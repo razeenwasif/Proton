@@ -1457,11 +1457,13 @@ impl Workspace {
             | Command::CircuitSynthesise { .. }
             | Command::CircuitMachineSet { .. }
             | Command::CircuitMachineShow { .. }
-            | Command::CircuitMachineBuild { .. }) => {
+            | Command::CircuitMachineBuild { .. }
+            | Command::CircuitExport { .. }
+            | Command::CircuitImport { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
-                if events.iter().any(|e| matches!(e, Event::CircuitHome { .. })) {
-                    // A project made or saved is files the tree and git see.
+                if events.iter().any(|e| matches!(e, Event::CircuitHome { .. } | Event::CircuitExported { .. })) {
+                    // A project made, saved or written out is files the tree and git see.
                     events.push(self.tree_event());
                     events.push(self.repo_event());
                 }

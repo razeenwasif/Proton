@@ -77,3 +77,43 @@ fn a_cpu_clocked_as_fast_as_it_goes() {
         println!("{file}: {} parts, {cycles} cycles, {:.0} Hz", built.netlist.parts(), hz);
     }
 }
+
+/// Each file of the folder imported as a Proton project, written as
+/// `.circuit` files and read back, and its test cases run from there:
+/// the same passes as from the `.dig` files themselves.
+#[test]
+#[ignore = "needs PROTON_CIRCUIT_DIG_DIR, a folder of .dig files"]
+fn a_folder_of_dig_files_imported_passes_the_same_tests() {
+    let Ok(dir) = std::env::var("PROTON_CIRCUIT_DIG_DIR") else { return };
+    let dir = std::path::PathBuf::from(dir);
+    let mut files: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".dig")).collect();
+    files.sort();
+    let scratch = std::env::temp_dir().join(format!("proton-circuit-imported-{}", std::process::id()));
+    let (mut passed, mut failed) = (0, 0);
+    for f in files {
+        let (project, dropped) = proton_circuit::circ::import_dig(&dir, &f).unwrap_or_else(|e| panic!("{f}: {e}"));
+        if !dropped.is_empty() {
+            println!("{f}: left out {}", dropped.join(", "));
+        }
+        let folder = scratch.join(format!("{}.circuit", f.trim_end_matches(".dig")));
+        proton_circuit::circ::write_project(&folder, &project).unwrap();
+        let back = proton_circuit::circ::read(&folder).unwrap();
+        assert_eq!(back, project, "{f} does not read back as written");
+        let Ok(built) = back.build(&back.top) else {
+            println!("{f}: not built");
+            failed += 1;
+            continue;
+        };
+        for o in proton_circuit::testlang::run_all(&built) {
+            if o.passed() {
+                passed += 1;
+            } else {
+                failed += 1;
+                println!("FAIL {f} {}: {:?} {:?}", o.label, o.error, o.failures.first());
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(scratch);
+    println!("{passed} passed, {failed} failed");
+    assert_eq!(failed, 0);
+}

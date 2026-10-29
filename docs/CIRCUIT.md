@@ -61,7 +61,8 @@ Name.circuit/
 
   Positions are grid steps; `rot` (quarter turns) and `mirror` are said only
   when set, and settings are sorted. Ids are kept when parts move or are
-  renamed. Wires are straight segments on the grid and join only where their
+  renamed. Wires are segments on the grid — straight as Proton draws them, at
+  a slant if Digital drew one so — and join only where their
   ends meet, as Digital's do: a branch splits the wire it leaves.
 - **Part kinds** are lower-case words (`in`, `out`, `clock`, `const`, `and`,
   `nand`, `mux`, `decoder`, `add`, `subtract`, `register`, `dff`, `ram2`,
@@ -293,6 +294,21 @@ minimised through the excitation table, codes no state has as don't
 cares, the parts joined by tunnels) and the machine's own run as its test.
 Not built: a state table read back from a circuit of flip-flops, and
 dragging states about.
+C7 — out and in: the header's export writes the circuit shown into the
+project's `export/` as Verilog-2001 or VHDL-2008 — one module or entity, its
+ports the top circuit's inputs, clocks and outputs, its body every part of
+the netlist the simulator runs, subcircuits inline; shared nets resolved
+by the language, pulls as `tri1`/`tri0` or weak `'H'`/`'L'`, state starting
+at 0 and changing on rising edges — or as SVG, drawn as the window draws
+it. Icarus Verilog and GHDL are not on this Mac, so the check that compiles
+the Verilog and drives it through a full adder's rows skips itself; the
+output is otherwise checked by its text. Digital's `.dig` files in the
+folder are listed on the home page and imported when opened, with every
+circuit they place: positions divided by the grid, settings by name,
+inputs and outputs given ids in file order (Digital's pin order), test
+cases as tables, slanting wires kept, and parts with no Proton kind left
+out and named. Imported this way, the person's whole CPU passes all 79 of
+its test tables from the `.circuit` files.
 
 | | What | Proved by |
 |---|---|---|

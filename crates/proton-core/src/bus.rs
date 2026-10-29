@@ -728,6 +728,18 @@ pub enum Command {
         circuit: String,
         label: Option<String>,
     },
+    /// A circuit written out beside the project, in `export/`: `format` is
+    /// `verilog`, `vhdl` or `svg`.
+    CircuitExport {
+        generation: u32,
+        circuit: String,
+        format: String,
+    },
+    /// A Digital `.dig` file of the project, and the circuits it places,
+    /// made into a `.circuit` project beside it and opened.
+    CircuitImport {
+        path: String,
+    },
     /// A truth table and minimised forms: of a circuit of the project, or
     /// of expressions — `Y = A·B + C'; Z = A ^ B`.
     CircuitAnalyse {
@@ -1628,6 +1640,12 @@ pub enum Event {
     },
     /// What was copied, for the system clipboard.
     CircuitClip {
+        text: String,
+    },
+    /// A circuit written out: where, and what was written.
+    CircuitExported {
+        path: String,
+        format: String,
         text: String,
     },
     /// A truth table, minimised, or why there is none.

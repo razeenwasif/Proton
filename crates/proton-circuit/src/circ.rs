@@ -31,6 +31,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::dig::{self, Attr, Element};
+use crate::edit;
 
 const VERSION: u32 = 1;
 const G: i32 = 20;
@@ -53,7 +54,8 @@ pub struct Part {
     pub attrs: BTreeMap<String, String>,
 }
 
-/// A wire: one straight segment between two grid points.
+/// A wire: a segment between two grid points — straight as drawn here, at a
+/// slant if Digital drew it so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Wire {
     pub a: (i32, i32),
@@ -289,9 +291,8 @@ pub fn parse(text: &str) -> Result<Drawing, String> {
                     (Some(a), Some(b)) if w.len() == 3 => (a, b),
                     _ => return Err(format!("line {n}: a wire is “wire <x>,<y> <x>,<y>”")),
                 };
-                if a.0 != b.0 && a.1 != b.1 {
-                    return Err(format!("line {n}: a wire runs straight across or down"));
-                }
+                // Drawn here, a wire runs straight; one from Digital may
+                // slant, and joins only at its ends all the same.
                 d.wires.push(Wire::new(a, b));
             }
             "width" => {
@@ -577,6 +578,108 @@ fn put(path: &Path, text: &str) -> Result<(), String> {
     std::fs::rename(&partial, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// A Digital `.dig` file, and every circuit it places, as a project: its
+/// circuits named for their files, its test cases as tables, `top` the
+/// file given. The parts Proton has no kind for are left out and named,
+/// file by file.
+pub fn import_dig(dir: &Path, file: &str) -> Result<(Project, Vec<String>), String> {
+    let mut lib = dig::Library::new(dir);
+    let stem = |f: &str| f.trim_end_matches(".dig").to_string();
+    let mut p = Project { top: stem(file), ..Default::default() };
+    let mut dropped: Vec<String> = Vec::new();
+    let mut queue = vec![file.to_string()];
+    while let Some(f) = queue.pop() {
+        let name = stem(&f);
+        if p.circuits.contains_key(&name) {
+            continue;
+        }
+        if !is_name(&name) {
+            return Err(format!("{f}: “{name}” cannot name a circuit"));
+        }
+        let c = lib.get(&f)?.clone();
+        let mut d = Drawing { width: c.width, ..Default::default() };
+        let (mut pins_in, mut pins_out) = (0, 0);
+        let mut left_out: BTreeMap<String, usize> = BTreeMap::new();
+        let mut tests: BTreeMap<String, String> = BTreeMap::new();
+        for el in &c.elements {
+            let at = |v: i32| (v as f64 / G as f64).round() as i32;
+            let kind = if dig::is_sub(&el.name) {
+                let sub = stem(&el.name);
+                queue.push(el.name.clone());
+                format!("sub:{sub}")
+            } else if el.name == "Testcase" {
+                if let Some(Attr::Test(t)) = el.attrs.get("Testdata") {
+                    let mut label: String = el.label().chars().map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' { ch } else { '_' }).collect();
+                    if label.is_empty() {
+                        label = "test".into();
+                    }
+                    let mut unique = label.clone();
+                    let mut n = 2;
+                    while tests.contains_key(&unique) {
+                        unique = format!("{label}{n}");
+                        n += 1;
+                    }
+                    tests.insert(unique, if t.ends_with('\n') { t.clone() } else { format!("{t}\n") });
+                }
+                continue;
+            } else if let Some((k, _)) = KINDS.iter().find(|(_, dn)| *dn == el.name) {
+                k.to_string()
+            } else {
+                *left_out.entry(el.name.clone()).or_default() += 1;
+                continue;
+            };
+            // Inputs and outputs in file order: Digital's pin order.
+            let id = match kind.as_str() {
+                "in" | "clock" => {
+                    pins_in += 1;
+                    format!("I{pins_in}")
+                }
+                "out" => {
+                    pins_out += 1;
+                    format!("O{pins_out}")
+                }
+                k => edit::fresh_id(&d, edit::prefix(k)),
+            };
+            let mut attrs = BTreeMap::new();
+            for (key, v) in &el.attrs {
+                let key = if key == "Signed" { "signed" } else { key.as_str() };
+                let Some((ck, _, _)) = ATTRS.iter().find(|(_, dk, _)| *dk == key) else { continue };
+                let v = match v {
+                    Attr::Str(s) => s.clone(),
+                    Attr::Int(i) => i.to_string(),
+                    Attr::Bool(b) => b.to_string(),
+                    _ => continue,
+                };
+                if !v.is_empty() {
+                    attrs.insert(ck.to_string(), v);
+                }
+            }
+            let rot = match el.attrs.get("rotation") {
+                Some(Attr::Rotation(r)) => *r % 4,
+                _ => 0,
+            };
+            d.parts.push(Part { id, kind, x: at(el.x), y: at(el.y), rot, mirror: el.flag("mirror"), attrs });
+        }
+        for (a, b) in &c.wires {
+            let g = |q: (i32, i32)| ((q.0 as f64 / G as f64).round() as i32, (q.1 as f64 / G as f64).round() as i32);
+            let (a, b) = (g(*a), g(*b));
+            if a != b {
+                d.wires.push(Wire::new(a, b));
+            }
+        }
+        for (k, n) in left_out {
+            dropped.push(format!("{f}: {n} × {k}"));
+        }
+        // Held as it is written.
+        let d = parse(&write(&d)).map_err(|e| format!("{f}: {e}"))?;
+        p.circuits.insert(name.clone(), d);
+        if !tests.is_empty() {
+            p.tests.insert(name, tests);
+        }
+    }
+    Ok((p, dropped))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,7 +722,7 @@ wire 8,4 8,5
         let out = write(&d);
         assert_eq!(out, "part U2 or at 5,5 rot 1 mirror inputs=3 label=\"two words\"\npart U10 and at 1,1\nwire 0,0 0,3\nwire 1,4 4,4\n");
         assert_eq!(write(&parse(&out).unwrap()), out);
-        assert!(parse("wire 0,0 1,1").unwrap_err().contains("straight"));
+        assert_eq!(parse("wire 0,0 1,1").unwrap().wires.len(), 1, "a slanting wire, as Digital draws some, is read");
         assert!(parse("part A in at 0,0\npart A out at 1,1").unwrap_err().contains("two parts"));
     }
 
@@ -750,6 +853,42 @@ wire 8,4 8,5
         set(&mut sim, "Vb", 0b0100);
         set(&mut sim, "Sel", 2);
         assert_eq!(out(&sim, "Bt").get(), 1);
+    }
+
+    #[test]
+    fn a_dig_file_and_its_subcircuits_come_in_as_a_project_that_passes_its_tests() {
+        // pass.dig: B listed first, so its first pin; and.dig places it, with
+        // a test and a part Proton does not have.
+        let dir = std::env::temp_dir().join(format!("proton-circuit-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let el = |name: &str, attrs: &str, x: i32, y: i32| format!("<visualElement><elementName>{name}</elementName><elementAttributes>{attrs}</elementAttributes><pos x=\"{x}\" y=\"{y}\"/></visualElement>");
+        let label = |l: &str| format!("<entry><string>Label</string><string>{l}</string></entry>");
+        let wire = |a: (i32, i32), b: (i32, i32)| format!("<wire><p1 x=\"{}\" y=\"{}\"/><p2 x=\"{}\" y=\"{}\"/></wire>", a.0, a.1, b.0, b.1);
+        let file = |els: Vec<String>, wires: Vec<String>| format!("<?xml version=\"1.0\"?><circuit><version>2</version><attributes/><visualElements>{}</visualElements><wires>{}</wires></circuit>", els.concat(), wires.concat());
+        std::fs::write(
+            dir.join("pass.dig"),
+            file(vec![el("In", &label("B"), 0, 100), el("Out", &label("Y"), 100, 100), el("In", &label("A"), 0, 0)], vec![wire((0, 100), (100, 100))]),
+        )
+        .unwrap();
+        let test = "<entry><string>Testdata</string><testData><dataString>P Q Y\n1 0 1\n0 1 0\n</dataString></testData></entry><entry><string>Label</string><string>first pin</string></entry>";
+        std::fs::write(
+            dir.join("top.dig"),
+            file(
+                vec![el("In", &label("P"), 100, 0), el("In", &label("Q"), 100, 40), el("pass.dig", "", 200, 0), el("Out", &label("Y"), 300, 20), el("Rectangle", "", 0, 0), el("Testcase", test, 0, 200)],
+                vec![wire((100, 0), (200, 0)), wire((100, 40), (200, 40)), wire((260, 20), (300, 20))],
+            ),
+        )
+        .unwrap();
+        let (p, dropped) = import_dig(&dir, "top.dig").unwrap();
+        assert_eq!(p.top, "top");
+        assert_eq!(p.circuits.keys().cloned().collect::<Vec<_>>(), vec!["pass", "top"]);
+        assert_eq!(dropped, vec!["top.dig: 1 × Rectangle"]);
+        assert!(write(&p.circuits["top"]).contains("part S1 sub:pass at 10,0"), "{}", write(&p.circuits["top"]));
+        assert_eq!(p.tests["top"].keys().cloned().collect::<Vec<_>>(), vec!["first_pin"]);
+        let b = p.build("top").unwrap();
+        let outcomes = crate::testlang::run_all(&b);
+        assert!(outcomes[0].passed(), "{:?} {:?}", outcomes[0].failures, outcomes[0].error);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

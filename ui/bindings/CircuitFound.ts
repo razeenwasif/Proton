@@ -7,4 +7,9 @@ export type CircuitFound = {
 /**
  * As the project names it.
  */
-path: string, name: string, };
+path: string, name: string, 
+/**
+ * `circuit` for a `.circuit` folder; `dig` for a Digital file, which is
+ * imported when it is opened.
+ */
+kind: string, };

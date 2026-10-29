@@ -12,6 +12,8 @@
 //! - [`analysis`]: truth tables, minimised expressions, circuits built from
 //!   them.
 //! - [`fsm`]: state machines as text, tabulated and built with flip-flops.
+//! - [`hdl`]: Verilog and VHDL of a built circuit.
+//! - [`svg`]: a circuit drawn as SVG.
 //! - [`testlang`]: test tables in Digital's language, run against one.
 
 pub mod analysis;
@@ -19,9 +21,11 @@ pub mod circ;
 pub mod dig;
 pub mod edit;
 pub mod fsm;
+pub mod hdl;
 pub mod hex;
 pub mod parts;
 pub mod sim;
+pub mod svg;
 pub mod testlang;
 pub mod value;
 

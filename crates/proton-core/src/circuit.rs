@@ -53,6 +53,9 @@ pub struct CircuitFound {
     /// As the project names it.
     pub path: String,
     pub name: String,
+    /// `circuit` for a `.circuit` folder; `dig` for a Digital file, which is
+    /// imported when it is opened.
+    pub kind: String,
 }
 
 /// A pin as drawn, in grid steps.
@@ -660,6 +663,68 @@ impl Circuits {
                     Err(why) => tables.iter().map(|(l, _)| CircuitTestResult { label: l.clone(), rows: 0, failures: Vec::new(), error: Some(why.clone()) }).collect(),
                 };
                 vec![Event::CircuitTests { generation, circuit, results }]
+            }
+            Command::CircuitExport { generation, circuit, format } => {
+                let open = match self.checked(generation, &circuit) {
+                    Ok(open) => open,
+                    Err(events) => return events,
+                };
+                let module = format!("{}_{circuit}", open.name);
+                let (text, ext) = match format.as_str() {
+                    "verilog" | "vhdl" => {
+                        let built = match open.project.build(&circuit) {
+                            Ok(b) => b,
+                            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                        };
+                        if format == "verilog" {
+                            (proton_circuit::hdl::verilog(&built, &module), "v")
+                        } else {
+                            (proton_circuit::hdl::vhdl(&built, &module), "vhd")
+                        }
+                    }
+                    "svg" => match proton_circuit::svg::svg(&open.project, &circuit) {
+                        Ok(t) => (t, "svg"),
+                        Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                    },
+                    other => return vec![notice(format!("“{other}” is not a way to write a circuit: verilog, vhdl or svg"), NoticeLevel::Warn)],
+                };
+                let file = open.path.join("export").join(format!("{circuit}.{ext}"));
+                if let Err(why) = std::fs::create_dir_all(open.path.join("export")).and_then(|_| std::fs::write(&file, &text)) {
+                    return vec![notice(format!("{}: {why}", file.display()), NoticeLevel::Error)];
+                }
+                let shown = format!("{}/export/{circuit}.{ext}", open.shown_path);
+                vec![notice(format!("wrote {shown}"), NoticeLevel::Info), Event::CircuitExported { path: shown, format, text }]
+            }
+            Command::CircuitImport { path } => {
+                if self.dirty() {
+                    return vec![notice("save or discard the open circuit's changes before opening another".into(), NoticeLevel::Warn)];
+                }
+                let file = match within(root, &path, "dig") {
+                    Ok(f) => f,
+                    Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                };
+                let (Some(dir), Some(name)) = (file.parent(), file.file_name().map(|n| n.to_string_lossy().into_owned())) else {
+                    return vec![notice(format!("{path} is nowhere"), NoticeLevel::Warn)];
+                };
+                let (project, dropped) = match circ::import_dig(dir, &name) {
+                    Ok(x) => x,
+                    Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                };
+                let folder = dir.join(format!("{}.{EXTENSION}", slug(name.trim_end_matches(".dig"))));
+                if folder.exists() {
+                    return vec![notice(format!("{} is already there: open it, or move it away to import again", folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), NoticeLevel::Warn)];
+                }
+                if let Err(why) = circ::write_project(&folder, &project) {
+                    return vec![notice(why, NoticeLevel::Warn)];
+                }
+                self.show(root, folder, project);
+                let mut events = self.events(root);
+                let made = self.open.as_ref().map(|o| o.shown_path.clone()).unwrap_or_default();
+                events.push(notice(format!("imported {path} as {made}"), NoticeLevel::Info));
+                if !dropped.is_empty() {
+                    events.push(notice(format!("left out, as Proton has no such parts: {}", dropped.join("; ")), NoticeLevel::Warn));
+                }
+                events
             }
             Command::CircuitAnalyse { generation, circuit, expression } => {
                 let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else {
@@ -1421,12 +1486,17 @@ fn apply_ops(d: &mut Drawing, circuit: &str, circuits: &std::collections::BTreeM
 /// A `.circuit` folder named relative to the project, refused if it is not
 /// one or leads outside.
 fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    within(root, rel, EXTENSION)
+}
+
+/// A path of the project ending `.<ext>`, refused if it leads outside.
+fn within(root: &Path, rel: &str, ext: &str) -> Result<PathBuf, String> {
     let named = Path::new(rel);
     if rel.is_empty() || !named.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
         return Err(format!("{rel} is not in the project"));
     }
-    if named.extension().and_then(|e| e.to_str()) != Some(EXTENSION) {
-        return Err(format!("{rel} is not a circuit: a circuit is a .{EXTENSION} folder"));
+    if named.extension().and_then(|e| e.to_str()) != Some(ext) {
+        return Err(if ext == EXTENSION { format!("{rel} is not a circuit: a circuit is a .{EXTENSION} folder") } else { format!("{rel} is not a .{ext} file") });
     }
     let base = std::fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let path = base.join(named);
@@ -1482,12 +1552,20 @@ fn find(root: &Path) -> Vec<CircuitFound> {
             }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || SKIP.contains(&name.as_str()) || !path.is_dir() {
+            if name.starts_with('.') || SKIP.contains(&name.as_str()) {
                 continue;
             }
-            if path.extension().and_then(|e| e.to_str()) == Some(EXTENSION) {
-                let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-                out.push(CircuitFound { path: rel, name: name.trim_end_matches(&format!(".{EXTENSION}")).to_string() });
+            let rel = || path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+            let ext = path.extension().and_then(|e| e.to_str());
+            if !path.is_dir() {
+                // A Digital file, to import.
+                if ext == Some("dig") {
+                    out.push(CircuitFound { path: rel(), name: name.trim_end_matches(".dig").to_string(), kind: "dig".into() });
+                }
+                continue;
+            }
+            if ext == Some(EXTENSION) {
+                out.push(CircuitFound { path: rel(), name: name.trim_end_matches(&format!(".{EXTENSION}")).to_string(), kind: "circuit".into() });
             } else if depth < 3 {
                 stack.push((path, depth + 1));
             }
@@ -1527,7 +1605,7 @@ mod tests {
             Event::CircuitHome { projects } => projects.clone(),
             _ => unreachable!(),
         };
-        assert_eq!(found, vec![CircuitFound { path: "full-adder.circuit".into(), name: "full-adder".into() }]);
+        assert_eq!(found, vec![CircuitFound { path: "full-adder.circuit".into(), name: "full-adder".into(), kind: "circuit".into() }]);
 
         // A circuit with parts, drawn with its pins placed.
         std::fs::write(root.join("full-adder.circuit/circuits/main.circ"), "part A in at 0,0 label=A\npart U and at 2,0\npart Z frob at 9,9\nwire 0,0 2,0\n").unwrap();
@@ -1868,6 +1946,49 @@ mod tests {
         assert!(results[0].label == "machine" && results[0].failures.is_empty() && results[0].error.is_none(), "{results:?}");
         c.apply(&root, Command::CircuitSave);
         assert!(root.join("seq.circuit/machines/ones.fsm").exists() && root.join("seq.circuit/circuits/detector_logic.circ").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_circuit_is_written_out_and_a_dig_file_imported() {
+        let root = scratch("export");
+        let mut c = Circuits::default();
+        let g = view(&c.apply(&root, Command::CircuitNew { name: "lab".into() })).unwrap().generation;
+        let inv = "part A in at 0,0 label=A\npart N not at 2,0\npart Y out at 6,0 label=Y\nwire 0,0 2,0\nwire 4,0 6,0\n";
+        c.apply(&root, Command::CircuitEdit { generation: g, circuit: "main".into(), ops: vec![CircuitOp::Paste { text: inv.into(), dx: 0, dy: 0 }] });
+        for (format, ext, says) in [("verilog", "v", "module lab_main ("), ("vhdl", "vhd", "entity lab_main is"), ("svg", "svg", "<svg ")] {
+            let events = c.apply(&root, Command::CircuitExport { generation: g, circuit: "main".into(), format: format.into() });
+            let (path, text) = events
+                .iter()
+                .find_map(|e| match e {
+                    Event::CircuitExported { path, text, .. } => Some((path.clone(), text.clone())),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{format}: {events:?}"));
+            assert_eq!(path, format!("lab.circuit/export/main.{ext}"));
+            assert!(text.contains(says), "{format}: {text}");
+            assert_eq!(std::fs::read_to_string(root.join(&path)).unwrap(), text);
+        }
+        assert!(c.apply(&root, Command::CircuitExport { generation: g, circuit: "main".into(), format: "pdf".into() }).iter().any(|e| matches!(e, Event::Notice { .. })));
+        c.apply(&root, Command::CircuitSave);
+        // A Digital file in the folder: listed, and imported as a project beside it.
+        let dig = "<?xml version=\"1.0\"?><circuit><version>2</version><attributes/><visualElements>\
+            <visualElement><elementName>In</elementName><elementAttributes><entry><string>Label</string><string>A</string></entry></elementAttributes><pos x=\"0\" y=\"0\"/></visualElement>\
+            <visualElement><elementName>Out</elementName><elementAttributes><entry><string>Label</string><string>Y</string></entry></elementAttributes><pos x=\"100\" y=\"0\"/></visualElement>\
+            </visualElements><wires><wire><p1 x=\"0\" y=\"0\"/><p2 x=\"100\" y=\"0\"/></wire></wires></circuit>";
+        std::fs::create_dir_all(root.join("course")).unwrap();
+        std::fs::write(root.join("course/wire.dig"), dig).unwrap();
+        let found = match &c.events(&root)[0] {
+            Event::CircuitHome { projects } => projects.clone(),
+            _ => unreachable!(),
+        };
+        assert!(found.iter().any(|f| f.path == "course/wire.dig" && f.kind == "dig"), "{found:?}");
+        let v = view(&c.apply(&root, Command::CircuitImport { path: "course/wire.dig".into() })).unwrap();
+        assert_eq!((v.path.as_str(), v.top.as_str(), v.parts.len()), ("course/wire.circuit", "wire", 2));
+        assert!(root.join("course/wire.circuit/circuits/wire.circ").exists());
+        c.apply(&root, Command::CircuitClose { discard: false });
+        assert!(c.apply(&root, Command::CircuitImport { path: "course/wire.dig".into() }).iter().any(|e| matches!(e, Event::Notice { .. })), "it is there already");
+        assert!(c.apply(&root, Command::CircuitImport { path: "../x.dig".into() }).iter().any(|e| matches!(e, Event::Notice { .. })));
         let _ = std::fs::remove_dir_all(root);
     }
 

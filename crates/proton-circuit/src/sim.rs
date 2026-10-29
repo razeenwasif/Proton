@@ -103,6 +103,19 @@ impl Netlist {
         self.parts[part].state.mem = words;
     }
 
+    /// A net, as written out: its width, its name, its pull if any.
+    pub fn net_info(&self, net: NetId) -> (u8, &str, Option<bool>) {
+        let n = &self.nets[net];
+        (n.bits, &n.name, n.pull)
+    }
+
+    /// A part, as written out: what it is, its name, the nets it reads and
+    /// drives, and the memory it starts with.
+    pub fn part_info(&self, part: PartId) -> (&Kind, &str, &[NetId], &[NetId], &[u64]) {
+        let p = &self.parts[part];
+        (&p.kind, &p.name, &p.ins, &p.outs, &p.state.mem)
+    }
+
     pub fn nets(&self) -> usize {
         self.nets.len()
     }
