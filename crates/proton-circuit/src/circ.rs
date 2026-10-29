@@ -83,6 +83,9 @@ const KINDS: &[(&str, &str)] = &[
     ("in", "In"),
     ("out", "Out"),
     ("clock", "Clock"),
+    ("button", "Button"),
+    ("reset", "Reset"),
+    ("break", "Break"),
     ("const", "Const"),
     ("ground", "Ground"),
     ("vdd", "VDD"),
@@ -319,11 +322,19 @@ pub fn write(d: &Drawing) -> String {
     s
 }
 
-/// A circuit as the reader takes it: Digital's names, Digital's units.
-pub fn to_dig(d: &Drawing) -> Result<dig::Circuit, String> {
-    // In and out parts first, in id order: they are the pins.
+/// A drawing's parts in the order the reader is given them: by id. A
+/// built circuit's `top_parts` are in this order.
+pub fn ordered(d: &Drawing) -> Vec<&Part> {
     let mut parts: Vec<&Part> = d.parts.iter().collect();
     parts.sort_by(|a, b| id_order(&a.id, &b.id));
+    parts
+}
+
+/// A circuit as the reader takes it: Digital's names, Digital's units.
+/// Its wires are in the drawing's order; a built circuit's `top_wires` too.
+pub fn to_dig(d: &Drawing) -> Result<dig::Circuit, String> {
+    // In and out parts first, in id order: they are the pins.
+    let parts = ordered(d);
     let mut elements = Vec::new();
     for p in parts {
         let name = if let Some(sub) = p.kind.strip_prefix("sub:") {
@@ -589,6 +600,35 @@ wire 8,4 8,5
         assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), when, "an unchanged circuit is not written");
         assert!(!dir.join("tests/half.table.tests").exists(), "a table taken away goes from the folder");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_built_circuit_says_which_part_and_net_each_drawn_one_is() {
+        // A button and a clock into an AND, to an LED and a Break; one
+        // wire left touching nothing.
+        let d = parse(
+            "part B button at 0,0 label=B\npart C clock at 0,2 label=C\npart U and at 2,0\npart L led at 7,1\npart X break at 7,3\n\
+             wire 0,0 2,0\nwire 0,2 2,2\nwire 5,1 7,1\nwire 6,1 6,3\nwire 6,3 7,3\nwire 20,20 21,20\n",
+        )
+        .unwrap();
+        let mut p = Project::new();
+        p.circuits.insert("main".into(), d.clone());
+        let b = p.build("main").unwrap();
+        let order: Vec<&str> = ordered(&d).iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(order, vec!["B", "C", "L", "U", "X"]);
+        assert!(b.top_parts.iter().all(Option::is_some));
+        assert_eq!(b.breaks.len(), 1);
+        let net_of = |i: usize| b.top_wires[i];
+        // Wires are held sorted: (0,0)-(2,0), (0,2)-(2,2), (5,1)-(7,1), (6,1)-(6,3), (6,3)-(7,3), (20,20)-(21,20).
+        assert!(net_of(5).is_none(), "a wire on no pin has no net");
+        let mut sim = crate::Sim::new(b.netlist, 1).unwrap();
+        let (button, clock) = (b.top_parts[0].unwrap(), b.top_parts[1].unwrap());
+        sim.set(button, 1).unwrap();
+        sim.set(clock, 1).unwrap();
+        assert_eq!(sim.value(net_of(2).unwrap()).get(), 1, "the AND's output wire is high");
+        // The (5,1)-(7,1) wire and the (6,1)-(6,3) one share no end, so the
+        // Break is fed only through its own leg.
+        assert!(sim.shown(b.breaks[0]).is_z() || sim.shown(b.breaks[0]).get() == 0);
     }
 
     #[test]

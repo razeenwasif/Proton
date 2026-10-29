@@ -14,11 +14,23 @@
 //! unsaved project. Each edit — the ops the window sends together, a
 //! circuit added, the top changed — is a step to undo, kept as the project
 //! before and after it: a circuit is small beside what that costs.
+//!
+//! Running is of the circuit shown, built afresh when it is started and
+//! after any edit, its inputs set again as they were. A click sets an
+//! input and the circuit settles; with `hold`, the change waits and gate
+//! steps take it a delay at a time. A quick run takes the simulator to a
+//! thread of its own and flips the clocks as fast as they go, nothing
+//! drawn, until a Break rises or it is stopped, and says how fast it went.
 
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant};
 
 use proton_circuit::circ::{self, Drawing, Part, Project, Wire};
-use proton_circuit::edit;
+use proton_circuit::sim::{NetId, PartId};
+use proton_circuit::{edit, Sim, Value};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -120,6 +132,100 @@ pub struct CircuitProjectView {
     pub palette: Vec<String>,
 }
 
+/// A value on a wire or a part, as drawn: its width, its bits in hex, and
+/// whether it is high-Z — all of it, or some.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitValue {
+    pub bits: u8,
+    pub hex: String,
+    pub z: bool,
+    pub some_z: bool,
+}
+
+impl From<Value> for CircuitValue {
+    fn from(v: Value) -> Self {
+        let mask = proton_circuit::value::mask(v.bits);
+        CircuitValue { bits: v.bits, hex: format!("{:x}", v.get()), z: v.z & mask == mask, some_z: v.z & mask != 0 }
+    }
+}
+
+/// A quick run: going or ended, how many clock cycles, and how fast.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitQuickView {
+    pub running: bool,
+    #[ts(type = "number")]
+    pub cycles: u64,
+    /// Cycles a second.
+    pub hz: f64,
+    /// Why it ended, once it has.
+    pub ended: Option<String>,
+}
+
+/// The circuit running.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitRunView {
+    pub generation: u32,
+    pub circuit: String,
+    /// Each wire's value, in the view's order; none on a wire no pin is on,
+    /// or while a quick run has the simulator.
+    pub wires: Vec<Option<CircuitValue>>,
+    /// Inputs, clocks and buttons, and outputs, LEDs and probes, by id.
+    pub values: Vec<(String, CircuitValue)>,
+    /// Parts waiting for a gate step.
+    pub waiting: u32,
+    /// The parts the last gate step worked.
+    pub stepped: Vec<String>,
+    /// Why it is not running: it would not settle, two drivers disagree.
+    pub error: Option<String>,
+    pub quick: Option<CircuitQuickView>,
+}
+
+enum QuickNews {
+    Cycles(u64),
+    Done { sim: Box<Sim>, cycles: u64, ended: String },
+}
+
+/// A quick run on its thread; stopped when this is dropped.
+struct Quick {
+    stop: Arc<AtomicBool>,
+    news: mpsc::Receiver<QuickNews>,
+    cycles: u64,
+    started: Instant,
+}
+
+impl Drop for Quick {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+struct Run {
+    circuit: String,
+    /// None while a quick run has it, or when it would not start.
+    sim: Option<Sim>,
+    error: Option<String>,
+    /// Each drawn part by id: the part it became, and its kind.
+    parts: HashMap<String, (PartId, String)>,
+    wires: Vec<Option<NetId>>,
+    clocks: Vec<PartId>,
+    breaks: Vec<PartId>,
+    /// What each input was set to, to set again when it is built afresh.
+    inputs: BTreeMap<String, u64>,
+    stepped: Vec<String>,
+    quick: Option<Quick>,
+    last_quick: Option<CircuitQuickView>,
+}
+
+/// The kinds a click sets, and those that show a value.
+const SETTABLE: [&str; 3] = ["in", "clock", "button"];
+const SHOWN: [&str; 3] = ["out", "led", "probe"];
+
 /// A step to undo: the project before and after, and the circuit shown.
 #[derive(Debug, Clone)]
 struct Step {
@@ -142,6 +248,7 @@ struct Open {
     generation: u32,
     done: Vec<Step>,
     undone: Vec<Step>,
+    run: Option<Run>,
 }
 
 impl std::fmt::Debug for Open {
@@ -168,6 +275,23 @@ impl Circuits {
     }
 
     pub fn apply(&mut self, root: &Path, command: Command) -> Vec<Event> {
+        let runs = matches!(
+            command,
+            Command::CircuitEdit { .. } | Command::CircuitUndo | Command::CircuitRedo | Command::CircuitShow { .. } | Command::CircuitAdd { .. }
+        );
+        let mut events = self.apply_inner(root, command);
+        // A circuit changed, or another shown, while running: built afresh.
+        if runs && self.open.as_ref().is_some_and(|o| o.run.is_some()) {
+            if let Some(open) = &mut self.open {
+                let inputs = open.run.take().map(|r| r.inputs).unwrap_or_default();
+                open.run = Some(start(open, inputs));
+            }
+            events.push(self.run_event());
+        }
+        events
+    }
+
+    fn apply_inner(&mut self, root: &Path, command: Command) -> Vec<Event> {
         match command {
             Command::CircuitNew { name } => self.new_project(root, &name),
             Command::CircuitOpen { path } => {
@@ -261,6 +385,102 @@ impl Circuits {
             }
             Command::CircuitUndo => self.step(true),
             Command::CircuitRedo => self.step(false),
+            Command::CircuitStart { generation } => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else {
+                    return vec![notice("that project is no longer open".into(), NoticeLevel::Warn)];
+                };
+                let inputs = open.run.take().map(|r| r.inputs).unwrap_or_default();
+                open.run = Some(start(open, inputs));
+                vec![self.run_event()]
+            }
+            Command::CircuitStop => {
+                let Some(open) = &mut self.open else { return Vec::new() };
+                match &mut open.run {
+                    // A quick run stops; the circuit goes on running where it got to.
+                    Some(run) if run.quick.is_some() => {
+                        if let Some(q) = &run.quick {
+                            q.stop.store(true, Ordering::Relaxed);
+                        }
+                        Vec::new()
+                    }
+                    _ => {
+                        open.run = None;
+                        vec![self.run_event()]
+                    }
+                }
+            }
+            Command::CircuitSet { generation, id, value, hold } => {
+                let run = match self.running(generation) {
+                    Ok(run) => run,
+                    Err(events) => return events,
+                };
+                let Some((part, kind)) = run.parts.get(&id).cloned() else {
+                    return vec![notice(format!("there is no part {id} to set"), NoticeLevel::Warn)];
+                };
+                if !SETTABLE.contains(&kind.as_str()) {
+                    return vec![notice(format!("{id} is not an input"), NoticeLevel::Warn)];
+                }
+                let Some(v) = number(&value) else {
+                    return vec![notice(format!("“{value}” is not a number"), NoticeLevel::Warn)];
+                };
+                run.inputs.insert(id, v);
+                drive(run, &[(part, v)], hold);
+                vec![self.run_event()]
+            }
+            Command::CircuitClock { generation, hold } => {
+                let run = match self.running(generation) {
+                    Ok(run) => run,
+                    Err(events) => return events,
+                };
+                if run.clocks.is_empty() {
+                    return vec![notice("this circuit has no clock".into(), NoticeLevel::Warn)];
+                }
+                let Some(sim) = &run.sim else { return Vec::new() };
+                let flips: Vec<(PartId, u64)> = run.clocks.iter().map(|c| (*c, sim.output(*c, 0).get() ^ 1)).collect();
+                for (id, (part, _)) in &run.parts {
+                    if let Some((_, v)) = flips.iter().find(|(c, _)| c == part) {
+                        run.inputs.insert(id.clone(), *v);
+                    }
+                }
+                drive(run, &flips, hold);
+                vec![self.run_event()]
+            }
+            Command::CircuitStep { generation } => {
+                let run = match self.running(generation) {
+                    Ok(run) => run,
+                    Err(events) => return events,
+                };
+                if let Some(sim) = &mut run.sim {
+                    match sim.step() {
+                        Ok(names) => run.stepped = names,
+                        Err(e) => {
+                            run.error = Some(e.to_string());
+                            run.sim = None;
+                        }
+                    }
+                }
+                vec![self.run_event()]
+            }
+            Command::CircuitQuick { generation } => {
+                let run = match self.running(generation) {
+                    Ok(run) => run,
+                    Err(events) => return events,
+                };
+                if run.clocks.is_empty() {
+                    return vec![notice("a quick run flips the clocks, and this circuit has none".into(), NoticeLevel::Warn)];
+                }
+                let Some(mut sim) = run.sim.take() else { return Vec::new() };
+                if sim.waiting() > 0 {
+                    let _ = sim.settle();
+                }
+                let stop = Arc::new(AtomicBool::new(false));
+                let (tell, news) = mpsc::channel();
+                let (clocks, breaks, halt) = (run.clocks.clone(), run.breaks.clone(), stop.clone());
+                std::thread::spawn(move || quick_run(sim, clocks, breaks, halt, tell));
+                run.quick = Some(Quick { stop, news, cycles: 0, started: Instant::now() });
+                run.last_quick = None;
+                vec![self.run_event()]
+            }
             Command::CircuitCopy { generation, circuit, ids, wires } => {
                 let open = match self.checked(generation, &circuit) {
                     Ok(open) => open,
@@ -286,6 +506,96 @@ impl Circuits {
             return Err(vec![notice(format!("there is no circuit {circuit}"), NoticeLevel::Warn)]);
         }
         Ok(open)
+    }
+
+    /// The run of the project open, if the window's number is for it and
+    /// a quick run does not have it.
+    fn running(&mut self, generation: u32) -> Result<&mut Run, Vec<Event>> {
+        let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else {
+            return Err(vec![notice("that project is no longer open".into(), NoticeLevel::Warn)]);
+        };
+        let Some(run) = &mut open.run else {
+            return Err(vec![notice("the circuit is not running".into(), NoticeLevel::Warn)]);
+        };
+        if run.quick.is_some() {
+            return Err(vec![notice("a quick run is under way: ⎋ stops it".into(), NoticeLevel::Warn)]);
+        }
+        if run.sim.is_none() {
+            return Err(vec![notice(run.error.clone().unwrap_or_else(|| "the circuit is not running".into()), NoticeLevel::Warn)]);
+        }
+        Ok(run)
+    }
+
+    /// News of a quick run: how far it has got, and its end.
+    pub fn poll(&mut self) -> Vec<Event> {
+        let Some(run) = self.open.as_mut().and_then(|o| o.run.as_mut()) else { return Vec::new() };
+        let Some(q) = &mut run.quick else { return Vec::new() };
+        let mut changed = false;
+        let mut done = None;
+        while let Ok(news) = q.news.try_recv() {
+            changed = true;
+            match news {
+                QuickNews::Cycles(n) => q.cycles = n,
+                QuickNews::Done { sim, cycles, ended } => done = Some((sim, cycles, ended)),
+            }
+        }
+        if let Some((sim, cycles, ended)) = done {
+            let secs = q.started.elapsed().as_secs_f64().max(1e-9);
+            run.last_quick = Some(CircuitQuickView { running: false, cycles, hz: cycles as f64 / secs, ended: Some(ended) });
+            run.quick = None;
+            // The clocks are where the run left them.
+            for (id, (part, kind)) in &run.parts {
+                if kind == "clock" {
+                    run.inputs.insert(id.clone(), sim.output(*part, 0).get());
+                }
+            }
+            run.sim = Some(*sim);
+        } else if !changed {
+            return Vec::new();
+        }
+        vec![self.run_event()]
+    }
+
+    pub fn run_event(&self) -> Event {
+        let Some(open) = &self.open else { return Event::CircuitRun { run: None } };
+        let Some(run) = &open.run else { return Event::CircuitRun { run: None } };
+        let quick = match &run.quick {
+            Some(q) => Some(CircuitQuickView { running: true, cycles: q.cycles, hz: q.cycles as f64 / q.started.elapsed().as_secs_f64().max(1e-9), ended: None }),
+            None => run.last_quick.clone(),
+        };
+        let (wires, values, waiting) = match &run.sim {
+            Some(sim) => {
+                let wires = run.wires.iter().map(|n| n.map(|n| CircuitValue::from(sim.value(n)))).collect();
+                let mut values: Vec<(String, CircuitValue)> = run
+                    .parts
+                    .iter()
+                    .filter_map(|(id, (part, kind))| {
+                        if SETTABLE.contains(&kind.as_str()) {
+                            Some((id.clone(), sim.output(*part, 0).into()))
+                        } else if SHOWN.contains(&kind.as_str()) {
+                            Some((id.clone(), sim.shown(*part).into()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                values.sort_by(|a, b| a.0.cmp(&b.0));
+                (wires, values, sim.waiting() as u32)
+            }
+            None => (Vec::new(), Vec::new(), 0),
+        };
+        Event::CircuitRun {
+            run: Some(Box::new(CircuitRunView {
+                generation: open.generation,
+                circuit: run.circuit.clone(),
+                wires,
+                values,
+                waiting,
+                stepped: run.stepped.clone(),
+                error: run.error.clone(),
+                quick,
+            })),
+        }
     }
 
     /// Undo, or redo: the project as the step found or left it.
@@ -347,6 +657,7 @@ impl Circuits {
             generation: self.generations,
             done: Vec::new(),
             undone: Vec::new(),
+            run: None,
         });
     }
 
@@ -433,6 +744,124 @@ impl Circuits {
             })),
         }
     }
+}
+
+/// The circuit shown, built and powered on, its inputs set as they were.
+fn start(open: &Open, inputs: BTreeMap<String, u64>) -> Run {
+    let circuit = open.shown.clone();
+    let mut run = Run {
+        circuit: circuit.clone(),
+        sim: None,
+        error: None,
+        parts: HashMap::new(),
+        wires: Vec::new(),
+        clocks: Vec::new(),
+        breaks: Vec::new(),
+        inputs: BTreeMap::new(),
+        stepped: Vec::new(),
+        quick: None,
+        last_quick: None,
+    };
+    let built = match open.project.build(&circuit) {
+        Ok(b) => b,
+        Err(why) => {
+            run.error = Some(why);
+            return run;
+        }
+    };
+    let drawing = &open.project.circuits[&circuit];
+    for (part, made) in circ::ordered(drawing).into_iter().zip(&built.top_parts) {
+        if let Some(id) = made {
+            run.parts.insert(part.id.clone(), (*id, part.kind.clone()));
+            if part.kind == "clock" {
+                run.clocks.push(*id);
+            }
+        }
+    }
+    run.wires = built.top_wires.clone();
+    run.breaks = built.breaks.clone();
+    match Sim::new(built.netlist, 0x5eed) {
+        Ok(mut sim) => {
+            for (id, v) in inputs {
+                if let Some((part, kind)) = run.parts.get(&id) {
+                    if SETTABLE.contains(&kind.as_str()) {
+                        if let Err(e) = sim.set(*part, v) {
+                            run.error = Some(e.to_string());
+                            return run;
+                        }
+                        run.inputs.insert(id, v);
+                    }
+                }
+            }
+            run.sim = Some(sim);
+        }
+        Err(e) => run.error = Some(e.to_string()),
+    }
+    run
+}
+
+/// Inputs set, settled — or, `hold`, waiting for gate steps.
+fn drive(run: &mut Run, sets: &[(PartId, u64)], hold: bool) {
+    let Some(sim) = &mut run.sim else { return };
+    run.stepped.clear();
+    for (part, v) in sets {
+        if hold {
+            sim.hold(*part, *v);
+        } else if let Err(e) = sim.set(*part, *v) {
+            run.error = Some(e.to_string());
+            run.sim = None;
+            return;
+        }
+    }
+}
+
+/// A number as typed: decimal, `0x…`, `0b…`, or `0o…`.
+fn number(s: &str) -> Option<u64> {
+    let s = s.trim().replace('_', "");
+    let (digits, radix) = match s.get(..2) {
+        Some("0x" | "0X") => (&s[2..], 16),
+        Some("0b" | "0B") => (&s[2..], 2),
+        Some("0o" | "0O") => (&s[2..], 8),
+        _ => (s.as_str(), 10),
+    };
+    u64::from_str_radix(digits, radix).ok()
+}
+
+/// The clocks flipped as fast as they go until a Break rises, the run is
+/// stopped, or something goes wrong; its news sent as it goes.
+fn quick_run(mut sim: Sim, clocks: Vec<PartId>, breaks: Vec<PartId>, stop: Arc<AtomicBool>, tell: mpsc::Sender<QuickNews>) {
+    let mut cycles = 0u64;
+    let mut told = Instant::now();
+    let mut was: Vec<bool> = breaks.iter().map(|b| sim.shown(*b).get() == 1).collect();
+    let ended = 'run: loop {
+        if stop.load(Ordering::Relaxed) {
+            break "stopped".to_string();
+        }
+        for _ in 0..2 {
+            for c in &clocks {
+                let v = sim.output(*c, 0).get() ^ 1;
+                if let Err(e) = sim.set(*c, v) {
+                    break 'run e.to_string();
+                }
+            }
+            for (i, b) in breaks.iter().enumerate() {
+                let now = sim.shown(*b).get() == 1;
+                if now && !was[i] {
+                    cycles += 1;
+                    break 'run "a Break rose".to_string();
+                }
+                was[i] = now;
+            }
+        }
+        cycles += 1;
+        if told.elapsed() >= Duration::from_millis(100) {
+            told = Instant::now();
+            if tell.send(QuickNews::Cycles(cycles)).is_err() {
+                break "the project closed".to_string();
+            }
+        }
+    };
+    let _ = tell.send(QuickNews::Done { sim: Box::new(sim), cycles, ended });
 }
 
 /// A change made a step: the project as it was kept to undo to.
@@ -755,6 +1184,99 @@ mod tests {
         project.tests.entry("main".into()).or_default().insert("t".into(), "In1 Out1\n0 1\n1 0\n".into());
         let outcomes = proton_circuit::testlang::run_all(&project.build("main").unwrap());
         assert!(outcomes[0].passed(), "{:?} {:?}", outcomes[0].failures, outcomes[0].error);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn run_of(events: &[Event]) -> Option<CircuitRunView> {
+        events.iter().rev().find_map(|e| match e {
+            Event::CircuitRun { run } => run.as_deref().cloned(),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_circuit_runs_its_inputs_clicked_stepped_and_rebuilt_when_edited() {
+        let root = scratch("run");
+        std::fs::create_dir_all(root.join("inv.circuit/circuits")).unwrap();
+        std::fs::write(root.join("inv.circuit/project.json"), "{\n  \"version\": 1,\n  \"top\": \"main\"\n}\n").unwrap();
+        // An input through a NOT to an output, and a clock to an LED.
+        std::fs::write(
+            root.join("inv.circuit/circuits/main.circ"),
+            "part A in at 0,0 label=A\npart Clk clock at 0,4 label=Clk\npart L led at 3,4\npart N not at 2,0\npart Y out at 6,0 label=Y\nwire 0,0 2,0\nwire 4,0 6,0\nwire 0,4 3,4\n",
+        )
+        .unwrap();
+        let mut c = Circuits::default();
+        let g = view(&c.apply(&root, Command::CircuitOpen { path: "inv.circuit".into() })).unwrap().generation;
+        let value = |r: &CircuitRunView, id: &str| r.values.iter().find(|(k, _)| k == id).map(|(_, v)| v.hex.clone()).unwrap();
+        let r = run_of(&c.apply(&root, Command::CircuitStart { generation: g })).unwrap();
+        assert!(r.error.is_none());
+        assert_eq!((value(&r, "A").as_str(), value(&r, "Y").as_str()), ("0", "1"));
+        assert_eq!(r.wires.len(), 3);
+        assert_eq!(r.wires[2].as_ref().unwrap().hex, "1", "the NOT's output wire, third as wires are held sorted, is high");
+
+        let r = run_of(&c.apply(&root, Command::CircuitSet { generation: g, id: "A".into(), value: "1".into(), hold: false })).unwrap();
+        assert_eq!(value(&r, "Y"), "0");
+        // Held: the change waits, and gate steps take it through.
+        let r = run_of(&c.apply(&root, Command::CircuitSet { generation: g, id: "A".into(), value: "0".into(), hold: true })).unwrap();
+        assert!(r.waiting > 0 && value(&r, "Y") == "0");
+        let mut steps = 0;
+        let mut r = r;
+        while r.waiting > 0 {
+            r = run_of(&c.apply(&root, Command::CircuitStep { generation: g })).unwrap();
+            steps += 1;
+            assert!(steps < 10);
+        }
+        assert_eq!((value(&r, "Y").as_str(), steps), ("1", 2), "the input's delay, then the NOT's");
+        // A clock edge flips the clock.
+        let r = run_of(&c.apply(&root, Command::CircuitClock { generation: g, hold: false })).unwrap();
+        assert_eq!((value(&r, "Clk").as_str(), value(&r, "L").as_str()), ("1", "1"));
+        // Not an input, not a number: refused.
+        assert!(c.apply(&root, Command::CircuitSet { generation: g, id: "Y".into(), value: "1".into(), hold: false }).iter().any(|e| matches!(e, Event::Notice { .. })));
+        assert!(c.apply(&root, Command::CircuitSet { generation: g, id: "A".into(), value: "lots".into(), hold: false }).iter().any(|e| matches!(e, Event::Notice { .. })));
+        // An edit while running builds it afresh, inputs as they were.
+        c.apply(&root, Command::CircuitSet { generation: g, id: "A".into(), value: "1".into(), hold: false });
+        let events = c.apply(&root, Command::CircuitEdit { generation: g, circuit: "main".into(), ops: vec![CircuitOp::Move { ids: vec!["Y".into()], wires: vec![], dx: 0, dy: 0 }, CircuitOp::Place { kind: "and".into(), x: 10, y: 10, rot: 0, mirror: false, settings: vec![] }] });
+        let r = run_of(&events).unwrap();
+        assert_eq!((value(&r, "A").as_str(), value(&r, "Y").as_str(), value(&r, "Clk").as_str()), ("1", "0", "1"));
+        let r = c.apply(&root, Command::CircuitStop);
+        assert!(matches!(&r[0], Event::CircuitRun { run: None }));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_quick_run_flips_the_clocks_until_a_break_rises() {
+        let root = scratch("quick");
+        std::fs::create_dir_all(root.join("count.circuit/circuits")).unwrap();
+        std::fs::write(root.join("count.circuit/project.json"), "{\n  \"version\": 1,\n  \"top\": \"main\"\n}\n").unwrap();
+        // Two T flip-flops counting, the second's Q to a Break.
+        std::fs::write(
+            root.join("count.circuit/circuits/main.circ"),
+            "part C clock at 0,1 label=C\npart F1 tff at 2,0\npart F2 tff at 8,0\npart K1 const at 1,0\npart K2 const at 7,0\npart X break at 13,0\n\
+             wire 1,0 2,0\nwire 0,1 2,1\nwire 5,0 6,0\nwire 6,0 6,1\nwire 6,1 8,1\nwire 7,0 8,0\nwire 11,0 13,0\n",
+        )
+        .unwrap();
+        let mut c = Circuits::default();
+        let g = view(&c.apply(&root, Command::CircuitOpen { path: "count.circuit".into() })).unwrap().generation;
+        let r = run_of(&c.apply(&root, Command::CircuitStart { generation: g })).unwrap();
+        assert!(r.error.is_none(), "{:?}", r.error);
+        let r = run_of(&c.apply(&root, Command::CircuitQuick { generation: g })).unwrap();
+        assert!(r.quick.as_ref().unwrap().running && r.wires.is_empty());
+        assert!(c.apply(&root, Command::CircuitClock { generation: g, hold: false }).iter().any(|e| matches!(e, Event::Notice { .. })), "a quick run has the simulator");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let ended = loop {
+            if let Some(r) = run_of(&c.poll()) {
+                if let Some(q) = r.quick.filter(|q| !q.running) {
+                    break q;
+                }
+            }
+            assert!(Instant::now() < deadline, "the quick run never ended");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(ended.ended.as_deref(), Some("a Break rose"));
+        assert!(ended.cycles >= 1 && ended.cycles <= 4, "{} cycles", ended.cycles);
+        // The circuit runs on from where the quick run left it.
+        let r = run_of(&c.apply(&root, Command::CircuitClock { generation: g, hold: false })).unwrap();
+        assert!(r.error.is_none() && !r.wires.is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 

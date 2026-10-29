@@ -679,6 +679,34 @@ pub enum Command {
     },
     CircuitUndo,
     CircuitRedo,
+    /// Run the circuit shown: built, powered on, its inputs to click.
+    CircuitStart {
+        generation: u32,
+    },
+    /// Stop running it, or stop a quick run.
+    CircuitStop,
+    /// An input, clock or button set — a number, as typed: `1`, `0x2a`.
+    /// `hold`: the change waits for gate steps instead of settling.
+    CircuitSet {
+        generation: u32,
+        id: String,
+        value: String,
+        hold: bool,
+    },
+    /// One clock edge: every clock flips. `hold` as for `CircuitSet`.
+    CircuitClock {
+        generation: u32,
+        hold: bool,
+    },
+    /// One gate delay of what is waiting.
+    CircuitStep {
+        generation: u32,
+    },
+    /// Run the clocks as fast as they go, nothing drawn, until a Break
+    /// rises or it is stopped.
+    CircuitQuick {
+        generation: u32,
+    },
     /// The parts and wires named, as `.circ` text for the clipboard.
     CircuitCopy {
         generation: u32,
@@ -1534,6 +1562,11 @@ pub enum Event {
     /// What was copied, for the system clipboard.
     CircuitClip {
         text: String,
+    },
+    /// The circuit running — every wire's value, the inputs' and displays',
+    /// what waits for a gate step, a quick run — or not running.
+    CircuitRun {
+        run: Option<Box<crate::circuit::CircuitRunView>>,
     },
     /// The project's workbooks, for Excel mode's home page.
     SheetHome {

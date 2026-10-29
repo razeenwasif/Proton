@@ -1438,7 +1438,13 @@ impl Workspace {
             | Command::CircuitEdit { .. }
             | Command::CircuitUndo
             | Command::CircuitRedo
-            | Command::CircuitCopy { .. }) => {
+            | Command::CircuitCopy { .. }
+            | Command::CircuitStart { .. }
+            | Command::CircuitStop
+            | Command::CircuitSet { .. }
+            | Command::CircuitClock { .. }
+            | Command::CircuitStep { .. }
+            | Command::CircuitQuick { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
                 if events.iter().any(|e| matches!(e, Event::CircuitHome { .. })) {
@@ -2676,6 +2682,11 @@ impl Workspace {
         // something whose whole job is to end a wait.
         events.extend(self.answer_finished_cells());
         self.answer_embedded_searches();
+        // A quick run on its own thread: how far it has gone, and its end.
+        let ran = self.circuits.poll();
+        if !self.quiet {
+            events.extend(ran);
+        }
         events.extend(self.poll_external_format());
 
         if let Some(event) = self.poll_repo() {

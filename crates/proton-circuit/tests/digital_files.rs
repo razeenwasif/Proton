@@ -45,3 +45,35 @@ fn every_test_case_in_a_folder_of_dig_files_passes() {
     println!("{passed} passed, {failed} failed");
     assert_eq!(failed, 0);
 }
+
+/// How fast a CPU's clock goes in the simulator: the basic and extended
+/// CPUs of the folder, each clocked for two seconds with its first test
+/// case's program loaded.
+#[test]
+#[ignore = "needs PROTON_CIRCUIT_DIG_DIR, a folder with basic-cpu.dig"]
+fn a_cpu_clocked_as_fast_as_it_goes() {
+    let Ok(dir) = std::env::var("PROTON_CIRCUIT_DIG_DIR") else { return };
+    let dir = std::path::PathBuf::from(dir);
+    for file in ["basic-cpu.dig", "extended-cpu.dig"] {
+        let Ok(built) = proton_circuit::dig::build(&dir, file) else { continue };
+        let Some(&(clock, _)) = built.inputs.get("CLK") else { continue };
+        let mut sim = proton_circuit::Sim::new(built.netlist.clone(), 0x5eed).unwrap();
+        // FIB's program, if the file has it: a loop to keep the CPU busy.
+        if let (Some(ram), Some((_, text))) = (built.program, built.tests.iter().find(|(l, _)| l == "FIB")) {
+            if let Some(start) = text.find("program(") {
+                let words: Vec<u64> = text[start + 8..].split(')').next().unwrap_or("").split(',').filter_map(|w| u64::from_str_radix(w.trim().trim_start_matches("0x"), 16).ok()).collect();
+                sim.load(ram, &words).unwrap();
+            }
+        }
+        let started = std::time::Instant::now();
+        let mut cycles = 0u64;
+        while started.elapsed() < std::time::Duration::from_secs(2) {
+            for _ in 0..100 {
+                sim.tick(clock).unwrap();
+            }
+            cycles += 100;
+        }
+        let hz = cycles as f64 / started.elapsed().as_secs_f64();
+        println!("{file}: {} parts, {cycles} cycles, {:.0} Hz", built.netlist.parts(), hz);
+    }
+}

@@ -116,12 +116,14 @@ pub struct Sim {
     /// Steps the last change took.
     pub steps: usize,
     seed: u64,
+    /// Parts waiting for the next gate delay, when stepping by hand.
+    waiting: Vec<PartId>,
 }
 
 impl Sim {
     /// The netlist, settled from power-on; or why it would not settle.
     pub fn new(net: Netlist, seed: u64) -> Result<Sim, SimError> {
-        let mut sim = Sim { nets: net.nets, parts: net.parts, settled: false, steps: 0, seed: seed | 1 };
+        let mut sim = Sim { nets: net.nets, parts: net.parts, settled: false, steps: 0, seed: seed | 1, waiting: Vec::new() };
         sim.power_on()?;
         Ok(sim)
     }
@@ -222,43 +224,80 @@ impl Sim {
     fn run_from(&mut self, start: &[PartId]) -> Result<usize, SimError> {
         let mut pending: Vec<PartId> = start.to_vec();
         let mut steps = 0;
-        let mut seen = vec![false; self.parts.len()];
         while !pending.is_empty() {
             steps += 1;
             if steps > MOST_STEPS {
                 return Err(SimError::Oscillation { parts: self.names(&pending) });
             }
-            // Everyone reads, then everyone writes: one unit of delay.
-            let results: Vec<(PartId, Vec<Value>)> = pending.iter().map(|&p| (p, self.compute(p))).collect();
-            let mut touched = Vec::new();
-            for (p, vals) in results {
-                touched.extend(self.set_outputs(p, vals));
-            }
-            touched.sort_unstable();
-            touched.dedup();
-            pending.clear();
-            for n in touched {
-                if self.refresh(n)? {
-                    for &r in &self.nets[n].readers {
-                        if !seen[r] {
-                            seen[r] = true;
-                            pending.push(r);
-                        }
-                    }
-                }
-            }
-            for &p in &pending {
-                seen[p] = false;
-            }
+            pending = self.delay(&pending)?;
         }
         self.steps = steps;
         Ok(steps)
     }
 
+    /// One unit of delay: the parts given read their inputs, then all write
+    /// at once. The parts whose inputs that changed, to go next.
+    fn delay(&mut self, pending: &[PartId]) -> Result<Vec<PartId>, SimError> {
+        let results: Vec<(PartId, Vec<Value>)> = pending.iter().map(|&p| (p, self.compute(p))).collect();
+        let mut touched = Vec::new();
+        for (p, vals) in results {
+            touched.extend(self.set_outputs(p, vals));
+        }
+        touched.sort_unstable();
+        touched.dedup();
+        let mut next = Vec::new();
+        let mut seen = vec![false; self.parts.len()];
+        for n in touched {
+            if self.refresh(n)? {
+                for &r in &self.nets[n].readers {
+                    // A part that drives nothing — an output, a Break — is
+                    // read where it is; it has no delay to wait for.
+                    if !seen[r] && !self.parts[r].outs.is_empty() {
+                        seen[r] = true;
+                        next.push(r);
+                    }
+                }
+            }
+        }
+        Ok(next)
+    }
+
+    /// An input set without running anything: the parts it reaches wait,
+    /// for [`Sim::step`] to take one gate delay at a time.
+    pub fn hold(&mut self, part: PartId, value: u64) {
+        self.parts[part].state.q = value;
+        if !self.waiting.contains(&part) {
+            self.waiting.push(part);
+        }
+    }
+
+    /// One gate delay of what is waiting; the parts that worked, by name.
+    pub fn step(&mut self) -> Result<Vec<String>, SimError> {
+        let now = std::mem::take(&mut self.waiting);
+        let names = self.names(&now);
+        self.waiting = self.delay(&now)?;
+        Ok(names)
+    }
+
+    /// How many parts wait for the next gate delay.
+    pub fn waiting(&self) -> usize {
+        self.waiting.len()
+    }
+
+    /// What is waiting worked through until it settles.
+    pub fn settle(&mut self) -> Result<usize, SimError> {
+        let now = std::mem::take(&mut self.waiting);
+        self.run_from(&now)
+    }
+
     /// An input or clock set to a value, and the circuit run until it settles.
     pub fn set(&mut self, part: PartId, value: u64) -> Result<usize, SimError> {
         self.parts[part].state.q = value;
-        self.run_from(&[part])
+        let mut start = std::mem::take(&mut self.waiting);
+        if !start.contains(&part) {
+            start.push(part);
+        }
+        self.run_from(&start)
     }
 
     /// A clock's full cycle: up, settled, down, settled.
@@ -332,6 +371,32 @@ mod tests {
             sim.set(ib, y).unwrap();
             assert_eq!((sim.value(s).get(), sim.value(c).get()), (x ^ y, x & y));
         }
+    }
+
+    #[test]
+    fn a_change_can_be_stepped_one_gate_delay_at_a_time() {
+        // An input through three inverters: the change takes four delays
+        // to come out, the input's own and one a gate.
+        let mut n = Netlist::default();
+        let nets: Vec<NetId> = (0..4).map(|i| n.net(1, &format!("n{i}"))).collect();
+        let i = n.part(Kind::Input, "I", &[], &[nets[0]]);
+        for k in 0..3 {
+            n.part(Kind::Not, &format!("U{k}"), &[nets[k]], &[nets[k + 1]]);
+        }
+        let mut sim = Sim::new(n, 3).unwrap();
+        assert_eq!(sim.value(nets[3]).get(), 1);
+        sim.hold(i, 1);
+        let mut names = Vec::new();
+        while sim.waiting() > 0 {
+            names.push(sim.step().unwrap().join(","));
+        }
+        assert_eq!(names, vec!["I", "U0", "U1", "U2"]);
+        assert_eq!(sim.value(nets[3]).get(), 0);
+        // Held and then set: what waited is run with it.
+        sim.hold(i, 0);
+        sim.step().unwrap();
+        sim.settle().unwrap();
+        assert_eq!((sim.waiting(), sim.value(nets[3]).get()), (0, 1));
     }
 
     #[test]

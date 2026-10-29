@@ -329,6 +329,8 @@ fn place(el: &Element, lib: &mut Library) -> Result<Vec<Pin>, String> {
     let gate_w = 3 * G;
     let mut p: Vec<Pin> = match el.name.as_str() {
         "In" | "Clock" | "Const" | "Ground" | "VDD" => vec![out(0, 0, Some(bits))],
+        "Button" | "Reset" => vec![out(0, 0, Some(1))],
+        "Break" => vec![inp(0, 0, Some(1))],
         "Out" | "LED" | "Probe" => vec![inp(0, 0, Some(bits))],
         "Tunnel" => vec![Pin { at: (0, 0), input: true, bits: None }],
         "Not" => vec![inp(0, 0, Some(bits)), out(if wide { 3 * G } else { 2 * G }, 0, Some(bits))],
@@ -482,6 +484,8 @@ struct Topology {
     classes: usize,
     /// Each net's width, where some pin says.
     widths: Vec<Option<u8>>,
+    /// Each wire's net, when a pin is on it.
+    wire_class: Vec<Option<usize>>,
 }
 
 fn topology(c: &Circuit, lib: &mut Library) -> Result<Topology, String> {
@@ -550,7 +554,8 @@ fn topology(c: &Circuit, lib: &mut Library) -> Result<Topology, String> {
         }
         class.push(row);
     }
-    Ok(Topology { pins, class, classes: number.len(), widths })
+    let wire_class = (0..nw).map(|w| number.get(&find(&mut parent, w)).copied()).collect();
+    Ok(Topology { pins, class, classes: number.len(), widths, wire_class })
 }
 
 /// The pins of a file's parts that touch nothing — no wire, no other
@@ -616,6 +621,13 @@ pub struct Built {
     pub program: Option<PartId>,
     /// The test cases in the top circuit: label and text.
     pub tests: Vec<(String, String)>,
+    /// For each element of the top circuit, in its order, the part it
+    /// became, if one: what a click on it sets, or what shows its value.
+    pub top_parts: Vec<Option<PartId>>,
+    /// For each wire of the top circuit, its net, if a pin is on it.
+    pub top_wires: Vec<Option<NetId>>,
+    /// The Break parts, at any depth: a quick run stops when one rises.
+    pub breaks: Vec<PartId>,
 }
 
 /// The circuit in `file`, in `dir`, built with every subcircuit inlined.
@@ -701,6 +713,34 @@ fn instance(
         n
     };
     for (e, el) in c.elements.iter().enumerate() {
+        let made = built.netlist.parts();
+        instance_part(lib, cache, &topo, e, el, built, prefix, bound, depth, &mut net)?;
+        if top {
+            let one = built.netlist.parts() > made && !is_sub(&el.name);
+            built.top_parts.push(one.then_some(made));
+        }
+    }
+    if top {
+        built.top_wires = topo.wire_class.iter().map(|k| k.and_then(|k| nets[k])).collect();
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn instance_part(
+    lib: &mut Library,
+    cache: &mut HashMap<String, std::rc::Rc<Topology>>,
+    topo: &Topology,
+    e: usize,
+    el: &Element,
+    built: &mut Built,
+    prefix: &str,
+    bound: &HashMap<String, NetId>,
+    depth: u32,
+    net: &mut dyn FnMut(usize, &mut Netlist) -> NetId,
+) -> Result<(), String> {
+    let top = depth == 0;
+    {
         let cls = &topo.class[e];
         let pins = &topo.pins[e];
         let label = el.label();
@@ -710,7 +750,7 @@ fn instance(
         let nl = &mut built.netlist;
         let bits = el.bits();
         match el.name.as_str() {
-            "In" | "Clock" => {
+            "In" | "Clock" | "Button" => {
                 if top {
                     let kind = if el.name == "Clock" { Kind::Clock } else { Kind::Input };
                     let id = nl.part(kind, &pname, &[], &outs);
@@ -727,6 +767,13 @@ fn instance(
             }
             "Const" => {
                 nl.part(Kind::Const(el.int("Value", 1) as u64 & mask(bits)), &pname, &[], &outs);
+            }
+            "Reset" => {
+                nl.part(Kind::Reset, &pname, &[], &outs);
+            }
+            "Break" => {
+                let id = nl.part(Kind::Break, &pname, &ins, &[]);
+                built.breaks.push(id);
             }
             "Ground" => {
                 nl.part(Kind::Const(0), &pname, &[], &outs);
