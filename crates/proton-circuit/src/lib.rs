@@ -9,8 +9,11 @@
 //! - [`edit`]: what editing does to a drawing: wires split where they meet,
 //!   fresh ids, copy and paste.
 //! - [`hex`]: memory contents as text, read and written.
+//! - [`analysis`]: truth tables, minimised expressions, circuits built from
+//!   them.
 //! - [`testlang`]: test tables in Digital's language, run against one.
 
+pub mod analysis;
 pub mod circ;
 pub mod dig;
 pub mod edit;

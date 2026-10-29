@@ -187,6 +187,29 @@ pub struct CircuitTestResult {
     pub error: Option<String>,
 }
 
+/// A truth table and its minimised forms.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitAnalysisView {
+    /// What it is of: a circuit's name, or the expressions.
+    pub source: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    /// Each output's column: `0`, `1` or `x` a row, the first input the
+    /// highest bit of the row's number.
+    pub columns: Vec<String>,
+    /// Each output's least sum of products, and product of sums.
+    pub sop: Vec<String>,
+    pub pos: Vec<String>,
+    /// Each output's sum-of-products terms as (value, care) bit masks, for
+    /// a Karnaugh map's groups.
+    pub groups: Vec<Vec<[u32; 2]>>,
+    /// Whether every cover is known to be the least.
+    pub exact: bool,
+    pub error: Option<String>,
+}
+
 /// What a run has recorded: the signals, and their values at each sample,
 /// newest last; none for high-Z.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -344,7 +367,7 @@ impl Circuits {
     pub fn apply(&mut self, root: &Path, command: Command) -> Vec<Event> {
         let runs = matches!(
             command,
-            Command::CircuitEdit { .. } | Command::CircuitUndo | Command::CircuitRedo | Command::CircuitShow { .. } | Command::CircuitAdd { .. }
+            Command::CircuitEdit { .. } | Command::CircuitUndo | Command::CircuitRedo | Command::CircuitShow { .. } | Command::CircuitAdd { .. } | Command::CircuitSynthesise { .. }
         );
         let mut events = self.apply_inner(root, command);
         // A circuit changed, or another shown, while running: built afresh.
@@ -607,6 +630,48 @@ impl Circuits {
                     Err(why) => tables.iter().map(|(l, _)| CircuitTestResult { label: l.clone(), rows: 0, failures: Vec::new(), error: Some(why.clone()) }).collect(),
                 };
                 vec![Event::CircuitTests { generation, circuit, results }]
+            }
+            Command::CircuitAnalyse { generation, circuit, expression } => {
+                let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else {
+                    return vec![notice("that project is no longer open".into(), NoticeLevel::Warn)];
+                };
+                let source = expression.clone().unwrap_or_else(|| circuit.clone().unwrap_or_else(|| open.shown.clone()));
+                let analysis = match table_from(&open.project, circuit.as_deref().unwrap_or(&open.shown), expression.as_deref()) {
+                    Ok(t) => analyse(&source, &t),
+                    Err(why) => CircuitAnalysisView { source, inputs: vec![], outputs: vec![], columns: vec![], sop: vec![], pos: vec![], groups: vec![], exact: true, error: Some(why) },
+                };
+                vec![Event::CircuitAnalysis { generation, analysis: Box::new(analysis) }]
+            }
+            Command::CircuitSynthesise { generation, circuit, expression, style, name } => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else {
+                    return vec![notice("that project is no longer open".into(), NoticeLevel::Warn)];
+                };
+                let name = name.trim().to_string();
+                if !circ::is_name(&name) || name.contains(' ') {
+                    return vec![notice(format!("“{name}” cannot name a circuit: letters, digits, - and _"), NoticeLevel::Warn)];
+                }
+                if open.project.circuits.contains_key(&name) {
+                    return vec![notice(format!("there is a circuit {name} already"), NoticeLevel::Warn)];
+                }
+                let style = match style.as_str() {
+                    "andOr" => proton_circuit::analysis::Style::AndOr,
+                    "nand" => proton_circuit::analysis::Style::Nand,
+                    "nor" => proton_circuit::analysis::Style::Nor,
+                    other => return vec![notice(format!("“{other}” is not a way to build: andOr, nand or nor"), NoticeLevel::Warn)],
+                };
+                let shown = open.shown.clone();
+                let built = table_from(&open.project, circuit.as_deref().unwrap_or(&shown), expression.as_deref())
+                    .and_then(|t| proton_circuit::analysis::synthesise(&t, style).map(|d| (t, d)));
+                let (table, drawing) = match built {
+                    Ok(x) => x,
+                    Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                };
+                let mut after = open.project.clone();
+                after.circuits.insert(name.clone(), drawing);
+                after.tests.entry(name.clone()).or_default().insert("truth".into(), proton_circuit::analysis::as_test(&table));
+                open.shown = name.clone();
+                record(open, after);
+                vec![notice(format!("built {name}, with its truth table as the test “truth”"), NoticeLevel::Info), self.project_event()]
             }
             Command::CircuitTraceClear { generation } => {
                 let run = match self.running(generation) {
@@ -1034,6 +1099,47 @@ fn drive(run: &mut Run, sets: &[(PartId, u64)], hold: bool) {
     if !hold {
         run.sample();
     }
+}
+
+/// A table of expressions, if given, or else of a circuit of the project.
+fn table_from(project: &Project, circuit: &str, expression: Option<&str>) -> Result<proton_circuit::analysis::Table, String> {
+    match expression.map(str::trim).filter(|e| !e.is_empty()) {
+        Some(e) => proton_circuit::analysis::expressions(e),
+        None => proton_circuit::analysis::project_table(project, circuit),
+    }
+}
+
+/// A table minimised, each output both ways.
+fn analyse(source: &str, t: &proton_circuit::analysis::Table) -> CircuitAnalysisView {
+    use proton_circuit::analysis::{minimise, pos_text, sop_text};
+    let mut view = CircuitAnalysisView {
+        source: source.to_string(),
+        inputs: t.inputs.clone(),
+        outputs: t.outputs.clone(),
+        columns: t.values.iter().map(|c| String::from_utf8_lossy(c).into_owned()).collect(),
+        sop: Vec::new(),
+        pos: Vec::new(),
+        groups: Vec::new(),
+        exact: true,
+        error: None,
+    };
+    for col in &t.values {
+        match minimise(t.inputs.len(), col) {
+            Ok(m) => {
+                view.sop.push(sop_text(&m, &t.inputs));
+                view.pos.push(pos_text(&m, &t.inputs));
+                view.groups.push(m.sop.iter().map(|g| [g.value, g.care]).collect());
+                view.exact &= m.exact;
+            }
+            Err(why) => {
+                view.error = Some(why);
+                view.sop.push(String::new());
+                view.pos.push(String::new());
+                view.groups.push(Vec::new());
+            }
+        }
+    }
+    view
 }
 
 /// A number as typed: decimal, `0x…`, `0b…`, or `0o…`.
@@ -1577,6 +1683,36 @@ mod tests {
         assert_eq!(csv, "sample,A,Y\n0,0,1\n1,1,0\n2,0,1\n3,1,0\n4,0,0\n");
         let r = run_of(&c.apply(&root, Command::CircuitTraceClear { generation: g })).unwrap();
         assert_eq!((r.trace.total, r.trace.samples.len()), (1, 1));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_table_is_analysed_and_a_circuit_built_from_it_passes_it() {
+        let root = scratch("analysis");
+        let mut c = Circuits::default();
+        let g = view(&c.apply(&root, Command::CircuitNew { name: "logic".into() })).unwrap().generation;
+        let analysis = |events: Vec<Event>| match events.into_iter().find(|e| matches!(e, Event::CircuitAnalysis { .. })) {
+            Some(Event::CircuitAnalysis { analysis, .. }) => *analysis,
+            _ => panic!("no analysis"),
+        };
+        let a = analysis(c.apply(&root, Command::CircuitAnalyse { generation: g, circuit: None, expression: Some("M = A B + A C + B C".into()) }));
+        assert_eq!((a.inputs.join(" "), a.columns[0].as_str(), a.sop[0].as_str()), ("A B C".into(), "00010111", "B·C + A·C + A·B"));
+        assert_eq!(a.groups[0].len(), 3);
+        // The empty main circuit has no outputs to tabulate.
+        assert!(analysis(c.apply(&root, Command::CircuitAnalyse { generation: g, circuit: None, expression: None })).error.is_some());
+        // Built as NANDs, shown, with its table as a test that passes.
+        let v = view(&c.apply(&root, Command::CircuitSynthesise { generation: g, circuit: None, expression: Some("M = A B + A C + B C".into()), style: "nand".into(), name: "majority".into() })).unwrap();
+        assert!(v.dirty && v.shown == "majority" && v.parts.iter().filter(|p| p.kind == "nand").count() == 4);
+        assert_eq!(v.tables[0].0, "truth");
+        let results = match c.apply(&root, Command::CircuitTestRun { generation: g, circuit: "majority".into(), label: None }).remove(0) {
+            Event::CircuitTests { results, .. } => results,
+            other => panic!("{other:?}"),
+        };
+        assert!(results[0].failures.is_empty() && results[0].error.is_none() && results[0].rows == 8, "{results:?}");
+        // And the circuit analysed gives the same table back.
+        let back = analysis(c.apply(&root, Command::CircuitAnalyse { generation: g, circuit: Some("majority".into()), expression: None }));
+        assert_eq!(back.columns, vec!["00010111".to_string()]);
+        assert!(c.apply(&root, Command::CircuitSynthesise { generation: g, circuit: None, expression: Some("A".into()), style: "wires".into(), name: "x".into() }).iter().any(|e| matches!(e, Event::Notice { .. })));
         let _ = std::fs::remove_dir_all(root);
     }
 

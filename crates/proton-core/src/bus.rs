@@ -728,6 +728,23 @@ pub enum Command {
         circuit: String,
         label: Option<String>,
     },
+    /// A truth table and minimised forms: of a circuit of the project, or
+    /// of expressions — `Y = A·B + C'; Z = A ^ B`.
+    CircuitAnalyse {
+        generation: u32,
+        circuit: Option<String>,
+        expression: Option<String>,
+    },
+    /// A new circuit built from a circuit's table or from expressions:
+    /// `style` is `andOr`, `nand` or `nor`. Its table comes with it as a
+    /// test. A held edit.
+    CircuitSynthesise {
+        generation: u32,
+        circuit: Option<String>,
+        expression: Option<String>,
+        style: String,
+        name: String,
+    },
     /// Forget what the run has recorded for the graph.
     CircuitTraceClear {
         generation: u32,
@@ -1591,6 +1608,11 @@ pub enum Event {
     /// What was copied, for the system clipboard.
     CircuitClip {
         text: String,
+    },
+    /// A truth table, minimised, or why there is none.
+    CircuitAnalysis {
+        generation: u32,
+        analysis: Box<crate::circuit::CircuitAnalysisView>,
     },
     /// Test tables run: each one's rows, and the rows that failed.
     CircuitTests {
