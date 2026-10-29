@@ -1,0 +1,127 @@
+part ACC register at 24,2 bits=8 label=A
+part ADD add at 24,10 bits=8
+part AM mux at 24,26 bits=8 sel=2
+part CA split at 38,2 in=4,1 out=5
+part CLK clock at 2,2 label=CLK
+part CS split at 38,18 in=3 out=2,1
+part CTL rom at 38,10 addr=5 bits=3 file=control label=control
+part INC add at 10,10 bits=8
+part IR split at 10,34 in=12 out=8,4
+part K1 const at 2,6 value=1
+part K2 const at 2,10 bits=8 value=1
+part K3 const at 2,14 value=0
+part K4 const at 2,18 bits=8 value=0
+part OUT out at 38,26 bits=8 label=ACC
+part PC register at 10,2 bits=8 label=PC
+part PM mux at 10,18 bits=8
+part ROM rom at 10,26 addr=8 bits=12 file=program label=program
+part SUB subtract at 24,18 bits=8
+part T1 tunnel at 3,2 net=clk
+part T2 tunnel at 3,6 net=one
+part T3 tunnel at 3,10 net=one8
+part T4 tunnel at 3,14 net=zero
+part T5 tunnel at 3,18 net=zero8
+part T6 tunnel at 9,2 rot 2 net=npc
+part T7 tunnel at 9,3 rot 2 net=clk
+part T8 tunnel at 9,4 rot 2 net=one
+part T9 tunnel at 14,3 net=pc
+part T10 tunnel at 9,10 rot 2 net=pc
+part T11 tunnel at 9,11 rot 2 net=one8
+part T12 tunnel at 9,12 rot 2 net=zero
+part T13 tunnel at 14,10 net=pc1
+part T14 tunnel at 11,21 rot 3 net=jump
+part T15 tunnel at 9,18 rot 2 net=pc1
+part T16 tunnel at 9,20 rot 2 net=k
+part T17 tunnel at 13,19 net=npc
+part T18 tunnel at 9,26 rot 2 net=pc
+part T19 tunnel at 9,27 rot 2 net=one
+part T20 tunnel at 14,26 net=ir
+part T21 tunnel at 9,34 rot 2 net=ir
+part T22 tunnel at 12,34 net=k
+part T23 tunnel at 12,35 net=op
+part T24 tunnel at 23,2 rot 2 net=nacc
+part T25 tunnel at 23,3 rot 2 net=clk
+part T26 tunnel at 23,4 rot 2 net=one
+part T27 tunnel at 28,3 net=acc
+part T28 tunnel at 23,10 rot 2 net=acc
+part T29 tunnel at 23,11 rot 2 net=k
+part T30 tunnel at 23,12 rot 2 net=zero
+part T31 tunnel at 28,10 net=sum
+part T32 tunnel at 23,18 rot 2 net=acc
+part T33 tunnel at 23,19 rot 2 net=k
+part T34 tunnel at 23,20 rot 2 net=zero
+part T35 tunnel at 28,18 net=diff
+part T36 tunnel at 25,31 rot 3 net=asel
+part T37 tunnel at 23,26 rot 2 net=k
+part T38 tunnel at 23,27 rot 2 net=sum
+part T39 tunnel at 23,28 rot 2 net=diff
+part T40 tunnel at 23,29 rot 2 net=acc
+part T41 tunnel at 27,28 net=nacc
+part T42 tunnel at 23,36 rot 2 net=acc
+part T43 tunnel at 23,37 rot 2 net=zero8
+part T44 tunnel at 28,37 net=z
+part T45 tunnel at 37,2 rot 2 net=op
+part T46 tunnel at 37,3 rot 2 net=z
+part T47 tunnel at 40,2 net=caddr
+part T48 tunnel at 37,10 rot 2 net=caddr
+part T49 tunnel at 37,11 rot 2 net=one
+part T50 tunnel at 42,10 net=ctl
+part T51 tunnel at 37,18 rot 2 net=ctl
+part T52 tunnel at 40,18 net=asel
+part T53 tunnel at 40,19 net=jump
+part T54 tunnel at 37,26 rot 2 net=acc
+part Z compare at 24,36 bits=8
+wire 2,2 3,2
+wire 2,6 3,6
+wire 2,10 3,10
+wire 2,14 3,14
+wire 2,18 3,18
+wire 9,2 10,2
+wire 9,3 10,3
+wire 9,4 10,4
+wire 9,10 10,10
+wire 9,11 10,11
+wire 9,12 10,12
+wire 9,18 10,18
+wire 9,20 10,20
+wire 9,26 10,26
+wire 9,27 10,27
+wire 9,34 10,34
+wire 11,20 11,21
+wire 11,34 12,34
+wire 11,35 12,35
+wire 12,19 13,19
+wire 13,3 14,3
+wire 13,10 14,10
+wire 13,26 14,26
+wire 23,2 24,2
+wire 23,3 24,3
+wire 23,4 24,4
+wire 23,10 24,10
+wire 23,11 24,11
+wire 23,12 24,12
+wire 23,18 24,18
+wire 23,19 24,19
+wire 23,20 24,20
+wire 23,26 24,26
+wire 23,27 24,27
+wire 23,28 24,28
+wire 23,29 24,29
+wire 23,36 24,36
+wire 23,37 24,37
+wire 25,30 25,31
+wire 26,28 27,28
+wire 27,3 28,3
+wire 27,10 28,10
+wire 27,18 28,18
+wire 27,37 28,37
+wire 37,2 38,2
+wire 37,3 38,3
+wire 37,10 38,10
+wire 37,11 38,11
+wire 37,18 38,18
+wire 37,26 38,26
+wire 39,2 40,2
+wire 39,18 40,18
+wire 39,19 40,19
+wire 41,10 42,10

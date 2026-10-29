@@ -2183,6 +2183,72 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A quick run of `root`'s project for a second, stopped: its news.
+    fn quick_for_a_second(c: &mut Circuits, root: &Path, path: &str) -> (CircuitQuickView, CircuitRunView) {
+        let open = if path.ends_with(".dig") { Command::CircuitImport { path: path.into() } } else { Command::CircuitOpen { path: path.into() } };
+        let g = view(&c.apply(root, open)).unwrap().generation;
+        let r = run_of(&c.apply(root, Command::CircuitStart { generation: g })).unwrap();
+        assert!(r.error.is_none(), "{:?}", r.error);
+        assert!(run_of(&c.apply(root, Command::CircuitQuick { generation: g })).unwrap().quick.unwrap().running);
+        std::thread::sleep(Duration::from_secs(1));
+        c.apply(root, Command::CircuitStop);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(r) = run_of(&c.poll()) {
+                if let Some(q) = r.quick.clone().filter(|q| !q.running) {
+                    assert_eq!(q.ended.as_deref(), Some("stopped"));
+                    return (q, r);
+                }
+            }
+            assert!(Instant::now() < deadline, "the quick run never stopped");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// C9's budget: a small CPU — `tiny-cpu.circuit`, proton-circuit's
+    /// fixture — quick-run at 100 kHz or more, as the window's Quick runs
+    /// it. Kept by a release build; a debug build only says how fast.
+    #[test]
+    fn a_small_cpu_quick_runs_at_100_khz_or_more() {
+        let root = scratch("tiny-cpu");
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../proton-circuit/tests/tiny-cpu.circuit");
+        for sub in ["", "circuits", "data", "tests"] {
+            std::fs::create_dir_all(root.join("tiny-cpu.circuit").join(sub)).unwrap();
+            for e in std::fs::read_dir(from.join(sub)).unwrap().flatten().filter(|e| e.path().is_file()) {
+                std::fs::copy(e.path(), root.join("tiny-cpu.circuit").join(sub).join(e.file_name())).unwrap();
+            }
+        }
+        let mut c = Circuits::default();
+        let (q, r) = quick_for_a_second(&mut c, &root, "tiny-cpu.circuit");
+        println!("tiny-cpu quick run: {} cycles, {:.0} Hz", q.cycles, q.hz);
+        // The program has long since counted down and stopped at seven.
+        assert_eq!(r.values.iter().find(|(k, _)| k == "OUT").map(|(_, v)| v.hex.as_str()), Some("7"));
+        if !cfg!(debug_assertions) {
+            assert!(q.hz >= 100_000.0, "{:.0} Hz", q.hz);
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The same for a folder of `.dig` files with a `basic-cpu.dig`, e.g.
+    /// a course's CPU; copied to a scratch folder first, since a `.dig`
+    /// file is imported beside itself.
+    #[test]
+    #[ignore = "needs PROTON_CIRCUIT_DIG_DIR, a folder with basic-cpu.dig"]
+    fn a_folders_cpus_quick_run() {
+        let Ok(dir) = std::env::var("PROTON_CIRCUIT_DIG_DIR") else { return };
+        let root = scratch("dig-cpu");
+        for e in std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.path().extension().is_some_and(|x| x == "dig" || x == "hex")) {
+            std::fs::copy(e.path(), root.join(e.file_name())).unwrap();
+        }
+        for file in ["basic-cpu.dig", "extended-cpu.dig"] {
+            if root.join(file).exists() {
+                let (q, _) = quick_for_a_second(&mut Circuits::default(), &root, file);
+                println!("{file} quick run: {} cycles, {:.0} Hz", q.cycles, q.hz);
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn a_ram_written_while_running_is_kept_as_a_data_file() {
         let root = scratch("ram");
