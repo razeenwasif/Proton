@@ -3,13 +3,13 @@
 # Proton
 
 A code editor that is also a chat client, a data notebook, a research
-workbench, a study notebook and a spreadsheet — one window, six modes, a shared Vim-style
+workbench, a study notebook, a spreadsheet and a logic simulator — one window, seven modes, a shared Vim-style
 modal engine underneath all of them, and an agent that can act in any of them.
 
 Every mode in the window reads and writes a real document: the editor,
 Telescope and language servers, the agent, the Code Visualizer, the plugin
-host, Data's notebooks, Research's investigations, Notebook's sources and
-Excel's workbooks all ship. The creative modes that were here — Design, Model, Game, Canvas, Diffuse
+host, Data's notebooks, Research's investigations, Notebook's sources,
+Excel's workbooks and Circuit's projects all ship. The creative modes that were here — Design, Model, Game, Canvas, Diffuse
 and Video — moved to an app of their own in October 2026, and LaTeX and the
 Reader to Quark.
 
@@ -60,14 +60,14 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-trace/` | The Code Visualizer client |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all six modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The six modes
+## The seven modes
 
 Every mode keeps projects of its own: the folder open in Codex is not
 carried into Data, Research or any other, and going back to a mode brings
@@ -234,6 +234,26 @@ in `.xlsx`. The agent reads, writes and charts the workbook with its sheet
 tools, `@sheet` sends what is selected, and a range goes to Data as a
 dataframe and a notebook's table comes back as a sheet. Edits are held until
 ⌘S, and quitting with an unsaved workbook asks first.
+
+**Circuit** · digital logic on ⌃7, after hneemann's
+[Digital](https://github.com/hneemann/Digital). A project is a
+`Name.circuit/` folder of text — a `.circ` file a circuit, a line a part or
+a wire, test tables, memory contents as `.hex` and state machines — and
+Digital's `.dig` files open as projects of their own. Gates, flip-flops,
+registers, counters, memories, multiplexers, arithmetic, splitters, tunnels
+and displays are placed, wired, turned and copied with the keys or the
+mouse, and circuits placed in one another. Proton's simulator
+(`crates/proton-circuit`) runs them as Digital does, a gate's delay at a time
+when asked, the wires coloured by their values and inputs clicked; a quick
+run clocks a CPU at hundreds of kilohertz until a Break rises. Test tables in
+Digital's language run against a circuit and its signals are graphed; truth
+tables, minimised expressions (Quine–McCluskey) and Karnaugh maps come from
+a circuit, and circuits from expressions or from a state machine written as
+text. Out go Verilog, VHDL and SVG. The agent reads, edits, tests and
+analyses circuits with its circuit tools, `@circuit` sends the circuit on
+screen, and Notebook makes circuit practice from your sources, each problem
+built and checked by the simulator before you see it. Edits are held until
+⌘S.
 
 ## The three things that hold it together
 

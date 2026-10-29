@@ -128,6 +128,14 @@ is that the canvas draws the right colours where it should, that the rows
 under it catch up once the screen is still, and that switching back leaves
 nothing behind.
 
+`tests/ui/circuit-bench.html` draws a circuit of 2,502 parts — the suite's
+half adder laid out 417 times — panned a step a frame at seven zooms from
+fitted to close, and once running, and reports the main thread's time per
+frame and the frames that came late; `window.bench.all('sync')` times the
+drawing alone, for a WKWebView off the screen, which gets no frames.
+`docs/CIRCUIT.md` (Measured) has its numbers. The suite's own check draws the
+same circuit and fails only at ten times what it measured.
+
 The document checks open `fixtures/three-pages.pdf` — three pages, the middle
 one landscape, written by hand to be small — over Data rather than Codex, at
 the page a citation names, and check that its pages are drawn with their text

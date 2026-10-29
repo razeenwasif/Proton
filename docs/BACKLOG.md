@@ -150,14 +150,30 @@ installed on 2026-10-28. What is left of it.
 
 ## Circuit
 
-A digital logic mode after hneemann's Digital, asked for on 2026-10-28, is
-planned in [`CIRCUIT.md`](CIRCUIT.md). It covers:
-- gates, flip-flops, memories and buses drawn and simulated as Digital does,
-  in a `Name.circuit/` folder of text;
-- test tables;
-- truth tables, Quine–McCluskey, K-maps, synthesis and an FSM editor;
-- Verilog, VHDL and SVG out, and `.dig` in;
-- the agent and Notebook's exercises.
+The digital logic mode after hneemann's Digital, asked for on 2026-10-28,
+is built, C0–C9, as [`CIRCUIT.md`](CIRCUIT.md) planned it, on 2026-10-30.
+What is left of it.
 
-Milestones are C0–C9, being built from 2026-10-28: "Circuit" on ⌃7, the
-simulator in the core, Digital's `.dig` files read in C7.
+### Waiting on the person
+
+- **Circuit in the installed app, with your own circuits.** Your CPU's 79
+  test tables pass from its `.dig` files and imported; the window has been
+  tested in the browser and timed in WebKit, not used by hand in the app.
+- **Icarus Verilog and GHDL.** The check that compiles the written Verilog
+  and drives it through a full adder's rows skips itself while they are not
+  on this Mac (`brew install icarus-verilog ghdl`); VHDL has no run check
+  yet.
+- **Circuit practice made by a model.** Notebook's problems are checked by
+  the simulator when they are made, and that is tested with a model's answer
+  written by hand; no set has been made by one of your engines yet.
+
+### Later builds
+
+- **A state table from a circuit of flip-flops.** The state machine read back
+  from a drawn circuit, as Digital does; today machines go one way, text to
+  circuit.
+- **State machines drawn by dragging.** The Machines tab is text with a
+  diagram drawn from it; states cannot be moved about on the diagram.
+- **The 74xx library.** Digital's chips as subcircuits, made here.
+- **FPGA boards and JEDEC files.** BASYS3 and TinyFPGA, and GALs; they need
+  the hardware to test against.

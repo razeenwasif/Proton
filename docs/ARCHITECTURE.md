@@ -1,7 +1,7 @@
 # Proton — architecture
 
 This document describes the implemented system and records its build history.
-All six modes read real documents. The design reference is [`DESIGN.md`](../design/DESIGN.md),
+All seven modes read real documents. The design reference is [`DESIGN.md`](../design/DESIGN.md),
 and the tool choices are in [`STACK.md`](STACK.md).
 
 The capability table below describes current behavior. Milestone sections later
@@ -15,6 +15,7 @@ in this document retain historical decisions and measurements.
 | Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures and 3D scenes drawn in the Lab |
 | Notebook | Notebooks of your own sources with a cited tutor on four engines; study guides, flashcards on FSRS, quizzes marked by another family, exams from past papers, audio overviews, slides | The tutor and studio spend each engine's plan, audio Fish credit |
 | Excel | `Name.sheet/` workbooks, `.xlsx`, `.csv`, `.tsv`; Proton's own formula engine recalculating only what a change reaches; a grid drawn by the rows on screen; formats, frozen panes, sorting, filters, colour rules, charts; sheet tools for the agent; ranges to and from Data | `.xlsx` merged cells, conditional formats, filters, pictures, pivot tables and macros are not kept (said on opening); a million rows take about 4 s to open and 0.7–1 GB |
+| Circuit | `Name.circuit/` projects and Digital's `.dig` files; Proton's own simulator with gate delays, quick run and Break; editing, subcircuits, memories, test tables and graphs; truth tables, K-maps, synthesis, state machines; Verilog, VHDL and SVG out; circuit tools for the agent; Notebook's circuit practice | No 74xx library, FPGA boards or co-simulation; the written Verilog and VHDL are checked by their text unless Icarus or GHDL is installed |
 
 ```bash
 cargo test --workspace        # headless; some integrations require external tools
@@ -47,7 +48,7 @@ dependency, and the front end is replaceable.**
       ╭─────────▼──────────╮        ╭────────────▼───────────╮
       │  proton-shell      │        │  GPU editor surface    │
       │  webview · chrome  │  ────▶ │  later, only if the    │
-      │  all six modes     │        │  latency budget fails  │
+      │  all seven modes   │        │  latency budget fails  │
       ╰────────────────────╯        ╰────────────────────────╯
 ```
 
@@ -60,7 +61,7 @@ Two rules keep that seam honest:
    (`Delete·Line`, count 2), which is exactly the boundary that lets a different
    front end reuse it verbatim.
 
-The webview ships first because six modes demand it. The GPU surface is held
+The webview ships first because seven modes demand it. The GPU surface is held
 in reserve for the editor pane alone, and only once a measured
 input-to-photon number justifies it. See STACK.md § "The actual decision".
 

@@ -226,7 +226,7 @@ The parts a course on digital logic uses, in the first version:
 
 Each lands with its tests passing.
 
-**Built so far** (2026-10-29): C0 — the engine, the `.dig` reader and test
+**Built** (2026-10-30), C0–C9: C0 — the engine, the `.dig` reader and test
 language, and the `Name.circuit/` folder; C1 — the mode on ⌃7: its home page
 of projects, making and opening one, its circuits listed with the top marked,
 the one shown drawn on a canvas (gate shapes, boxes around other parts' pins,
@@ -323,6 +323,19 @@ table before keeping the problem, so no table is wrong; "Build in Circuit"
 sets the problem up in a practice project named for the set, its signals
 placed and its table the test "practice", which checks the student's
 circuit.
+C9 — measured, against the budgets below (see Measured). Quick run met its
+budget as C3 built it. Drawing did not: a circuit of 2,500 parts took 85 ms
+a frame, and now takes under 3 ms of the window's own time at any zoom. Only
+what is on the stage is drawn; each part's outline is worked out once, on the
+grid, and every part drawn with one fill and two strokes, its pins in a path
+for each kind; labels and values are drawn together a font at a time, and
+none under five of the stage's pixels high; the junctions are found once a
+circuit; zoomed out below six pixels a step, parts are drawn as their boxes
+without pins. The small CPU the budget names is `tiny-cpu.circuit`, in
+`crates/proton-circuit/tests/`: an accumulator machine of eight bits with a
+program counter, a program ROM, an adder and a subtracter, a control ROM
+looked up by the operation and a zero flag, and tunnels for wires, written by
+`examples/tiny_cpu.rs`; its table counts down from ten and stops at seven.
 
 | | What | Proved by |
 |---|---|---|
@@ -336,6 +349,50 @@ circuit.
 | **C7** | Verilog, VHDL and SVG out; `.dig` in | written Verilog run by Icarus when present; `.dig` files made here read |
 | **C8** | The agent's tools, `@circuit`, Notebook's exercises | through `run_tool`, as the other tools are tested |
 | **C9** | Measured: a small CPU in quick run at 100 kHz or more, a 2,500-part circuit drawn at 60 fps; docs; the status page | timing budgets |
+
+## Measured (C9)
+
+On this Mac, an M-series, release builds. The simulator's budget is kept by
+tests that run in a release build and only report in a debug one; drawing's
+by `tests/ui/circuit-bench.html`, with a looser check in the browser suite.
+
+**Quick run** — the clock flipped as fast as it goes, as Quick runs it: the
+core's quick run for a second, then stopped (`cargo test --release -p
+proton-core --lib quick_run -- --nocapture`, and `-p proton-circuit --test
+speed` for the simulator alone).
+
+| Circuit | Parts | Clocked at | Budget |
+|---|---|---|---|
+| `tiny-cpu.circuit`, in the core's quick run | 19 | 1.07 MHz | 100 kHz |
+| the same, the simulator alone | 19 | 1.06 MHz | 100 kHz |
+| the person's basic CPU (`.dig`, imported) | — | 359 kHz | 100 kHz |
+| the person's extended CPU (`.dig`, imported) | — | 223 kHz | 100 kHz |
+
+A debug build runs the tiny CPU at about 190 kHz. The person's CPUs are
+measured by an ignored test given their folder (`PROTON_CIRCUIT_DIG_DIR`),
+copied to a scratch folder first, with no program loaded; with FIB's program
+in RAM the simulator alone ran the extended CPU at about 138 kHz in C3.
+
+**Drawing** — the half adder laid out 417 times, 2,502 parts and 5,004
+wires, panned a step a frame at each zoom from fitted to close, and once
+running with every wire and input carrying a value. The window's main
+thread, per frame, in WebKit as the app has it (a WKWebView on the screen,
+invisible), at 60 frames a second:
+
+| Zoom (pixels a step) | Median | p95 | Late frames |
+|---|---|---|---|
+| 4.5, fitted: parts as boxes | 1 ms | 2 ms | 0 |
+| 7.1, the most on the stage drawn whole | 2 ms | 3 ms | 0 |
+| 8.8, labels drawn too | 3 ms | 5 ms | 0 |
+| 27, close | 1 ms | 2 ms | 2 of 120 |
+| 8.8, running | 4 ms | 6 ms | 0 |
+
+WebKit paints the canvas in its GPU process, beside the main thread: about
+3 ms of its time a frame over the whole run, and the page's own process
+about 2 ms. Headless Chromium, which paints in software, keeps 60 frames a
+second at every zoom too, its frames 3–17 ms with the painting in them and
+the drawing itself under 3 ms. Before C9 the same circuit took 85 ms a frame
+zoomed in, most of it the wires sorted by colour a copy at a time.
 
 ## Decided at the start
 
