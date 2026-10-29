@@ -44,7 +44,7 @@ Name.circuit/
   project.json                   which circuit is the top
   circuits/<name>.circ           a circuit: a line per part, a line per wire
   tests/<circuit>.<label>.tests  a test table for a circuit
-  data/<name>.hex                ROM and RAM contents (C4)
+  data/<name>.hex                ROM, RAM and table contents
 ```
 
 - **A `.circ` line is a part or a wire,** parts sorted by id (`U2` before
@@ -249,6 +249,20 @@ thread of its own, nothing drawn, until a Break rises or ⎋, and says how
 fast it went. Measured (release, this Mac, `a_cpu_clocked_as_fast_as_it_goes`):
 the person's basic CPU (144 parts) runs at about 366 kHz, the extended one
 (5,574 parts) at about 138 kHz.
+C4 — parts and contents: subcircuits, tunnels, splitters, arithmetic,
+flip-flops, registers and the two-port RAM were in from C0 by way of the
+`.dig` reader; added now are a counter, a ROM, a one-port RAM (`ram`: A,
+Din, str, C, ld → D), a look-up table, tri-state drivers (`driver`,
+`driverinv`), pull-up and pull-down, a bit extender and selector, Button,
+Reset and Break, and three displays — a seven-segment (`seg7`, a–g and the
+point), a hex digit (`hexdisplay`, d and the point) and an RGB LED — drawn lit
+while running. Their inputs run down the left and outputs to the right: as
+these parts were in none of the drawings Digital's layouts were worked out
+from, the layouts are Proton's own, and a `.dig` file using them may not
+meet its wires. Contents are `data/<name>.hex` (Logisim's `v2.0 raw`, runs
+as `n*w`), named by `file=<name>` or given inline with `data=`; Digital's
+own contents in a `.dig` are read too. A running RAM is kept as a data file
+with Enter or a double-click, a held edit like any other.
 
 | | What | Proved by |
 |---|---|---|

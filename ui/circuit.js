@@ -55,7 +55,12 @@ const INVERTED = new Set(["nand", "nor", "xnor", "not"]);
 const BOX_NAMES = /** @type {Record<string, string>} */ ({
   mux: "MUX", demux: "DEMUX", decoder: "DEC", priority: "PRI", add: "+", subtract: "−", multiply: "×", divide: "÷",
   compare: "CMP", negate: "−x", shifter: "SHIFT", register: "REG", dff: "D", tff: "T", jkff: "JK", rsff: "RS", ram2: "RAM",
+  ram: "RAM", rom: "ROM", lut: "LUT", counter: "CTR", driver: "EN", driverinv: "EN̄", bitext: "EXT", bitsel: "BIT",
 });
+/** The displays: drawn as a face, lit from their value while running. */
+const DISPLAYS = new Set(["seg7", "hexdisplay", "rgbled"]);
+/** A hex digit's segments, a to g as bits 0 to 6. */
+const DIGITS = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f, 0x77, 0x7c, 0x39, 0x5e, 0x79, 0x71];
 
 /** A part's setting. @param {PartView} p @param {string} k */
 const setting = (p, k) => p.settings.find(([key]) => key === k)?.[1] ?? "";
@@ -114,6 +119,9 @@ export function body(p) {
     case "tunnel": return { x0: 0, x1: 0.8, y0: -0.4, y1: 0.4 };
     case "ground": case "vdd": return { x0: -0.5, x1: 0.5, y0: -0.9, y1: 0.9 };
     case "text": return { x0: 0, x1: 3, y0: -0.5, y1: 0.5 };
+    case "seg7": case "hexdisplay": case "rgbled": return { x0: 0, x1: 3, y0: -0.5, y1: Math.max(f.y1, 2) + 0.5 };
+    case "pullup": return { x0: -0.4, x1: 0.4, y0: -1.2, y1: 0 };
+    case "pulldown": return { x0: -0.4, x1: 0.4, y0: 0, y1: 1.2 };
     default: return { x0: f.x0, x1: Math.max(f.x1, f.x0 + 1), y0: f.y0 - 0.5, y1: f.y1 + 0.5 };
   }
 }
@@ -539,7 +547,9 @@ export function createCircuit(host) {
         const b = body(part);
         const [x, y] = world(part, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
         const high = v.bits === 1 && v.hex === "1" && !v.z;
-        if (part.kind === "led") {
+        if (DISPLAYS.has(part.kind)) {
+          face(g, part, v, col);
+        } else if (part.kind === "led") {
           g.fillStyle = high ? col.high : col.bg;
           g.beginPath();
           g.arc(x, y, 0.42, 0, Math.PI * 2);
@@ -660,6 +670,18 @@ export function createCircuit(host) {
     } else if (kind === "split") {
       g.fillStyle = col.text;
       g.fillRect(f.x0 + 0.35, f.y0 - 0.3, 0.3, f.y1 - f.y0 + 0.6);
+    } else if (DISPLAYS.has(kind)) {
+      const b = body(p);
+      g.beginPath();
+      g.rect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+      g.fill(); g.stroke();
+    } else if (kind === "pullup" || kind === "pulldown") {
+      const dir = kind === "pullup" ? -1 : 1;
+      g.beginPath();
+      g.moveTo(0, 0); g.lineTo(0, 0.3 * dir);
+      g.rect(-0.18, Math.min(0.3 * dir, 1 * dir), 0.36, 0.7);
+      g.stroke();
+      if (kind === "pullup") { g.beginPath(); g.moveTo(-0.35, -1.15); g.lineTo(0.35, -1.15); g.stroke(); }
     } else if (kind === "text") {
       text(g, setting(p, "text"), 0, 0, col.muted, 0.6, "left");
     } else {
@@ -682,6 +704,45 @@ export function createCircuit(host) {
       g.stroke();
     }
     if (label && GATES.has(kind)) text(g, label, (f.x0 + f.x1) / 2, f.y0 - 1, col.muted, 0.5, "center");
+    g.restore();
+  }
+
+  /** A display lit from its value: segments a–g and the point; a digit and
+   *  its point; or a colour, R, G and B each as wide as a third of the bus.
+   *  Drawn upright at the middle of the part's body.
+   *  @param {CanvasRenderingContext2D} g @param {PartView} p @param {Value} v @param {ReturnType<typeof colours>} col */
+  function face(g, p, v, col) {
+    const b = body(p);
+    const [cx, cy] = world(p, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+    const n = BigInt(`0x${v.hex || "0"}`);
+    if (p.kind === "rgbled") {
+      const w = BigInt(Math.max(1, Math.floor(v.bits / 3)));
+      const top = (1n << w) - 1n;
+      const ch = (/** @type {bigint} */ i) => Number(((n >> (i * w)) & top) * 255n / (top || 1n));
+      g.fillStyle = `rgb(${ch(0n)}, ${ch(1n)}, ${ch(2n)})`;
+      g.beginPath();
+      g.arc(cx, cy, 0.9, 0, Math.PI * 2);
+      g.fill();
+      return;
+    }
+    const segs = p.kind === "seg7" ? Number(n & 0xffn) : (DIGITS[Number(n & 0xfn)] ?? 0) | (Number((n >> 4n) & 1n) << 7);
+    const h = Math.min(b.y1 - b.y0, 3) * 0.38, w = 0.55, t = 0.14;
+    /** a b c d e f g as lines from the digit's centre. */
+    const lines = [[-w, -h, w, -h], [w, -h, w, 0], [w, 0, w, h], [-w, h, w, h], [-w, 0, -w, h], [-w, -h, -w, 0], [-w, 0, w, 0]];
+    g.save();
+    g.lineWidth = t;
+    g.lineCap = "round";
+    lines.forEach(([x0, y0, x1, y1], i) => {
+      g.strokeStyle = segs >> i & 1 ? col.danger : col.line;
+      g.beginPath();
+      g.moveTo(cx - 0.15 + x0, cy + y0);
+      g.lineTo(cx - 0.15 + x1, cy + y1);
+      g.stroke();
+    });
+    g.fillStyle = segs >> 7 & 1 ? col.danger : col.line;
+    g.beginPath();
+    g.arc(cx + w + 0.15, cy + h, t, 0, Math.PI * 2);
+    g.fill();
     g.restore();
   }
 
@@ -887,7 +948,8 @@ export function createCircuit(host) {
   els.stage.addEventListener("dblclick", (e) => {
     const at = gridOf(e);
     const part = partAt(at.x, at.y);
-    if (part) editSettings(part);
+    if (part && running() && (part.kind === "ram" || part.kind === "ram2")) saveMemory(part);
+    else if (part) editSettings(part);
   });
 
   /* ── settings, the part picker, the clipboard ─────────────────────── */
@@ -943,6 +1005,17 @@ export function createCircuit(host) {
       send([{ op: "set", id: part.id, newId: renamed, settings: pairs }]);
     });
     /** @type {HTMLInputElement | null} */ (els.stage.querySelector(".ci-pop [name=settings]"))?.focus();
+  }
+
+  /** A running RAM's contents kept as a data file, for a ROM to read.
+   *  @param {PartView} part */
+  function saveMemory(part) {
+    popup(`<label class="ci-pop-row"><span>Keep ${esc(part.id)}'s contents as data/</span><input name="name" value="${esc(part.id.toLowerCase())}" aria-label="Data file" spellcheck="false"><span>.hex</span></label>
+      <p class="ci-pop-hint">A held edit, saved with ⌘S; a ROM reads it with file=&lt;name&gt;.</p>`,
+    [part.x, part.y], (form) => {
+      const name = /** @type {HTMLInputElement} */ (form.elements.namedItem("name")).value.trim();
+      if (name) runCommand("circuitSaveMemory", { id: part.id, name });
+    });
   }
 
   /** `a`: a part picked by name, placed at the cursor. */
@@ -1071,6 +1144,7 @@ export function createCircuit(host) {
         if (state.wiring) return keys.w();
         const ids = targets();
         const part = p.parts.find((q) => q.id === ids[0]);
+        if (part && running() && (part.kind === "ram" || part.kind === "ram2")) return saveMemory(part);
         if (part) editSettings(part);
       },
       e: () => keys.Enter(),

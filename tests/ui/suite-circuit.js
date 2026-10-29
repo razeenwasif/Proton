@@ -248,6 +248,40 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     assert(!shown(ws().querySelector('[data-circuit-running]')), 'the run\'s controls stayed');
   });
 
+  await test('A display is lit from its value, and a running RAM is kept as a data file', async () => {
+    const parts = [
+      {id: 'H', kind: 'hexdisplay', x: 2, y: 0, rot: 0, mirror: false, settings: [], pins: [{x: 2, y: 0, input: true}, {x: 2, y: 1, input: true}], problem: null},
+      {id: 'M', kind: 'ram', x: 8, y: 0, rot: 0, mirror: false, settings: [['addr', '2']], problem: null,
+        pins: [0, 1, 2, 3, 4].map((i) => ({x: 8, y: i, input: true})).concat([{x: 11, y: 0, input: false}])},
+    ];
+    await win.pushEvents([project({parts, wires: [], palette: ['hexdisplay', 'ram', 'rom']}),
+      {type: 'circuitRun', run: {generation: 4, circuit: 'half', wires: [], values: [['H', {bits: 5, hex: '8', z: false, someZ: false}]], waiting: 0, stepped: [], error: null, quick: null}}]);
+    await settle(); await frames();
+    // An 8 lights every segment: the middle one, g, is lit.
+    const c = /** @type {HTMLCanvasElement} */ (ws().querySelector('[data-circuit-canvas]'));
+    const dpr = win.devicePixelRatio || 1, v = win.circuitDebug().view;
+    const px = Math.round((v.ox + (2 + 1.5 - 0.15) * v.scale) * dpr), py = Math.round((v.oy + 1 * v.scale) * dpr);
+    const [red, green] = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d')).getImageData(px, py, 1, 1).data;
+    assert(red > green + 40, `the display's middle segment is not lit: rgb ${red}, ${green}`);
+    // Enter on a running RAM asks what to keep its contents as.
+    const stage = ws().querySelector('[data-circuit-stage]');
+    stage.focus();
+    key('Escape');
+    const r = stage.getBoundingClientRect();
+    const at = {clientX: r.left + v.ox + 9.5 * v.scale, clientY: r.top + v.oy + 2 * v.scale, bubbles: true, pointerId: 1, button: 0};
+    stage.dispatchEvent(new win.PointerEvent('pointerdown', at));
+    stage.dispatchEvent(new win.PointerEvent('pointerup', at)); await settle();
+    key('Enter'); await settle();
+    const pop = stage.querySelector('.ci-pop [name=name]');
+    assert(pop?.value === 'm', 'Enter on a running RAM does not ask for a data file');
+    pop.value = 'boot';
+    const before = win.commands.length;
+    stage.querySelector('.ci-pop').requestSubmit(); await settle();
+    const saved = sent(before, 'circuitSaveMemory')[0];
+    assert(saved?.id === 'M' && saved.name === 'boot' && saved.generation === 4, `saving sent ${JSON.stringify(saved)}`);
+    await win.pushEvents([{type: 'circuitRun', run: null}]); await settle();
+  });
+
   await test('Clicks and keys: another circuit, a new one, the top, zoom and fit, ⌘S and close', async () => {
     const before = win.commands.length;
     ws().querySelector('[data-circuit-show="main"]').click(); await settle();
