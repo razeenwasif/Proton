@@ -314,6 +314,12 @@ fn sub_pins(c: &Circuit) -> (Names, Names, i32) {
     (ins.iter().map(|e| (e.label().to_string(), e.bits())).collect(), outs.iter().map(|e| (e.label().to_string(), e.bits())).collect(), w)
 }
 
+/// A part's pins where they fall, in Digital's units: each point, and
+/// whether it is an input.
+pub fn pins_of(el: &Element, lib: &mut Library) -> Result<Vec<(Point, bool)>, String> {
+    Ok(place(el, lib)?.into_iter().map(|p| (p.at, p.input)).collect())
+}
+
 /// A part's pins where they fall, turned and mirrored as it is.
 fn place(el: &Element, lib: &mut Library) -> Result<Vec<Pin>, String> {
     let bits = el.bits();

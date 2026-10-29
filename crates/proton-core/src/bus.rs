@@ -643,6 +643,34 @@ pub enum Command {
     SheetRemoveSheet {
         sheet: u32,
     },
+    /* ── circuit ──────────────────────────────────────────────────── */
+    /// Make a circuit project: a `.circuit` folder named after it, with
+    /// one empty circuit, `main`.
+    CircuitNew {
+        name: String,
+    },
+    /// Open a `.circuit` folder in the project.
+    CircuitOpen {
+        path: String,
+    },
+    /// Close it; refused while it has unsaved changes unless `discard`.
+    CircuitClose {
+        discard: bool,
+    },
+    /// ⌘S: write it back to its folder.
+    CircuitSave,
+    /// Show another of its circuits.
+    CircuitShow {
+        circuit: String,
+    },
+    /// A new, empty circuit in the project, shown; held until ⌘S.
+    CircuitAdd {
+        name: String,
+    },
+    /// Make a circuit the one that runs when the project does.
+    CircuitSetTop {
+        circuit: String,
+    },
     /* ── notebook ─────────────────────────────────────────────────── */
     /// Keep notebooks in this folder — typed as a path is, `~` and all.
     /// Saved in the person's own settings.
@@ -1478,6 +1506,15 @@ pub enum Event {
     /// every output in it.
     CellSelected {
         index: usize,
+    },
+    /// The project's circuit projects, for Circuit mode's home page.
+    CircuitHome {
+        projects: Vec<crate::circuit::CircuitFound>,
+    },
+    /// The circuit project open — its circuits, the one shown drawn with
+    /// its pins placed, and whether it is saved — or none.
+    CircuitProject {
+        project: Option<Box<crate::circuit::CircuitProjectView>>,
     },
     /// The project's workbooks, for Excel mode's home page.
     SheetHome {

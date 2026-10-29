@@ -376,7 +376,48 @@ pub fn is_name(s: &str) -> bool {
     !s.is_empty() && s.len() <= 64 && !s.starts_with('-') && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == ' ')
 }
 
+/// A pin as drawn: where it is, in grid steps, and whether it is an input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinAt {
+    pub x: i32,
+    pub y: i32,
+    pub input: bool,
+}
+
 impl Project {
+    fn library(&self) -> Result<dig::Library, String> {
+        let mut lib = HashMap::new();
+        for (n, d) in &self.circuits {
+            lib.insert(format!("{n}.circ"), to_dig(d).map_err(|e| format!("{n}: {e}"))?);
+        }
+        Ok(dig::Library::of(lib))
+    }
+
+    /// Each part of a circuit by id, and where its pins are — or why they
+    /// could not be placed: a part Proton does not know, a circuit not in
+    /// the project.
+    pub fn pins(&self, circuit: &str) -> Vec<(String, Result<Vec<PinAt>, String>)> {
+        let Some(d) = self.circuits.get(circuit) else { return Vec::new() };
+        let mut lib = HashMap::new();
+        for (n, d) in &self.circuits {
+            // A circuit that does not convert places nothing; its parts say why.
+            if let Ok(c) = to_dig(d) {
+                lib.insert(format!("{n}.circ"), c);
+            }
+        }
+        let mut lib = dig::Library::of(lib);
+        d.parts
+            .iter()
+            .map(|p| {
+                let one = Drawing { parts: vec![p.clone()], wires: Vec::new(), width: None };
+                let placed = to_dig(&one).and_then(|c| dig::pins_of(&c.elements[0], &mut lib)).map(|pins| {
+                    pins.into_iter().map(|((x, y), input)| PinAt { x: x.div_euclid(G), y: y.div_euclid(G), input }).collect()
+                });
+                (p.id.clone(), placed)
+            })
+            .collect()
+    }
+
     /// A new project: one circuit, `main`, empty.
     pub fn new() -> Project {
         let mut p = Project { top: "main".into(), ..Default::default() };
@@ -387,11 +428,7 @@ impl Project {
     /// The circuit `name` built, its subcircuits inlined and its tables
     /// attached, ready to run.
     pub fn build(&self, name: &str) -> Result<dig::Built, String> {
-        let mut lib = HashMap::new();
-        for (n, d) in &self.circuits {
-            lib.insert(format!("{n}.circ"), to_dig(d).map_err(|e| format!("{n}: {e}"))?);
-        }
-        let mut built = dig::build_from(dig::Library::of(lib), &format!("{name}.circ"))?;
+        let mut built = dig::build_from(self.library()?, &format!("{name}.circ"))?;
         if let Some(t) = self.tests.get(name) {
             built.tests.extend(t.iter().map(|(l, t)| (l.clone(), t.clone())));
         }
@@ -565,6 +602,9 @@ wire 8,4 8,5
             parse("part P in at 0,0 label=P\npart Q in at 0,2 label=Q\npart U sub:pass at 2,0\npart Y out at 6,1 label=Y\nwire 0,0 2,0\nwire 0,2 2,2\nwire 5,1 6,1\n").unwrap(),
         );
         let b = p.build("main").unwrap();
+        let pins = p.pins("main");
+        let u = &pins.iter().find(|(id, _)| id == "U").unwrap().1;
+        assert_eq!(u.as_ref().unwrap(), &vec![PinAt { x: 2, y: 0, input: true }, PinAt { x: 2, y: 2, input: true }, PinAt { x: 5, y: 1, input: false }]);
         let mut sim = crate::Sim::new(b.netlist, 1).unwrap();
         sim.set(b.inputs["P"].0, 1).unwrap();
         assert_eq!(sim.shown(b.outputs["Y"]).get(), 1);

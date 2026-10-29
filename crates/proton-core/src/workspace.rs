@@ -86,6 +86,8 @@ pub struct Workspace {
     data: crate::data::Data,
     /// The workbook open in Excel mode, with its history.
     sheets: crate::sheet::Sheets,
+    /// The circuit project open in Circuit mode.
+    circuits: crate::circuit::Circuits,
     settings: crate::settings::Settings,
     /// Polled while another project is on screen: what it hears is taken in,
     /// but its notebook, terminal and conversation are not drawn into events
@@ -557,7 +559,7 @@ impl Workspace {
     /// asks before closing it, because a closed workspace takes its buffers
     /// with it and there is no undo for that.
     pub fn is_modified(&self) -> bool {
-        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.sheets.unsaved().is_empty()
+        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.sheets.unsaved().is_empty() || !self.circuits.unsaved().is_empty()
     }
 
     /// The files with unsaved changes, as the project names them.
@@ -573,6 +575,7 @@ impl Workspace {
             .collect();
         // So is a workbook.
         files.extend(self.sheets.unsaved());
+        files.extend(self.circuits.unsaved());
         files
     }
 
@@ -585,6 +588,7 @@ impl Workspace {
         }
         let mut failed: Vec<String> = failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect();
         failed.extend(self.sheets.save_unsaved());
+        failed.extend(self.circuits.save_unsaved());
         failed
     }
 
@@ -679,6 +683,10 @@ impl Workspace {
                 if self.mode == ModeId::Sheet {
                     let root = self.root().to_path_buf();
                     events.extend(self.sheets.events(&root));
+                }
+                if self.mode == ModeId::Circuit {
+                    let root = self.root().to_path_buf();
+                    events.extend(self.circuits.events(&root));
                 }
                 events
             }
@@ -1414,6 +1422,23 @@ impl Workspace {
                 let mut events = self.sheets.apply(&root, command);
                 if events.iter().any(|e| matches!(e, Event::SheetHome { .. })) {
                     // A workbook made or saved is files the tree and git see.
+                    events.push(self.tree_event());
+                    events.push(self.repo_event());
+                }
+                events
+            }
+
+            command @ (Command::CircuitNew { .. }
+            | Command::CircuitOpen { .. }
+            | Command::CircuitClose { .. }
+            | Command::CircuitSave
+            | Command::CircuitShow { .. }
+            | Command::CircuitAdd { .. }
+            | Command::CircuitSetTop { .. }) => {
+                let root = self.root().to_path_buf();
+                let mut events = self.circuits.apply(&root, command);
+                if events.iter().any(|e| matches!(e, Event::CircuitHome { .. })) {
+                    // A project made or saved is files the tree and git see.
                     events.push(self.tree_event());
                     events.push(self.repo_event());
                 }
@@ -5690,6 +5715,11 @@ impl Workspace {
         if mode == ModeId::Sheet {
             let root = self.root().to_path_buf();
             events.extend(self.sheets.events(&root));
+        }
+        // And Circuit its circuit projects.
+        if mode == ModeId::Circuit {
+            let root = self.root().to_path_buf();
+            events.extend(self.circuits.events(&root));
         }
 
         events

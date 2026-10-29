@@ -248,3 +248,37 @@ fn excel_shows_its_workbooks_and_the_quit_prompt_names_an_unsaved_one() {
     assert!(back.iter().any(|e| matches!(e, Event::Notice { .. })));
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn circuit_shows_its_projects_and_the_quit_prompt_names_an_unsaved_one() {
+    let root = project("circuit");
+    std::fs::create_dir_all(root.join("labs/adder.circuit/circuits")).unwrap();
+    std::fs::write(root.join("labs/adder.circuit/project.json"), "{\n  \"version\": 1,\n  \"top\": \"main\"\n}\n").unwrap();
+    std::fs::write(root.join("labs/adder.circuit/circuits/main.circ"), "part A in at 0,0 label=A\n").unwrap();
+    let mut space = Workspace::rooted(root.clone());
+    let events = space.apply(Command::SetMode { mode: ModeId::Circuit });
+    let layout = layout_in(&events).expect("a mode change carries its layout");
+    assert_eq!((layout.stage, layout.document), (Slot::Schematic, DocumentKind::CircuitProject));
+    let found = events.iter().find_map(|e| match e {
+        Event::CircuitHome { projects } => Some(projects.iter().map(|p| p.path.clone()).collect::<Vec<_>>()),
+        _ => None,
+    });
+    assert_eq!(found, Some(vec!["labs/adder.circuit".to_string()]));
+
+    let events = space.apply(Command::CircuitOpen { path: "labs/adder.circuit".into() });
+    let parts = events
+        .iter()
+        .find_map(|e| match e {
+            Event::CircuitProject { project: Some(p) } => Some(p.parts.len()),
+            _ => None,
+        })
+        .expect("the project open");
+    assert_eq!(parts, 1);
+    space.apply(Command::CircuitAdd { name: "half".into() });
+    assert!(space.is_modified());
+    assert_eq!(space.unsaved(), vec!["labs/adder.circuit".to_string()]);
+    assert!(space.save_unsaved().is_empty());
+    assert!(space.unsaved().is_empty());
+    assert_eq!(std::fs::read_to_string(root.join("labs/adder.circuit/circuits/half.circ")).unwrap(), "");
+    let _ = std::fs::remove_dir_all(root);
+}

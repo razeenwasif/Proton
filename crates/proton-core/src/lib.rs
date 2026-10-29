@@ -9,6 +9,7 @@ pub mod agent;
 pub mod block;
 pub mod bus;
 pub mod chats;
+pub mod circuit;
 pub mod claude;
 pub mod contract;
 pub mod data;

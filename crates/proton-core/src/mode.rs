@@ -29,15 +29,18 @@ pub enum ModeId {
     /// typed, sorting, filters, colour and charts. "Excel" on the rail;
     /// `sheet` in the code.
     Sheet,
+    /// Digital logic: gates, flip-flops, memories and buses drawn, run and
+    /// checked against test tables. "Circuit" on the rail.
+    Circuit,
 }
 
 impl ModeId {
-    /// Ordered as the keys bind them, `1`–`6`: Data and Research beside
+    /// Ordered as the keys bind them, `1`–`7`: Data and Research beside
     /// Codex, the three a working day moves between, Notebook after
-    /// Research, and Excel sixth. (Design, Model, Game, Video, Canvas and
+    /// Research, Excel sixth and Circuit seventh. (Design, Model, Game, Video, Canvas and
     /// Diffuse were the sixth to the eleventh, and LaTeX and the Reader once
     /// among them, until they moved to apps of their own.)
-    pub const ALL: [ModeId; 6] = [ModeId::Chat, ModeId::Codex, ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Sheet];
+    pub const ALL: [ModeId; 7] = [ModeId::Chat, ModeId::Codex, ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Sheet, ModeId::Circuit];
 
     pub fn slug(self) -> &'static str {
         match self {
@@ -47,6 +50,7 @@ impl ModeId {
             ModeId::Research => "research",
             ModeId::Study => "study",
             ModeId::Sheet => "sheet",
+            ModeId::Circuit => "circuit",
         }
     }
 
@@ -64,6 +68,7 @@ impl ModeId {
             ModeId::Research => "Research",
             ModeId::Study => "Notebook",
             ModeId::Sheet => "Excel",
+            ModeId::Circuit => "Circuit",
         }
     }
 
@@ -76,7 +81,7 @@ impl ModeId {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`6`, one-indexed as the user sees them.
+    /// `1`–`7`, one-indexed as the user sees them.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }
