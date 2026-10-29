@@ -23,6 +23,9 @@ use crate::dig::Built;
 use crate::sim::{PartId, Sim};
 use crate::value::mask;
 
+/// No table runs more rows than this.
+pub const MOST_ROWS: usize = 2_000_000;
+
 /// A test case's outcome.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Outcome {
@@ -346,6 +349,11 @@ fn split_args(s: &str) -> Vec<String> {
     out
 }
 
+/// Whether a table reads: its signals named, its statements whole. Why not.
+pub fn check(text: &str) -> Result<(), String> {
+    read(text).map(|_| ())
+}
+
 /// A test's text read: its signals, and its statements.
 fn read(text: &str) -> Result<(Vec<String>, Vec<Stmt>), String> {
     let lines: Vec<(usize, String)> = text
@@ -508,6 +516,9 @@ impl Runner<'_> {
             return Err(format!("line {line}: {} values for {} signals", cells.len(), self.names.len()));
         }
         self.rows += 1;
+        if self.rows > MOST_ROWS {
+            return Err(format!("line {line}: more than {MOST_ROWS} rows; a loop that long is not a test"));
+        }
         // An input that does not matter is tried both ways, 0 and 1, each
         // input so marked against every other, as Digital does.
         let free: Vec<(PartId, u8)> = cells.iter().enumerate().filter_map(|(k, c)| match self.sigs[k] {

@@ -21,6 +21,11 @@
 //! steps take it a delay at a time. A quick run takes the simulator to a
 //! thread of its own and flips the clocks as fast as they go, nothing
 //! drawn, until a Break rises or it is stopped, and says how fast it went.
+//!
+//! A run records its inputs' and displays' values after each click, clock
+//! edge and gate step, for the window's timing graph and for Data. Test
+//! tables are the project's, edited as any other part of it, and run
+//! against the circuit built afresh.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -122,6 +127,8 @@ pub struct CircuitProjectView {
     pub tests: Vec<String>,
     /// The project's memory contents, `data/<name>.hex`, by name.
     pub data: Vec<String>,
+    /// The shown circuit's test tables: each label and its text.
+    pub tables: Vec<(String, String)>,
     pub generation: u32,
     pub dirty: bool,
     pub can_undo: bool,
@@ -167,6 +174,33 @@ pub struct CircuitQuickView {
     pub ended: Option<String>,
 }
 
+/// A test table run: how many rows, and those that failed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitTestResult {
+    pub label: String,
+    pub rows: u32,
+    /// The first rows that failed: the line, and what came instead.
+    pub failures: Vec<String>,
+    /// Why it could not run at all.
+    pub error: Option<String>,
+}
+
+/// What a run has recorded: the signals, and their values at each sample,
+/// newest last; none for high-Z.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitTraceView {
+    /// Each signal's id and width.
+    pub signals: Vec<(String, u8)>,
+    /// The last samples, at most `SHOWN_SAMPLES`, each a value a signal.
+    pub samples: Vec<Vec<Option<String>>>,
+    /// How many have been taken since it was cleared.
+    pub total: u32,
+}
+
 /// The circuit running.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -186,6 +220,7 @@ pub struct CircuitRunView {
     /// Why it is not running: it would not settle, two drivers disagree.
     pub error: Option<String>,
     pub quick: Option<CircuitQuickView>,
+    pub trace: CircuitTraceView,
 }
 
 enum QuickNews {
@@ -222,6 +257,36 @@ struct Run {
     stepped: Vec<String>,
     quick: Option<Quick>,
     last_quick: Option<CircuitQuickView>,
+    /// The signals recorded, id order, and the samples: (value, high-Z).
+    signals: Vec<(String, PartId, bool, u8)>,
+    samples: std::collections::VecDeque<Vec<Option<u64>>>,
+    taken: u32,
+}
+
+/// No more samples than this are kept, nor sent for the graph.
+const MOST_SAMPLES: usize = 10_000;
+const SHOWN_SAMPLES: usize = 400;
+
+impl Run {
+    /// The signals' values now, as one more sample.
+    fn sample(&mut self) {
+        let Some(sim) = &self.sim else { return };
+        let row: Vec<Option<u64>> = self
+            .signals
+            .iter()
+            .map(|(_, part, input, _)| {
+                let v = if *input { sim.output(*part, 0) } else { sim.shown(*part) };
+                (!v.is_z()).then(|| v.get())
+            })
+            .collect();
+        // A sample like the last is kept too: a clock edge that changed
+        // nothing still marks time on the graph.
+        self.samples.push_back(row);
+        if self.samples.len() > MOST_SAMPLES {
+            self.samples.pop_front();
+        }
+        self.taken += 1;
+    }
 }
 
 /// The kinds a click sets, and those that show a value.
@@ -454,7 +519,10 @@ impl Circuits {
                 };
                 if let Some(sim) = &mut run.sim {
                     match sim.step() {
-                        Ok(names) => run.stepped = names,
+                        Ok(names) => {
+                            run.stepped = names;
+                            run.sample();
+                        }
                         Err(e) => {
                             run.error = Some(e.to_string());
                             run.sim = None;
@@ -481,6 +549,73 @@ impl Circuits {
                 std::thread::spawn(move || quick_run(sim, clocks, breaks, halt, tell));
                 run.quick = Some(Quick { stop, news, cycles: 0, started: Instant::now() });
                 run.last_quick = None;
+                vec![self.run_event()]
+            }
+            Command::CircuitTestSet { generation, circuit, label, text } => {
+                let open = match self.checked(generation, &circuit) {
+                    Ok(open) => open,
+                    Err(events) => return events,
+                };
+                let label = label.trim().to_string();
+                if !circ::is_name(&label) || label.contains(' ') {
+                    return vec![notice(format!("“{label}” cannot name a test table: letters, digits, - and _"), NoticeLevel::Warn)];
+                }
+                if let Some(t) = &text {
+                    if let Err(why) = proton_circuit::testlang::check(t) {
+                        return vec![notice(format!("{label}: {why}"), NoticeLevel::Warn)];
+                    }
+                }
+                let mut after = open.project.clone();
+                let tables = after.tests.entry(circuit.clone()).or_default();
+                match text {
+                    Some(t) => {
+                        let t = if t.ends_with('\n') { t } else { format!("{t}\n") };
+                        tables.insert(label, t);
+                    }
+                    None => {
+                        tables.remove(&label);
+                    }
+                }
+                after.tests.retain(|_, t| !t.is_empty());
+                if after != open.project {
+                    record(open, after);
+                }
+                vec![self.project_event()]
+            }
+            Command::CircuitTestRun { generation, circuit, label } => {
+                let open = match self.checked(generation, &circuit) {
+                    Ok(open) => open,
+                    Err(events) => return events,
+                };
+                let tables: Vec<(String, String)> = open
+                    .project
+                    .tests
+                    .get(&circuit)
+                    .map(|t| t.iter().filter(|(l, _)| label.as_ref().is_none_or(|want| want == *l)).map(|(l, t)| (l.clone(), t.clone())).collect())
+                    .unwrap_or_default();
+                if tables.is_empty() {
+                    return vec![notice(format!("{circuit} has no test table{}", label.map(|l| format!(" {l}")).unwrap_or_default()), NoticeLevel::Warn)];
+                }
+                let results = match open.project.build(&circuit) {
+                    Ok(built) => tables
+                        .iter()
+                        .map(|(l, t)| {
+                            let o = proton_circuit::testlang::run(&built, l, t);
+                            CircuitTestResult { label: o.label, rows: o.rows as u32, failures: o.failures, error: o.error }
+                        })
+                        .collect(),
+                    Err(why) => tables.iter().map(|(l, _)| CircuitTestResult { label: l.clone(), rows: 0, failures: Vec::new(), error: Some(why.clone()) }).collect(),
+                };
+                vec![Event::CircuitTests { generation, circuit, results }]
+            }
+            Command::CircuitTraceClear { generation } => {
+                let run = match self.running(generation) {
+                    Ok(run) => run,
+                    Err(events) => return events,
+                };
+                run.samples.clear();
+                run.taken = 0;
+                run.sample();
                 vec![self.run_event()]
             }
             Command::CircuitSaveMemory { generation, id, name } => {
@@ -550,6 +685,35 @@ impl Circuits {
         Ok(run)
     }
 
+    /// What the run has recorded, as CSV — a row a sample, a column a
+    /// signal, numbers in decimal and high-Z empty — and a name for it.
+    pub fn trace_csv(&self, generation: u32) -> Result<(String, String), String> {
+        let open = self.open.as_ref().filter(|o| o.generation == generation).ok_or("that project is no longer open")?;
+        let run = open.run.as_ref().ok_or("the circuit is not running, so nothing is recorded")?;
+        if run.signals.is_empty() {
+            return Err("the circuit has no inputs or outputs to record".into());
+        }
+        let mut csv = String::from("sample");
+        for (id, ..) in &run.signals {
+            csv.push(',');
+            csv.push_str(id);
+        }
+        csv.push('\n');
+        let first = run.taken as usize - run.samples.len();
+        for (i, row) in run.samples.iter().enumerate() {
+            csv.push_str(&(first + i).to_string());
+            for v in row {
+                csv.push(',');
+                if let Some(v) = v {
+                    csv.push_str(&v.to_string());
+                }
+            }
+            csv.push('\n');
+        }
+        let label = format!("{}-{}", open.name, run.circuit).chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' }).collect();
+        Ok((csv, label))
+    }
+
     /// News of a quick run: how far it has got, and its end.
     pub fn poll(&mut self) -> Vec<Event> {
         let Some(run) = self.open.as_mut().and_then(|o| o.run.as_mut()) else { return Vec::new() };
@@ -574,6 +738,7 @@ impl Circuits {
                 }
             }
             run.sim = Some(*sim);
+            run.sample();
         } else if !changed {
             return Vec::new();
         }
@@ -618,6 +783,16 @@ impl Circuits {
                 stepped: run.stepped.clone(),
                 error: run.error.clone(),
                 quick,
+                trace: CircuitTraceView {
+                    signals: run.signals.iter().map(|(id, _, _, bits)| (id.clone(), *bits)).collect(),
+                    samples: run
+                        .samples
+                        .iter()
+                        .skip(run.samples.len().saturating_sub(SHOWN_SAMPLES))
+                        .map(|row| row.iter().map(|v| v.map(|v| format!("{v:x}"))).collect())
+                        .collect(),
+                    total: run.taken,
+                },
             })),
         }
     }
@@ -754,6 +929,7 @@ impl Circuits {
                 wires: drawing.wires.iter().map(|w| [w.a.0, w.a.1, w.b.0, w.b.1]).collect(),
                 tests: p.tests.get(&open.shown).map(|t| t.keys().cloned().collect()).unwrap_or_default(),
                 data: p.data.keys().cloned().collect(),
+                tables: p.tests.get(&open.shown).map(|t| t.iter().map(|(l, t)| (l.clone(), t.clone())).collect()).unwrap_or_default(),
                 generation: open.generation,
                 dirty: open.project != open.saved,
                 can_undo: !open.done.is_empty(),
@@ -786,6 +962,9 @@ fn start(open: &Open, inputs: BTreeMap<String, u64>) -> Run {
         stepped: Vec::new(),
         quick: None,
         last_quick: None,
+        signals: Vec::new(),
+        samples: std::collections::VecDeque::new(),
+        taken: 0,
     };
     let built = match open.project.build(&circuit) {
         Ok(b) => b,
@@ -818,7 +997,21 @@ fn start(open: &Open, inputs: BTreeMap<String, u64>) -> Run {
                     }
                 }
             }
+            // The inputs and what shows values, in id order, recorded.
+            let mut signals: Vec<(String, PartId, bool, u8)> = run
+                .parts
+                .iter()
+                .filter(|(_, (_, k))| SETTABLE.contains(&k.as_str()) || SHOWN.contains(&k.as_str()))
+                .map(|(id, (part, k))| {
+                    let input = SETTABLE.contains(&k.as_str());
+                    let bits = if input { sim.output(*part, 0).bits } else { sim.shown(*part).bits };
+                    (id.clone(), *part, input, bits)
+                })
+                .collect();
+            signals.sort_by(|a, b| a.0.cmp(&b.0));
+            run.signals = signals;
             run.sim = Some(sim);
+            run.sample();
         }
         Err(e) => run.error = Some(e.to_string()),
     }
@@ -837,6 +1030,9 @@ fn drive(run: &mut Run, sets: &[(PartId, u64)], hold: bool) {
             run.sim = None;
             return;
         }
+    }
+    if !hold {
+        run.sample();
     }
 }
 
@@ -1334,6 +1530,53 @@ mod tests {
         }))
         .unwrap();
         assert!(v.parts.iter().find(|p| p.kind == "rom").unwrap().problem.is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn tables_are_held_edits_run_against_the_circuit_and_a_run_is_recorded() {
+        let root = scratch("tables");
+        let mut c = Circuits::default();
+        let g = view(&c.apply(&root, Command::CircuitNew { name: "inv".into() })).unwrap().generation;
+        let inv = "part A in at 0,0 label=A\npart N not at 2,0\npart Y out at 6,0 label=Y\nwire 0,0 2,0\nwire 4,0 6,0\n";
+        c.apply(&root, Command::CircuitEdit { generation: g, circuit: "main".into(), ops: vec![CircuitOp::Paste { text: inv.into(), dx: 0, dy: 0 }] });
+        let set = |c: &mut Circuits, label: &str, text: Option<&str>| c.apply(&root, Command::CircuitTestSet { generation: g, circuit: "main".into(), label: label.into(), text: text.map(str::to_string) });
+        let v = view(&set(&mut c, "truth", Some("A Y\n0 1\n1 0"))).unwrap();
+        assert_eq!(v.tables, vec![("truth".to_string(), "A Y\n0 1\n1 0\n".to_string())]);
+        assert!(set(&mut c, "bad", Some("A Y\nloop(i\n")).iter().any(|e| matches!(e, Event::Notice { .. })), "a table that does not read is refused");
+        assert!(set(&mut c, "two words", Some("A Y\n0 1\n")).iter().any(|e| matches!(e, Event::Notice { .. })));
+        set(&mut c, "wrong", Some("A Y\n0 0\n1 1\n"));
+        let results = |events: Vec<Event>| match events.into_iter().find(|e| matches!(e, Event::CircuitTests { .. })) {
+            Some(Event::CircuitTests { results, .. }) => results,
+            _ => panic!("no results"),
+        };
+        let all = results(c.apply(&root, Command::CircuitTestRun { generation: g, circuit: "main".into(), label: None }));
+        assert_eq!(all.iter().map(|r| (r.label.as_str(), r.rows, r.failures.len())).collect::<Vec<_>>(), vec![("truth", 2, 0), ("wrong", 2, 2)]);
+        assert!(all[1].failures[0].contains("Y is 1, not 0x0"), "{:?}", all[1].failures);
+        let one = results(c.apply(&root, Command::CircuitTestRun { generation: g, circuit: "main".into(), label: Some("truth".into()) }));
+        assert_eq!(one.len(), 1);
+        // Taken away, and back with undo; saved as files.
+        set(&mut c, "wrong", None);
+        c.apply(&root, Command::CircuitSave);
+        assert!(root.join("inv.circuit/tests/main.truth.tests").exists() && !root.join("inv.circuit/tests/main.wrong.tests").exists());
+        let v = view(&c.apply(&root, Command::CircuitUndo)).unwrap();
+        assert_eq!(v.tables.len(), 2);
+
+        // A run records each change; the graph's samples, and as CSV.
+        c.apply(&root, Command::CircuitStart { generation: g });
+        for v in ["1", "0", "1"] {
+            c.apply(&root, Command::CircuitSet { generation: g, id: "A".into(), value: v.into(), hold: false });
+        }
+        let r = run_of(&c.apply(&root, Command::CircuitSet { generation: g, id: "A".into(), value: "0".into(), hold: true })).unwrap();
+        assert_eq!(r.trace.signals, vec![("A".to_string(), 1), ("Y".to_string(), 1)]);
+        assert_eq!(r.trace.total, 4, "power-on and three settled changes; a held one waits");
+        let r = run_of(&c.apply(&root, Command::CircuitStep { generation: g })).unwrap();
+        assert_eq!(r.trace.samples.last().unwrap(), &vec![Some("0".to_string()), Some("0".to_string())], "the input changed, the NOT not yet");
+        let (csv, label) = c.trace_csv(g).unwrap();
+        assert_eq!(label, "inv-main");
+        assert_eq!(csv, "sample,A,Y\n0,0,1\n1,1,0\n2,0,1\n3,1,0\n4,0,0\n");
+        let r = run_of(&c.apply(&root, Command::CircuitTraceClear { generation: g })).unwrap();
+        assert_eq!((r.trace.total, r.trace.samples.len()), (1, 1));
         let _ = std::fs::remove_dir_all(root);
     }
 

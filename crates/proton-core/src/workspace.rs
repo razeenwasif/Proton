@@ -1386,6 +1386,10 @@ impl Workspace {
             Command::Poll => self.poll_servers(),
 
             Command::SheetToData { generation, sheet, range } => self.sheet_to_data(generation, sheet as usize, &range),
+            Command::CircuitTraceToData { generation } => match self.circuits.trace_csv(generation) {
+                Ok((csv, label)) => self.csv_to_data("circuit", &label, &csv, "trace_df", "from-circuit.ipynb", format!("the graph of {label} is in the notebook as trace_df: run the cell to load it")),
+                Err(why) => vec![notice(why, NoticeLevel::Warn)],
+            },
             Command::SheetFromData => self.data_to_sheet(),
 
             command @ (Command::SheetNew { .. }
@@ -1445,7 +1449,10 @@ impl Workspace {
             | Command::CircuitClock { .. }
             | Command::CircuitStep { .. }
             | Command::CircuitQuick { .. }
-            | Command::CircuitSaveMemory { .. }) => {
+            | Command::CircuitSaveMemory { .. }
+            | Command::CircuitTestSet { .. }
+            | Command::CircuitTestRun { .. }
+            | Command::CircuitTraceClear { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
                 if events.iter().any(|e| matches!(e, Event::CircuitHome { .. })) {
@@ -4325,18 +4332,26 @@ impl Workspace {
     /// the end of the notebook open — or of a new `from-excel.ipynb` — for
     /// the person to run.
     fn sheet_to_data(&mut self, generation: u32, sheet: usize, range: &str) -> Vec<Event> {
-        let root = self.root().to_path_buf();
         let (csv, label) = match self.sheets.range_csv(generation, sheet, range) {
             Ok(x) => x,
             Err(why) => return vec![notice(why, NoticeLevel::Warn)],
         };
-        let dir = root.join(".proton").join("excel");
+        let said = format!("{range} is in the notebook as sheet_df: run the cell to load it");
+        self.csv_to_data("excel", &label, &csv, "sheet_df", "from-excel.ipynb", said)
+    }
+
+    /// A table as a CSV under `.proton/<folder>/`, and a cell of the notebook
+    /// open — or of `notebook`, made if it must be — reading it as `var`;
+    /// Data shown with the cell selected.
+    fn csv_to_data(&mut self, folder: &str, label: &str, csv: &str, var: &str, notebook: &str, said: String) -> Vec<Event> {
+        let root = self.root().to_path_buf();
+        let dir = root.join(".proton").join(folder);
         let file = dir.join(format!("{label}.csv"));
         if let Err(why) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, csv)) {
             return vec![notice(format!("{}: {why}", file.display()), NoticeLevel::Error)];
         }
         if !self.data.is_open() {
-            let path = root.join("from-excel.ipynb");
+            let path = root.join(notebook);
             if !path.exists() {
                 let empty = r#"{"cells": [], "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}, "language_info": {"name": "python"}}, "nbformat": 4, "nbformat_minor": 5}"#;
                 if let Err(why) = std::fs::write(&path, empty) {
@@ -4348,7 +4363,7 @@ impl Workspace {
             }
         }
         let shown = serde_json::to_string(&file.display().to_string()).unwrap_or_default();
-        let code = format!("import pandas as pd\n\nsheet_df = pd.read_csv({shown})\nsheet_df");
+        let code = format!("import pandas as pd\n\n{var} = pd.read_csv({shown})\n{var}");
         let Some(index) = self.data.add_cell(true) else {
             return vec![notice("the notebook could not take a cell".into(), NoticeLevel::Warn)];
         };
@@ -4358,7 +4373,7 @@ impl Workspace {
         events.push(self.notebook_event());
         events.push(Event::CellSelected { index });
         events.push(self.tree_event());
-        events.push(notice(format!("{range} is in the notebook as sheet_df: run the cell to load it"), NoticeLevel::Info));
+        events.push(notice(said, NoticeLevel::Info));
         events
     }
 

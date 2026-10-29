@@ -11,6 +11,7 @@ import type { ChatFolder } from "./ChatFolder";
 import type { CircuitFound } from "./CircuitFound";
 import type { CircuitProjectView } from "./CircuitProjectView";
 import type { CircuitRunView } from "./CircuitRunView";
+import type { CircuitTestResult } from "./CircuitTestResult";
 import type { ClaudeCapabilities } from "./ClaudeCapabilities";
 import type { ClaudeItem } from "./ClaudeItem";
 import type { ClaudeSession } from "./ClaudeSession";
@@ -244,7 +245,7 @@ modified: boolean,
  * What the agent proposed and nobody has answered yet — also drawn
  * on each cell, and listed here for the agent's panel.
  */
-proposals: Array<ProposalView>, } | { "type": "notebookCells", path: string, cells: Array<CellAt>, modified: boolean, } | { "type": "cellSelected", index: number, } | { "type": "circuitHome", projects: Array<CircuitFound>, } | { "type": "circuitProject", project: CircuitProjectView | null, } | { "type": "circuitClip", text: string, } | { "type": "circuitRun", run: CircuitRunView | null, } | { "type": "sheetHome", workbooks: Array<SheetFound>, } | { "type": "sheetFilterValues", col: number, values: Array<[string, number]>, ticked: Array<string> | null, criteria: string, } | { "type": "sheetClip", text: string, } | { "type": "sheetBook", book: SheetBookView | null, } | { "type": "sheetCells", generation: number, version: number, sheet: number, rows: [number, number], cols: [number, number], cells: Array<SheetCellView>, partial: boolean, } | { "type": "unsaved", files: Array<string>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
+proposals: Array<ProposalView>, } | { "type": "notebookCells", path: string, cells: Array<CellAt>, modified: boolean, } | { "type": "cellSelected", index: number, } | { "type": "circuitHome", projects: Array<CircuitFound>, } | { "type": "circuitProject", project: CircuitProjectView | null, } | { "type": "circuitClip", text: string, } | { "type": "circuitTests", generation: number, circuit: string, results: Array<CircuitTestResult>, } | { "type": "circuitRun", run: CircuitRunView | null, } | { "type": "sheetHome", workbooks: Array<SheetFound>, } | { "type": "sheetFilterValues", col: number, values: Array<[string, number]>, ticked: Array<string> | null, criteria: string, } | { "type": "sheetClip", text: string, } | { "type": "sheetBook", book: SheetBookView | null, } | { "type": "sheetCells", generation: number, version: number, sheet: number, rows: [number, number], cols: [number, number], cells: Array<SheetCellView>, partial: boolean, } | { "type": "unsaved", files: Array<string>, } | { "type": "claudeSessions", sessions: Array<ClaudeSession>, 
 /**
  * The folders conversations are grouped into, each with what it
  * holds; what is in a folder is not in `sessions` as well.

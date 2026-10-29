@@ -282,3 +282,38 @@ fn circuit_shows_its_projects_and_the_quit_prompt_names_an_unsaved_one() {
     assert_eq!(std::fs::read_to_string(root.join("labs/adder.circuit/circuits/half.circ")).unwrap(), "");
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn a_circuit_runs_graph_goes_to_data_as_a_dataframe() {
+    let root = project("circuit-data");
+    std::fs::create_dir_all(root.join("inv.circuit/circuits")).unwrap();
+    std::fs::write(root.join("inv.circuit/project.json"), "{\n  \"version\": 1,\n  \"top\": \"main\"\n}\n").unwrap();
+    std::fs::write(root.join("inv.circuit/circuits/main.circ"), "part A in at 0,0 label=A\npart N not at 2,0\npart Y out at 6,0 label=Y\nwire 0,0 2,0\nwire 4,0 6,0\n").unwrap();
+    let mut space = Workspace::rooted(root.clone());
+    space.apply(Command::SetMode { mode: ModeId::Circuit });
+    let generation = space
+        .apply(Command::CircuitOpen { path: "inv.circuit".into() })
+        .iter()
+        .find_map(|e| match e {
+            Event::CircuitProject { project: Some(p) } => Some(p.generation),
+            _ => None,
+        })
+        .expect("the project open");
+    // Not running: nothing recorded, and it says so.
+    assert!(space.apply(Command::CircuitTraceToData { generation }).iter().any(|e| matches!(e, Event::Notice { .. })));
+    space.apply(Command::CircuitStart { generation });
+    space.apply(Command::CircuitSet { generation, id: "A".into(), value: "1".into(), hold: false });
+    let events = space.apply(Command::CircuitTraceToData { generation });
+    assert!(events.iter().any(|e| matches!(e, Event::ModeChanged { mode: ModeId::Data })), "Data is not shown");
+    assert_eq!(std::fs::read_to_string(root.join(".proton/circuit/inv-main.csv")).unwrap(), "sample,A,Y\n0,0,1\n1,1,0\n");
+    let cell = events
+        .iter()
+        .find_map(|e| match e {
+            Event::Notebook { cells, .. } => cells.last().map(|c| c.source.clone()),
+            _ => None,
+        })
+        .expect("the notebook drawn");
+    assert!(cell.contains("trace_df = pd.read_csv(") && cell.contains("inv-main.csv"), "{cell}");
+    assert!(root.join("from-circuit.ipynb").exists());
+    let _ = std::fs::remove_dir_all(root);
+}

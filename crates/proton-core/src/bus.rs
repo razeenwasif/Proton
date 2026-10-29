@@ -714,6 +714,28 @@ pub enum Command {
         id: String,
         name: String,
     },
+    /// A test table of a circuit written (`text`) or taken away (none):
+    /// a held edit.
+    CircuitTestSet {
+        generation: u32,
+        circuit: String,
+        label: String,
+        text: Option<String>,
+    },
+    /// Run a circuit's test tables, or the one labelled.
+    CircuitTestRun {
+        generation: u32,
+        circuit: String,
+        label: Option<String>,
+    },
+    /// Forget what the run has recorded for the graph.
+    CircuitTraceClear {
+        generation: u32,
+    },
+    /// What the run has recorded, to Data: a CSV, and a cell reading it.
+    CircuitTraceToData {
+        generation: u32,
+    },
     /// The parts and wires named, as `.circ` text for the clipboard.
     CircuitCopy {
         generation: u32,
@@ -1569,6 +1591,12 @@ pub enum Event {
     /// What was copied, for the system clipboard.
     CircuitClip {
         text: String,
+    },
+    /// Test tables run: each one's rows, and the rows that failed.
+    CircuitTests {
+        generation: u32,
+        circuit: String,
+        results: Vec<crate::circuit::CircuitTestResult>,
     },
     /// The circuit running — every wire's value, the inputs' and displays',
     /// what waits for a gate step, a quick run — or not running.
