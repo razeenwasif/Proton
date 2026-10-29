@@ -866,7 +866,8 @@ const sheet = createSheet({ root: document, dispatch,
   // The system's clipboard through the shell; the page's own without one.
   paste: async () => (await pasteText()) ?? (await navigator.clipboard?.readText?.().catch(() => null)) ?? null });
 /* Circuit: a project's circuits drawn on their grid. */
-const circuit = createCircuit({ root: document, dispatch });
+const circuit = createCircuit({ root: document, dispatch,
+  paste: async () => (await pasteText()) ?? (await navigator.clipboard?.readText?.().catch(() => null)) ?? null });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -3365,6 +3366,9 @@ function renderEvent(event) {
       break;
     case "circuitProject":
       circuit?.project(event);
+      break;
+    case "circuitClip":
+      void copyText(event.text);
       break;
 
     case "sheetHome":

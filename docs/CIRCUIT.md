@@ -230,7 +230,14 @@ language, and the `Name.circuit/` folder; C1 — the mode on ⌃7: its home page
 of projects, making and opening one, its circuits listed with the top marked,
 the one shown drawn on a canvas (gate shapes, boxes around other parts' pins,
 wires and junctions; pan, zoom and fit), a circuit added and the top changed
-as held edits, ⌘S and the quit prompt. Editing the drawing is C2.
+as held edits, ⌘S and the quit prompt; C2 — editing: parts placed from the
+palette, with `space` and by name with `a`; wires dragged from a pin or a
+wire's end (across, then down) or drawn with `w`, splitting the wires they
+meet so a junction drawn is one; moving, turning, mirroring and deleting
+what is selected (a click, ⇧-click, or a box dragged over nothing); a part's
+id and settings with Enter or a double-click; copy and paste as `.circ`
+text through the system clipboard; and undo and redo, each edit one step,
+back to saved meaning saved. The wheel pans and ⌥-drag too.
 
 | | What | Proved by |
 |---|---|---|

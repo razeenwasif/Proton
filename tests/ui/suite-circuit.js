@@ -11,7 +11,8 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
   const ws = () => $('.workspace[data-ws="circuit"]');
   const sent = (/** @type {number} */ from, /** @type {string} */ type) => win.commands.slice(from).filter((/** @type {any} */ c) => c.type === type);
   const project = (/** @type {Partial<any>} */ more = {}) => ({type: 'circuitProject', project: {path: 'labs/adder.circuit', name: 'adder', top: 'main',
-    circuits: ['half', 'main'], shown: 'half', parts: HALF.parts, wires: HALF.wires, tests: [], generation: 4, dirty: false, ...more}});
+    circuits: ['half', 'main'], shown: 'half', parts: HALF.parts, wires: HALF.wires, tests: [], generation: 4, dirty: false,
+    canUndo: false, canRedo: false, made: [], palette: ['in', 'out', 'clock', 'const', 'not', 'and', 'or', 'xor', 'mux', 'register'], ...more}});
   /** How many of the canvas's pixels are drawn on. */
   const inked = () => {
     const c = /** @type {HTMLCanvasElement} */ (ws().querySelector('[data-circuit-canvas]'));
@@ -76,6 +77,101 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
         assert(x > 0 && y > 0 && x < stage.width && y < stage.height, `pin ${p.id} at (${x}, ${y}) is off the stage`);
       }
     }
+  });
+
+  await test('Editing: placing from the palette and with space, wiring from a pin, moving, turning, settings, deleting, undo', async () => {
+    await win.pushEvents([project()]); await settle(); await frames();
+    const stage = ws().querySelector('[data-circuit-stage]');
+    const edits = (/** @type {number} */ from) => sent(from, 'circuitEdit').map((c) => {
+      assert(c.generation === 4 && c.circuit === 'half', `an edit went to ${c.generation}/${c.circuit}`);
+      return c.ops;
+    });
+    const r = stage.getBoundingClientRect();
+    const v = () => win.circuitDebug().view;
+    const at = (/** @type {number} */ x, /** @type {number} */ y) => ({clientX: r.left + v().ox + x * v().scale, clientY: r.top + v().oy + y * v().scale, bubbles: true, pointerId: 1, button: 0});
+    const drag = (/** @type {number[][]} */ path) => {
+      stage.dispatchEvent(new win.PointerEvent('pointerdown', at(path[0][0], path[0][1])));
+      for (const q of path.slice(1)) stage.dispatchEvent(new win.PointerEvent('pointermove', at(q[0], q[1])));
+      const end = path[path.length - 1];
+      stage.dispatchEvent(new win.PointerEvent('pointerup', at(end[0], end[1])));
+    };
+
+    // The palette lists what the core offers; a click places it at the cursor.
+    const kinds = [...ws().querySelectorAll('[data-circuit-place]')].map((b) => b.dataset.circuitPlace);
+    assert(kinds.slice(0, 4).join() === 'in,out,clock,const' && kinds.includes('register'), `the palette is ${kinds.join()}`);
+    let before = win.commands.length;
+    ws().querySelector('[data-circuit-place="not"]').click(); await settle();
+    let ops = edits(before);
+    assert(ops.length === 1 && ops[0][0].op === 'place' && ops[0][0].kind === 'not', `placing sent ${JSON.stringify(ops)}`);
+    const cursor = [ops[0][0].x, ops[0][0].y];
+    assert(doc.activeElement === stage, 'the drawing does not have the keys after placing');
+    // The cursor moves by h j k l; space places the last kind again there.
+    before = win.commands.length;
+    key('l'); key('l'); key('j'); key(' '); await settle();
+    ops = edits(before);
+    assert(ops[0]?.[0].kind === 'not' && ops[0][0].x === cursor[0] + 2 && ops[0][0].y === cursor[1] + 1, `space placed ${JSON.stringify(ops)}`);
+    // `a` picks a part by name.
+    before = win.commands.length;
+    key('a'); await settle();
+    const pickIn = stage.querySelector('.ci-pop [name=kind]');
+    assert(pickIn && doc.activeElement === pickIn, 'a does not ask which part');
+    pickIn.value = 'mux';
+    stage.querySelector('.ci-pop').requestSubmit(); await settle();
+    assert(edits(before)[0]?.[0].kind === 'mux', 'the part picked was not placed');
+
+    // A drag from a pin draws a wire, across and then down.
+    const xor = HALF.parts.find((/** @type {any} */ p) => p.kind === 'xor');
+    const out = xor.pins.find((/** @type {any} */ q) => !q.input);
+    before = win.commands.length;
+    drag([[out.x, out.y], [out.x + 1, out.y + 1], [out.x + 2, out.y + 3]]); await settle();
+    ops = edits(before);
+    assert(JSON.stringify(ops[0]?.[0]) === JSON.stringify({op: 'wire', points: [[out.x, out.y], [out.x + 2, out.y], [out.x + 2, out.y + 3]]}), `the wire sent ${JSON.stringify(ops)}`);
+    // A drag from a part's body moves it — selected — by whole steps.
+    const and = HALF.parts.find((/** @type {any} */ p) => p.kind === 'and');
+    before = win.commands.length;
+    drag([[and.x + 1.5, and.y + 1], [and.x + 2, and.y + 2], [and.x + 3.5, and.y + 3]]); await settle();
+    ops = edits(before);
+    assert(JSON.stringify(ops[0]?.[0]) === JSON.stringify({op: 'move', ids: [and.id], wires: [], dx: 2, dy: 2}), `the move sent ${JSON.stringify(ops)}`);
+    // r turns, m mirrors, Enter edits its settings, x deletes: the selection.
+    before = win.commands.length;
+    key('r'); key('m'); await settle();
+    ops = edits(before);
+    assert(ops[0]?.[0].op === 'rotate' && ops[0][0].ids.join() === and.id && ops[1]?.[0].op === 'mirror', `r and m sent ${JSON.stringify(ops)}`);
+    key('Enter'); await settle();
+    const pop = stage.querySelector('.ci-pop');
+    assert(pop && pop.querySelector('[name=id]').value === and.id, 'Enter does not edit the part');
+    pop.querySelector('[name=id]').value = 'Carry';
+    pop.querySelector('[name=settings]').value = 'inputs=3 label="carry out"';
+    before = win.commands.length;
+    pop.requestSubmit(); await settle();
+    ops = edits(before);
+    assert(JSON.stringify(ops[0]?.[0]) === JSON.stringify({op: 'set', id: and.id, newId: 'Carry', settings: [['inputs', '3'], ['label', 'carry out']]}), `settings sent ${JSON.stringify(ops)}`);
+    assert(doc.activeElement === stage, 'the keys did not come back to the drawing');
+    // Dragging a box over nothing but the wires selects them; x deletes them.
+    await win.pushEvents([project()]); await settle(); await frames();
+    stage.focus();
+    key('Escape');
+    const xs = HALF.wires.flatMap((/** @type {number[]} */ w) => [w[0], w[2]]), ys = HALF.wires.flatMap((/** @type {number[]} */ w) => [w[1], w[3]]);
+    const mx = Math.min(...xs), Mx = Math.max(...xs);
+    before = win.commands.length;
+    drag([[mx + 1.5, -3], [mx + 2, 2], [mx + 2.5, Math.max(...ys) + 3]]); await settle();
+    key('x'); await settle();
+    ops = edits(before);
+    const gone = ops[0]?.[0];
+    assert(gone?.op === 'delete' && gone.ids.length === 0 && gone.wires.length > 0 && gone.wires.every((/** @type {number[]} */ w) => w[0] === mx + 2 && w[2] === mx + 2), `the box deleted ${JSON.stringify(gone)} (wires span ${mx}–${Mx})`);
+    // y copies; u, ⌘Z and ⌃r and ⇧⌘Z undo and redo.
+    ws().querySelector('[data-circuit-place="and"]'); // still offered
+    before = win.commands.length;
+    drag([[and.x + 1.5, and.y + 1], [and.x + 1.5, and.y + 1]]); await settle();
+    key('y'); await settle();
+    assert(sent(before, 'circuitCopy')[0]?.ids.join() === and.id, 'y did not copy the selection');
+    key('u'); key('z', {metaKey: true}); key('r', {ctrlKey: true}); key('z', {metaKey: true, shiftKey: true}); await settle();
+    assert(sent(before, 'circuitUndo').length === 2 && sent(before, 'circuitRedo').length === 2, 'undo and redo were not asked for');
+    // What an edit made comes back selected.
+    await win.pushEvents([project({made: [HALF.parts[0].id]})]); await settle();
+    before = win.commands.length;
+    key('Delete'); await settle();
+    assert(edits(before)[0]?.[0].ids.join() === HALF.parts[0].id, 'what was made is not what is selected');
   });
 
   await test('Clicks and keys: another circuit, a new one, the top, zoom and fit, ⌘S and close', async () => {

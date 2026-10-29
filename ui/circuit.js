@@ -1,5 +1,5 @@
-/* Circuit: a project's circuits drawn on their grid, its projects when none
- * is open.
+/* Circuit: a project's circuits drawn and edited on their grid, its projects
+ * when none is open.
  *
  * The core sends a circuit with every part's pins already placed — where
  * the simulator joins them — so a pin drawn here is a pin that connects.
@@ -7,10 +7,17 @@
  * pins taken back into that frame to size its body, so a part the window
  * has no shape for is still a box exactly around its pins.
  *
- * One 2D canvas, redrawn on a frame when anything moves: dragging pans,
- * the wheel and a pinch zoom about the pointer, `=` fits the circuit to the
+ * One 2D canvas, redrawn on a frame when anything moves. The wheel pans,
+ * ⌘-wheel and a pinch zoom about the pointer, `=` fits the circuit to the
  * window. A project is `generation`-numbered by the core; the view is kept
- * while the same one is redrawn, and fitted when another opens. */
+ * while the same one is redrawn, and fitted when another opens.
+ *
+ * Editing is the core's: every change goes to it as ops (`circuitEdit`) and
+ * comes back as the circuit redrawn, so the pins of a part placed or turned
+ * are the simulator's. Here are only the gestures: a cursor on the grid
+ * moved by h j k l, a selection, and drags — from a pin or a wire's end to
+ * draw a wire, from a part to move what is selected, from nothing to select
+ * a box of it. ⌥-drag pans. */
 
 import { escapeHtml as esc, icon } from "./html.js";
 
@@ -71,7 +78,68 @@ export function extent(v) {
   return Number.isFinite(x0) ? { x0: x0 - 4, y0: y0 - 2, x1: x1 + 4, y1: y1 + 2 } : null;
 }
 
-/** @param {{root: Document, dispatch: (command: any) => unknown}} host */
+/** A point of a part's own frame put out on the grid: mirrored, then turned
+ *  a quarter at a time as the core turns it. @param {PartView} p @param {number} lx @param {number} ly @returns {[number, number]} */
+export function world(p, lx, ly) {
+  let x = lx, y = p.mirror ? -ly : ly;
+  for (let i = 0; i < p.rot % 4; i++) [x, y] = [y, -x];
+  return [p.x + x, p.y + y];
+}
+
+/** What a part covers in its own frame: its body, and its pins.
+ *  @param {PartView} p */
+export function body(p) {
+  const f = frame(p);
+  switch (p.kind) {
+    case "in": case "clock": return { x0: -1.5, x1: 0, y0: -0.5, y1: 0.5 };
+    case "out": case "led": case "probe": return { x0: 0, x1: 1.5, y0: -0.5, y1: 0.5 };
+    case "const": return { x0: -1, x1: 0, y0: -0.5, y1: 0.5 };
+    case "tunnel": return { x0: 0, x1: 0.8, y0: -0.4, y1: 0.4 };
+    case "ground": case "vdd": return { x0: -0.5, x1: 0.5, y0: -0.9, y1: 0.9 };
+    case "text": return { x0: 0, x1: 3, y0: -0.5, y1: 0.5 };
+    default: return { x0: f.x0, x1: Math.max(f.x1, f.x0 + 1), y0: f.y0 - 0.5, y1: f.y1 + 0.5 };
+  }
+}
+
+/** The box a part covers on the grid. @param {PartView} p */
+export function box(p) {
+  if (p.problem) return { x0: p.x - 0.5, y0: p.y - 0.5, x1: p.x + 2.5, y1: p.y + 1.5 };
+  const b = body(p);
+  const pts = [world(p, b.x0, b.y0), world(p, b.x1, b.y0), world(p, b.x0, b.y1), world(p, b.x1, b.y1)];
+  for (const pin of p.pins) pts.push([pin.x, pin.y]);
+  const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
+/** How far a point is from a wire, in grid steps. @param {number[]} w @param {number} x @param {number} y */
+export function wireDistance(w, x, y) {
+  const [ax, ay, bx, by] = w;
+  const len = (bx - ax) ** 2 + (by - ay) ** 2;
+  const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / len));
+  return Math.hypot(x - (ax + t * (bx - ax)), y - (ay + t * (by - ay)));
+}
+
+/** The legs of a wire from `a` to `b`: across, then down. @param {[number, number]} a @param {[number, number]} b @returns {[number, number][]} */
+export function legs(a, b) {
+  if (a[0] === b[0] || a[1] === b[1]) return [a, b];
+  return [a, [b[0], a[1]], b];
+}
+
+/** Where `.circ` text starts on the grid: its least x and y, for a paste to
+ *  land at the cursor. @param {string} text @returns {[number, number] | null} */
+export function origin(text) {
+  let x = Infinity, y = Infinity;
+  for (const m of text.matchAll(/(?:\bat |^wire |\s)(-?\d+),(-?\d+)/gm)) {
+    x = Math.min(x, Number(m[1]));
+    y = Math.min(y, Number(m[2]));
+  }
+  return Number.isFinite(x) ? [x, y] : null;
+}
+
+/** The parts a palette offers first, in its order. */
+const COMMON = ["in", "out", "clock", "const", "not", "and", "or", "xor", "nand", "nor", "mux", "add", "register", "dff", "tunnel", "split"];
+
+/** @param {{root: Document, dispatch: (command: any) => unknown, paste?: () => Promise<string | null>}} host */
 export function createCircuit(host) {
   const found = /** @type {HTMLElement | null} */ (host.root.querySelector('.workspace[data-ws="circuit"]'));
   if (!found) return null;
@@ -97,11 +165,58 @@ export function createCircuit(host) {
     view: { scale: FIT_SCALE, ox: 40, oy: 40 },
     /** The project and circuit the view was fitted to. */
     fitted: "",
-    /** A drag panning the view: where it started. @type {{x: number, y: number, ox: number, oy: number} | null} */
+    /** A drag under way: panning, moving the selection, drawing a wire, or
+     *  selecting a box. `x, y` are where it started on the screen, `from`
+     *  on the grid, `to` where it is now on the grid.
+     *  @type {null | {kind: "pan" | "move" | "wire" | "box", x: number, y: number, ox: number, oy: number, from: [number, number], to: [number, number], add: boolean, moved: boolean}} */
     drag: null,
     /** Naming a new circuit in the list. */
     adding: false,
+    /** The parts and wires selected: ids, and wires as `ax,ay,bx,by`. */
+    parts: /** @type {Set<string>} */ (new Set()),
+    wires: /** @type {Set<string>} */ (new Set()),
+    /** The cursor on the grid. */
+    cursor: /** @type {[number, number]} */ ([0, 0]),
+    /** A wire begun from the keyboard with `w`: where it starts. @type {[number, number] | null} */
+    wiring: null,
+    /** The kind `space` places. */
+    last: "and",
   };
+
+  const wireKey = (/** @type {number[]} */ w) => w.join(",");
+  /** Changes to the circuit shown, sent as one step. @param {any[]} ops */
+  function send(ops) {
+    const p = state.project;
+    if (p && ops.length) host.dispatch({ type: "circuitEdit", generation: p.generation, circuit: p.shown, ops });
+  }
+  const selectedWires = () => (state.project?.wires ?? []).filter((w) => state.wires.has(wireKey(w)));
+  const nothingSelected = () => state.parts.size === 0 && state.wires.size === 0;
+  /** The part at a grid point, the topmost. @param {number} x @param {number} y */
+  function partAt(x, y) {
+    const parts = state.project?.parts ?? [];
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const b = box(parts[i]);
+      if (x >= b.x0 - 0.15 && x <= b.x1 + 0.15 && y >= b.y0 - 0.15 && y <= b.y1 + 0.15) return parts[i];
+    }
+    return null;
+  }
+  /** The wire at a grid point, if one passes within reach. @param {number} x @param {number} y */
+  function wireAt(x, y) {
+    const reach = Math.max(0.25, 6 / state.view.scale);
+    return (state.project?.wires ?? []).find((w) => wireDistance(w, x, y) <= reach) ?? null;
+  }
+  /** Whether a wire can start at a grid point: a pin or a wire's end there. @param {number} x @param {number} y */
+  function wireEnd(x, y) {
+    const p = state.project;
+    if (!p) return false;
+    return p.parts.some((part) => part.pins.some((pin) => pin.x === x && pin.y === y)) || p.wires.some((w) => (w[0] === x && w[1] === y) || (w[2] === x && w[3] === y));
+  }
+  /** The parts the keys act on: the selection, or the part at the cursor. */
+  function targets() {
+    if (state.parts.size) return [...state.parts];
+    const at = partAt(state.cursor[0], state.cursor[1]);
+    return at ? [at.id] : [];
+  }
 
   /* ── the side list ─────────────────────────────────────────────────── */
 
@@ -125,11 +240,23 @@ export function createCircuit(host) {
       (state.adding
         ? `<form class="ci-add" data-circuit-add-form><input type="text" placeholder="Name" aria-label="New circuit's name" spellcheck="false"></form>`
         : `<button class="xl-row ci-add-row" data-circuit-add>${icon("plus")}<span class="xl-row-name">Add a circuit</span></button>`) +
+      `<div class="ci-section">Parts</div><div class="ci-palette">${palette(p)}</div>` +
       `<div class="ci-section">Projects</div>${projects}`;
     if (state.adding) {
       const input = /** @type {HTMLInputElement | null} */ (els.list.querySelector("[data-circuit-add-form] input"));
       input?.focus();
     }
+  }
+
+  /** The parts to place: the common ones, then subcircuits, then the rest.
+   *  @param {ProjectView} p */
+  function palette(p) {
+    const offered = new Set(p.palette);
+    const subs = p.palette.filter((k) => k.startsWith("sub:"));
+    const rest = p.palette.filter((k) => !k.startsWith("sub:") && !COMMON.includes(k));
+    return [...COMMON.filter((k) => offered.has(k)), ...subs, ...rest]
+      .map((k) => `<button class="ci-kind${k === state.last ? " on" : ""}" data-circuit-place="${esc(k)}" title="Place ${esc(k)} at the cursor — space places the last one again">${esc(k.startsWith("sub:") ? k.slice(4) : k)}</button>`)
+      .join("");
   }
 
   /* ── the project ───────────────────────────────────────────────────── */
@@ -145,6 +272,17 @@ export function createCircuit(host) {
     els.shown.textContent = p.shown === p.top ? `${p.shown}` : `${p.shown}  ·  top is ${p.top}`;
     q("[data-circuit-dirty]").hidden = !p.dirty;
     els.empty.hidden = p.parts.length > 0 || p.wires.length > 0;
+    // What was selected and is still there stays so; what an edit made is
+    // selected instead.
+    const ids = new Set(p.parts.map((part) => part.id));
+    const wires = new Set(p.wires.map(wireKey));
+    if (p.made.length) {
+      state.parts = new Set(p.made.filter((id) => ids.has(id)));
+      state.wires = new Set();
+    } else {
+      state.parts = new Set([...state.parts].filter((id) => ids.has(id)));
+      state.wires = new Set([...state.wires].filter((w) => wires.has(w)));
+    }
     if (`${p.generation}/${p.shown}` !== state.fitted) requestAnimationFrame(fit);
     else redraw();
   }
@@ -217,17 +355,23 @@ export function createCircuit(host) {
     g.lineCap = "round";
     g.lineJoin = "round";
     // Wires, and a dot where three or more ends meet.
-    g.strokeStyle = col.muted;
+    const d = state.drag;
+    const shift = d?.kind === "move" && d.moved ? [d.to[0] - d.from[0], d.to[1] - d.from[1]] : [0, 0];
     g.lineWidth = Math.max(1.5 / s, 0.09);
-    g.beginPath();
     /** @type {Map<string, number>} */
     const ends = new Map();
-    for (const [ax, ay, bx, by] of p.wires) {
-      g.moveTo(ax, ay);
-      g.lineTo(bx, by);
-      for (const k of [`${ax},${ay}`, `${bx},${by}`]) ends.set(k, (ends.get(k) ?? 0) + 1);
+    for (const on of [false, true]) {
+      g.strokeStyle = on ? col.accent : col.muted;
+      g.beginPath();
+      for (const w of p.wires) {
+        if (state.wires.has(wireKey(w)) !== on) continue;
+        const [dx, dy] = on ? shift : [0, 0];
+        g.moveTo(w[0] + dx, w[1] + dy);
+        g.lineTo(w[2] + dx, w[3] + dy);
+        if (!on || !d?.moved) for (const k of [`${w[0]},${w[1]}`, `${w[2]},${w[3]}`]) ends.set(k, (ends.get(k) ?? 0) + 1);
+      }
+      g.stroke();
     }
-    g.stroke();
     for (const part of p.parts) for (const pin of part.pins) {
       const k = `${pin.x},${pin.y}`;
       if (ends.has(k)) ends.set(k, /** @type {number} */ (ends.get(k)) + 1);
@@ -241,13 +385,61 @@ export function createCircuit(host) {
       g.fill();
     }
 
-    for (const part of p.parts) drawPart(g, part, col, s);
+    for (const part of p.parts) {
+      const on = state.parts.has(part.id);
+      if (on && (shift[0] || shift[1])) {
+        g.save();
+        g.translate(shift[0], shift[1]);
+        drawPart(g, part, col, s, true);
+        g.restore();
+      } else {
+        drawPart(g, part, col, s, on);
+      }
+    }
+
+    // A wire being drawn, by the mouse or from the keyboard.
+    const from = d?.kind === "wire" ? d.from : state.wiring;
+    const to = d?.kind === "wire" ? d.to : state.cursor;
+    if (from && (from[0] !== to[0] || from[1] !== to[1])) {
+      g.save();
+      g.strokeStyle = col.accent;
+      g.setLineDash([0.3, 0.2]);
+      g.beginPath();
+      const pts = legs(from, to);
+      g.moveTo(pts[0][0], pts[0][1]);
+      for (const q of pts.slice(1)) g.lineTo(q[0], q[1]);
+      g.stroke();
+      g.restore();
+    }
+    // A box being dragged out to select what is in it.
+    if (d?.kind === "box" && d.moved) {
+      g.save();
+      g.strokeStyle = col.accent;
+      g.fillStyle = col.accent;
+      g.globalAlpha = 0.12;
+      const x = Math.min(d.from[0], d.to[0]), y = Math.min(d.from[1], d.to[1]);
+      const w = Math.abs(d.to[0] - d.from[0]), h = Math.abs(d.to[1] - d.from[1]);
+      g.fillRect(x, y, w, h);
+      g.globalAlpha = 1;
+      g.setLineDash([0.2, 0.15]);
+      g.strokeRect(x, y, w, h);
+      g.restore();
+    }
+    // The cursor: a cross on its grid point.
+    const [cx, cy] = state.cursor;
+    g.strokeStyle = col.accent;
+    g.lineWidth = Math.max(1.5 / s, 0.07);
+    g.beginPath();
+    g.moveTo(cx - 0.35, cy); g.lineTo(cx + 0.35, cy);
+    g.moveTo(cx, cy - 0.35); g.lineTo(cx, cy + 0.35);
+    g.stroke();
     g.restore();
   }
 
-  /** @param {CanvasRenderingContext2D} g @param {PartView} p @param {ReturnType<typeof colours>} col @param {number} s */
-  function drawPart(g, p, col, s) {
-    const line = Math.max(1.5 / s, 0.08);
+  /** @param {CanvasRenderingContext2D} g @param {PartView} p @param {ReturnType<typeof colours>} colours_ @param {number} s @param {boolean} on selected: drawn in the accent */
+  function drawPart(g, p, colours_, s, on) {
+    const col = on ? { ...colours_, text: colours_.accent } : colours_;
+    const line = Math.max(1.5 / s, 0.08) * (on ? 1.5 : 1);
     if (p.problem) {
       g.save();
       g.strokeStyle = col.danger;
@@ -423,21 +615,199 @@ export function createCircuit(host) {
     pinchFrom = ge.scale;
   });
 
+  /** A screen point on the grid: exact, and snapped to the nearest step.
+   *  @param {PointerEvent | MouseEvent} e */
+  function gridOf(e) {
+    const r = els.stage.getBoundingClientRect();
+    const x = (e.clientX - r.left - state.view.ox) / state.view.scale, y = (e.clientY - r.top - state.view.oy) / state.view.scale;
+    return { x, y, snap: /** @type {[number, number]} */ ([Math.round(x), Math.round(y)]) };
+  }
+
   els.stage.addEventListener("pointerdown", (e) => {
-    if (!state.project || e.button !== 0) return;
+    const p = state.project;
+    if (!p || (e.button !== 0 && e.button !== 1)) return;
+    closeForms();
     els.stage.focus({ preventScroll: true });
     els.stage.setPointerCapture(e.pointerId);
-    state.drag = { x: e.clientX, y: e.clientY, ox: state.view.ox, oy: state.view.oy };
+    const at = gridOf(e);
+    const base = { x: e.clientX, y: e.clientY, ox: state.view.ox, oy: state.view.oy, from: at.snap, to: at.snap, add: e.shiftKey, moved: false };
+    state.cursor = at.snap;
+    state.wiring = null;
+    if (e.button === 1 || e.altKey) {
+      state.drag = { kind: "pan", ...base };
+      return;
+    }
+    // From a pin or a wire's end, close by: a wire.
+    if (Math.hypot(at.x - at.snap[0], at.y - at.snap[1]) < 0.3 && wireEnd(at.snap[0], at.snap[1])) {
+      state.drag = { kind: "wire", ...base };
+      redraw();
+      return;
+    }
+    const part = partAt(at.x, at.y);
+    const wire = part ? null : wireAt(at.x, at.y);
+    if (part || wire) {
+      const key = part ? part.id : wireKey(/** @type {number[]} */ (wire));
+      const set = part ? state.parts : state.wires;
+      if (e.shiftKey) {
+        if (set.has(key)) set.delete(key);
+        else set.add(key);
+      } else if (!set.has(key)) {
+        state.parts = new Set(part ? [key] : []);
+        state.wires = new Set(part ? [] : [key]);
+      }
+      state.drag = { kind: "move", ...base };
+    } else {
+      if (!e.shiftKey) {
+        state.parts.clear();
+        state.wires.clear();
+      }
+      state.drag = { kind: "box", ...base };
+    }
+    redraw();
   });
   els.stage.addEventListener("pointermove", (e) => {
     const d = state.drag;
     if (!d) return;
-    state.view = { ...state.view, ox: d.ox + e.clientX - d.x, oy: d.oy + e.clientY - d.y };
+    if (d.kind === "pan") {
+      state.view = { ...state.view, ox: d.ox + e.clientX - d.x, oy: d.oy + e.clientY - d.y };
+    } else {
+      const at = gridOf(e);
+      d.to = d.kind === "box" ? [at.x, at.y] : at.snap;
+      d.moved ||= Math.hypot(e.clientX - d.x, e.clientY - d.y) > 3;
+    }
     redraw();
   });
-  const endDrag = () => { state.drag = null; };
-  els.stage.addEventListener("pointerup", endDrag);
-  els.stage.addEventListener("pointercancel", endDrag);
+  els.stage.addEventListener("pointerup", () => {
+    const d = state.drag;
+    state.drag = null;
+    if (!d) return;
+    if (d.kind === "move" && d.moved) {
+      const dx = d.to[0] - d.from[0], dy = d.to[1] - d.from[1];
+      if (dx || dy) send([{ op: "move", ids: [...state.parts], wires: selectedWires(), dx, dy }]);
+    } else if (d.kind === "wire" && (d.to[0] !== d.from[0] || d.to[1] !== d.from[1])) {
+      send([{ op: "wire", points: legs(d.from, d.to) }]);
+      state.cursor = d.to;
+    } else if (d.kind === "box" && d.moved) {
+      // Everything wholly inside the box.
+      const x0 = Math.min(d.from[0], d.to[0]), x1 = Math.max(d.from[0], d.to[0]);
+      const y0 = Math.min(d.from[1], d.to[1]), y1 = Math.max(d.from[1], d.to[1]);
+      const inBox = (/** @type {number} */ x, /** @type {number} */ y) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+      for (const part of state.project?.parts ?? []) {
+        const b = box(part);
+        if (inBox(b.x0, b.y0) && inBox(b.x1, b.y1)) state.parts.add(part.id);
+      }
+      for (const w of state.project?.wires ?? []) if (inBox(w[0], w[1]) && inBox(w[2], w[3])) state.wires.add(wireKey(w));
+    }
+    redraw();
+  });
+  els.stage.addEventListener("pointercancel", () => { state.drag = null; redraw(); });
+  els.stage.addEventListener("dblclick", (e) => {
+    const at = gridOf(e);
+    const part = partAt(at.x, at.y);
+    if (part) editSettings(part);
+  });
+
+  /* ── settings, the part picker, the clipboard ─────────────────────── */
+
+  /** A form over the stage, at a grid point; gone on Escape or a click away.
+   *  @param {string} html @param {[number, number]} at @param {(form: HTMLFormElement) => void} done */
+  function popup(html, at, done) {
+    closeForms();
+    const form = document.createElement("form");
+    form.className = "ci-pop";
+    form.innerHTML = html;
+    const r = els.stage.getBoundingClientRect();
+    form.style.left = `${Math.max(8, Math.min(r.width - 330, state.view.ox + at[0] * state.view.scale + 12))}px`;
+    form.style.top = `${Math.max(8, Math.min(r.height - 90, state.view.oy + at[1] * state.view.scale + 12))}px`;
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      done(form);
+      form.remove();
+      els.stage.focus({ preventScroll: true });
+    });
+    form.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        form.remove();
+        els.stage.focus({ preventScroll: true });
+      }
+      e.stopPropagation();
+    });
+    els.stage.append(form);
+    /** @type {HTMLInputElement | null} */ (form.querySelector("input"))?.focus();
+    return form;
+  }
+  function closeForms() {
+    for (const f of els.stage.querySelectorAll(".ci-pop")) f.remove();
+  }
+
+  /** A part's id and settings, as `.circ` writes them, to edit and set.
+   *  @param {PartView} part */
+  function editSettings(part) {
+    const quote = (/** @type {string} */ v) => (/^[\w.,*+:/#-]+$/.test(v) ? v : `"${v.replace(/["\\]/g, "\\$&")}"`);
+    const settings = part.settings.map(([k, v]) => `${k}=${quote(v)}`).join(" ");
+    popup(`<label class="ci-pop-row"><span>${esc(part.kind)}</span><input name="id" value="${esc(part.id)}" aria-label="Id" spellcheck="false"></label>
+      <input name="settings" value="${esc(settings)}" placeholder="bits=8 label=A" aria-label="Settings" spellcheck="false">
+      <p class="ci-pop-hint">Settings as key=value: bits, inputs, label, sel, value, net, in, out, wide, flip, signed… Enter sets, Escape leaves.</p>`,
+    [part.x, part.y], (form) => {
+      const id = /** @type {HTMLInputElement} */ (form.elements.namedItem("id")).value.trim();
+      const text = /** @type {HTMLInputElement} */ (form.elements.namedItem("settings")).value;
+      /** @type {[string, string][]} */
+      const pairs = [];
+      for (const m of text.matchAll(/([\w]+)=("((?:[^"\\]|\\.)*)"|\S*)/g)) pairs.push([m[1], m[3] !== undefined ? m[3].replace(/\\(.)/g, "$1") : m[2]]);
+      const renamed = id && id !== part.id ? id : null;
+      // The selection follows the part to its new name.
+      if (renamed && state.parts.delete(part.id)) state.parts.add(renamed);
+      send([{ op: "set", id: part.id, newId: renamed, settings: pairs }]);
+    });
+    /** @type {HTMLInputElement | null} */ (els.stage.querySelector(".ci-pop [name=settings]"))?.focus();
+  }
+
+  /** `a`: a part picked by name, placed at the cursor. */
+  function pick() {
+    const p = state.project;
+    if (!p) return;
+    popup(`<input name="kind" list="ci-kinds" placeholder="Part — and, mux, sub:alu…" aria-label="Part to place" spellcheck="false">
+      <datalist id="ci-kinds">${p.palette.map((k) => `<option value="${esc(k)}">`).join("")}</datalist>`,
+    state.cursor, (form) => {
+      const kind = /** @type {HTMLInputElement} */ (form.elements.namedItem("kind")).value.trim();
+      if (kind) place(kind);
+    });
+  }
+
+  /** A part placed at the cursor, and remembered for `space`. @param {string} kind */
+  function place(kind) {
+    state.last = kind;
+    send([{ op: "place", kind, x: state.cursor[0], y: state.cursor[1], rot: 0, mirror: false, settings: [] }]);
+  }
+
+  function copy() {
+    const p = state.project;
+    if (!p || nothingSelected()) return;
+    host.dispatch({ type: "circuitCopy", generation: p.generation, circuit: p.shown, ids: [...state.parts], wires: selectedWires() });
+  }
+
+  /** What is on the clipboard, put in with its top left at the cursor. */
+  async function paste() {
+    const text = (await host.paste?.()) ?? null;
+    const at = text && origin(text);
+    if (!text || !at) return;
+    send([{ op: "paste", text, dx: state.cursor[0] - at[0], dy: state.cursor[1] - at[1] }]);
+  }
+
+  /** The cursor moved, and the view after it if it would leave the stage.
+   *  @param {number} dx @param {number} dy */
+  function moveCursor(dx, dy) {
+    state.cursor = [state.cursor[0] + dx, state.cursor[1] + dy];
+    const r = els.stage.getBoundingClientRect();
+    const v = state.view;
+    const x = v.ox + state.cursor[0] * v.scale, y = v.oy + state.cursor[1] * v.scale;
+    const margin = 3 * v.scale;
+    if (x < margin) v.ox += margin - x;
+    if (x > r.width - margin) v.ox -= x - (r.width - margin);
+    if (y < margin) v.oy += margin - y;
+    if (y > r.height - margin) v.oy -= y - (r.height - margin);
+    redraw();
+  }
 
   new ResizeObserver(() => {
     const p = state.project;
@@ -457,28 +827,95 @@ export function createCircuit(host) {
       return;
     }
     if (e.target !== els.stage || !p) return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const r = els.stage.getBoundingClientRect();
+    const k = e.key;
+    /** @type {Record<string, () => void>} */
+    const chords = {
+      z: () => host.dispatch({ type: e.shiftKey ? "circuitRedo" : "circuitUndo" }),
+      c: copy,
+      x: () => { copy(); remove(); },
+      v: () => void paste(),
+      a: () => {
+        state.parts = new Set(p.parts.map((part) => part.id));
+        state.wires = new Set(p.wires.map(wireKey));
+        redraw();
+      },
+    };
+    if (e.metaKey && !e.altKey) {
+      const run = chords[k.toLowerCase()];
+      if (run) {
+        e.preventDefault();
+        run();
+      }
+      return;
+    }
+    if (e.ctrlKey && k === "r") {
+      e.preventDefault();
+      host.dispatch({ type: "circuitRedo" });
+      return;
+    }
+    if (e.ctrlKey || e.altKey) return;
+    const step = e.shiftKey ? 5 : 1;
     /** @type {Record<string, () => void>} */
     const keys = {
       "=": fit,
       "+": () => zoom(1.25, r.width / 2, r.height / 2),
       "-": () => zoom(0.8, r.width / 2, r.height / 2),
-      h: () => { state.view.ox += 60; redraw(); },
-      l: () => { state.view.ox -= 60; redraw(); },
-      k: () => { state.view.oy += 60; redraw(); },
-      j: () => { state.view.oy -= 60; redraw(); },
-      ArrowLeft: () => { state.view.ox += 60; redraw(); },
-      ArrowRight: () => { state.view.ox -= 60; redraw(); },
-      ArrowUp: () => { state.view.oy += 60; redraw(); },
-      ArrowDown: () => { state.view.oy -= 60; redraw(); },
+      h: () => moveCursor(-step, 0), H: () => moveCursor(-step, 0), ArrowLeft: () => moveCursor(-step, 0),
+      l: () => moveCursor(step, 0), L: () => moveCursor(step, 0), ArrowRight: () => moveCursor(step, 0),
+      k: () => moveCursor(0, -step), K: () => moveCursor(0, -step), ArrowUp: () => moveCursor(0, -step),
+      j: () => moveCursor(0, step), J: () => moveCursor(0, step), ArrowDown: () => moveCursor(0, step),
+      " ": () => place(state.last),
+      a: pick,
+      w: () => {
+        // `w` starts a wire at the cursor, and again ends it there.
+        const from = state.wiring;
+        if (!from) {
+          state.wiring = state.cursor;
+        } else {
+          state.wiring = null;
+          if (from[0] !== state.cursor[0] || from[1] !== state.cursor[1]) send([{ op: "wire", points: legs(from, state.cursor) }]);
+        }
+        redraw();
+      },
+      Enter: () => {
+        if (state.wiring) return keys.w();
+        const ids = targets();
+        const part = p.parts.find((q) => q.id === ids[0]);
+        if (part) editSettings(part);
+      },
+      e: () => keys.Enter(),
+      r: () => send(targets().length ? [{ op: "rotate", ids: targets() }] : []),
+      m: () => send(targets().length ? [{ op: "mirror", ids: targets() }] : []),
+      x: remove,
+      Delete: remove,
+      Backspace: remove,
+      y: copy,
+      p: () => void paste(),
+      u: () => host.dispatch({ type: "circuitUndo" }),
+      Escape: () => {
+        state.wiring = null;
+        state.parts.clear();
+        state.wires.clear();
+        redraw();
+      },
     };
-    const run = keys[e.key];
+    const run = keys[k];
     if (run) {
       e.preventDefault();
       run();
     }
   });
+
+  /** The selection, or the part at the cursor, taken away. */
+  function remove() {
+    const ids = targets(), wires = selectedWires();
+    if (!ids.length && !wires.length) {
+      const w = wireAt(state.cursor[0], state.cursor[1]);
+      if (w) wires.push(w);
+    }
+    if (ids.length || wires.length) send([{ op: "delete", ids, wires }]);
+  }
 
   ws.addEventListener("click", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
@@ -495,6 +932,12 @@ export function createCircuit(host) {
     if (t.closest("[data-circuit-add]")) {
       state.adding = true;
       renderList();
+      return;
+    }
+    const placing = t.closest("[data-circuit-place]");
+    if (placing) {
+      place(/** @type {HTMLElement} */ (placing).dataset.circuitPlace ?? "and");
+      els.stage.focus({ preventScroll: true });
       return;
     }
     if (t.closest("[data-circuit-new]")) return void newProject();
