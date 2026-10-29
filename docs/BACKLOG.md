@@ -177,3 +177,35 @@ What is left of it.
 - **The 74xx library.** Digital's chips as subcircuits, made here.
 - **FPGA boards and JEDEC files.** BASYS3 and TinyFPGA, and GALs; they need
   the hardware to test against.
+
+## Logic
+
+A logic mode after logic-calculator.com and Logic for Fun, asked for on
+2026-10-30, is planned in [`LOGIC.md`](LOGIC.md): a calculator (truth
+tables, properties, normal forms, Karnaugh maps, equivalence, arguments),
+a model finder for puzzles written in first-order logic, and proofs by
+semantic tableaux, natural deduction, sequent calculus and resolution.
+Milestones L0–L9, built next: "Logic" on ⌃8, Proton's own language and
+Logic4Fun's both read and written.
+
+### Waiting on the person
+
+- **Fitch's rule names.** Proton reads the common names; it writes
+  `forall x`'s unless your course uses others. Say which before L6.
+
+### Later builds
+
+After L9, for a complete logic workbench:
+- **More proof styles.** Hilbert-style axiomatic proofs; tree-shaped
+  natural deduction; Boolean simplification step by step, each law named.
+- **More first-order machinery.** Herbrand models; equality by
+  paramodulation.
+- **SAT with the search shown.** DPLL and CDCL, for large propositional
+  problems.
+- **Other logics.** Modal (K, T, S4, S5) with tableaux and Kripke
+  countermodels; intuitionistic, with Kripke countermodels; three-valued and
+  fuzzy; relevant logics.
+- **Temporal logic.** LTL and CTL model checking.
+- **Syllogisms** with Venn diagrams.
+- **English to logic and back,** by the agent.
+- **To Lean.** A statement handed to Lean in Research.
