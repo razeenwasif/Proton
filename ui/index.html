@@ -945,6 +945,7 @@
               <button role="tab" data-circuit-tab="tests" aria-selected="true">Tests</button>
               <button role="tab" data-circuit-tab="graph" aria-selected="false">Graph</button>
               <button role="tab" data-circuit-tab="analysis" aria-selected="false">Analysis</button>
+              <button role="tab" data-circuit-tab="machines" aria-selected="false">Machines</button>
               <span class="grow"></span>
               <span class="ci-tab-tools" data-circuit-tools></span>
             </nav>
@@ -971,6 +972,16 @@
               <div class="ci-analysis-body">
                 <div class="ci-truth" data-circuit-truth></div>
                 <div class="ci-forms" data-circuit-forms></div>
+              </div>
+            </div>
+            <!-- Machines (C6): state machines written as text, drawn as they
+                 are written, their state tables, and circuits built from them. -->
+            <div class="ci-machines" data-circuit-machines hidden>
+              <div class="ci-tables" data-circuit-machine-list></div>
+              <textarea data-circuit-machine-text spellcheck="false" aria-label="State machine" placeholder="inputs X&#10;outputs Z&#10;state S0&#10;state S1 Z=1&#10;S0 -> S1 when X&#10;S1 -> S0 when X'"></textarea>
+              <div class="ci-machine-view">
+                <canvas data-circuit-machine-diagram></canvas>
+                <div class="ci-machine-table" data-circuit-machine-table></div>
               </div>
             </div>
             <div class="ci-graph" data-circuit-graph hidden>

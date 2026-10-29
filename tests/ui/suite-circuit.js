@@ -12,7 +12,7 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
   const sent = (/** @type {number} */ from, /** @type {string} */ type) => win.commands.slice(from).filter((/** @type {any} */ c) => c.type === type);
   const project = (/** @type {Partial<any>} */ more = {}) => ({type: 'circuitProject', project: {path: 'labs/adder.circuit', name: 'adder', top: 'main',
     circuits: ['half', 'main'], shown: 'half', parts: HALF.parts, wires: HALF.wires, tests: [], generation: 4, dirty: false,
-    canUndo: false, canRedo: false, made: [], data: [], tables: [], palette: ['in', 'out', 'clock', 'const', 'not', 'and', 'or', 'xor', 'mux', 'register'], ...more}});
+    canUndo: false, canRedo: false, made: [], data: [], tables: [], machines: [], palette: ['in', 'out', 'clock', 'const', 'not', 'and', 'or', 'xor', 'mux', 'register'], ...more}});
   /** How many of the canvas's pixels are drawn on. */
   const inked = () => {
     const c = /** @type {HTMLCanvasElement} */ (ws().querySelector('[data-circuit-canvas]'));
@@ -379,6 +379,57 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     // A circuit that cannot be tabulated says why.
     await win.pushEvents([{type: 'circuitAnalysis', generation: 4, analysis: {source: 'half', inputs: [], outputs: [], columns: [], sop: [], pos: [], groups: [], exact: true, error: 'this circuit keeps state'}}]); await settle();
     assert(ws().querySelector('.ci-truth .ci-failure')?.textContent.includes('keeps state'), 'the reason there is no table is not said');
+    stage.focus();
+    key('t'); await settle();
+  });
+
+  await test('Machines: written and read as typed, drawn with their state table, kept, and built with D or JK flip-flops', async () => {
+    const text = "inputs X\noutputs Z\nstate S0\nstate S1\nstate S2 Z=1\nS0 -> S1 when X\nS1 -> S2 when X\nS1 -> S0 when X'\nS2 -> S0 when !X\n";
+    await win.pushEvents([project({machines: [['ones', text]]}), {type: 'circuitRun', run: null}]); await settle(); await frames();
+    const stage = ws().querySelector('[data-circuit-stage]');
+    stage.focus();
+    if (!shown(ws().querySelector('[data-circuit-panel]'))) key('t');
+    await settle();
+    let before = win.commands.length;
+    ws().querySelector('[data-circuit-tab="machines"]').click(); await settle();
+    assert(ws().querySelector('[data-circuit-machine="ones"]')?.classList.contains('on'), 'the machine is not listed');
+    const area = ws().querySelector('[data-circuit-machine-text]');
+    assert(area.value === text, 'its text is not shown');
+    assert(sent(before, 'circuitMachineShow')[0]?.name === 'ones', 'the machine was not read');
+    await win.pushEvents([{type: 'circuitMachine', generation: 4, machine: {...{"name":null,"inputs":["X"],"outputs":["Z"],"states":["S0","S1","S2"],"stateOutputs":["","","Z=1"],"transitions":[[0,1,"X",""],[1,2,"X",""],[1,0,"X'",""],[2,0,"!X",""]],"mealy":false,"bits":2,"table":[[0,"0",0,"0"],[0,"1",1,"0"],[1,"0",0,"0"],[1,"1",2,"0"],[2,"0",0,"1"],[2,"1",2,"1"]],"error":null}, name: 'ones'}}]); await settle(); await frames();
+    assert(ws().querySelectorAll('.ci-machine-table tbody tr').length === 6, 'the state table is not drawn');
+    const c = /** @type {HTMLCanvasElement} */ (ws().querySelector('[data-circuit-machine-diagram]'));
+    const data = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d')).getImageData(0, 0, c.width, c.height).data;
+    let ink = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) ink++;
+    assert(ink > 500, `the diagram is all but empty: ${ink} pixels`);
+    // Typing reads it again, a moment after; Keep keeps it.
+    area.focus();
+    area.value = text + 'S2 -> S2 when X\n';
+    area.dispatchEvent(new win.Event('input'));
+    before = win.commands.length;
+    await new Promise((done) => setTimeout(done, 400));
+    assert(sent(before, 'circuitMachineShow')[0]?.text?.endsWith('S2 -> S2 when X\n'), 'what was typed was not read');
+    ws().querySelector('[data-circuit-machine-keep]').click(); await settle();
+    assert(sent(before, 'circuitMachineSet')[0]?.name === 'ones', 'Keep did not keep it');
+    await win.pushEvents([{type: 'circuitMachine', generation: 4, machine: {name: null, inputs: [], outputs: [], states: [], stateOutputs: [], transitions: [], mealy: false, bits: 0, table: [], error: 'line 3: Y is not one of the inputs'}}]); await settle();
+    assert(ws().querySelector('.ci-machine-table .ci-failure')?.textContent.includes('Y is not'), 'a machine that does not read does not say why');
+    // Build: a name is asked for; then the flip-flops chosen are sent.
+    before = win.commands.length;
+    ws().querySelector('[data-circuit-machine-build]').click(); await settle();
+    assert(!sent(before, 'circuitMachineBuild').length, 'it built without a name');
+    ws().querySelector('[data-circuit-machine-circuit]').value = 'detector';
+    ws().querySelector('[data-circuit-machine-ff]').value = 'jk';
+    ws().querySelector('[data-circuit-machine-build]').click(); await settle();
+    const built = sent(before, 'circuitMachineBuild')[0];
+    assert(built?.name === 'ones' && built.flipflop === 'jk' && built.circuit === 'detector', `building sent ${JSON.stringify(built)}`);
+    // A new machine: named, and begun from a template.
+    ws().querySelector('[data-circuit-machine-new]').click(); await settle();
+    const name = ws().querySelector('[data-circuit-machine-form] input');
+    name.value = 'blink';
+    ws().querySelector('[data-circuit-machine-form]').requestSubmit(); await settle();
+    const made = sent(before, 'circuitMachineSet').find((c) => c.name === 'blink');
+    assert(made?.text?.startsWith('inputs X\noutputs Z'), `the new machine is ${JSON.stringify(made)}`);
     stage.focus();
     key('t'); await settle();
   });

@@ -39,6 +39,7 @@ import { escapeHtml as esc, icon } from "./html.js";
 /** @typedef {import("./bindings/CircuitValue").CircuitValue} Value */
 /** @typedef {import("./bindings/CircuitTestResult").CircuitTestResult} TestResult */
 /** @typedef {import("./bindings/CircuitAnalysisView").CircuitAnalysisView} Analysis */
+/** @typedef {import("./bindings/CircuitMachineView").CircuitMachineView} MachineView */
 
 /** No more rows of a truth table than this are drawn. */
 const MOST_TRUTH_ROWS = 256;
@@ -254,7 +255,11 @@ export function createCircuit(host) {
     press: null,
     /** The panel below: open, and which tab. */
     panel: false,
-    tab: /** @type {"tests" | "graph" | "analysis"} */ ("tests"),
+    tab: /** @type {"tests" | "graph" | "analysis" | "machines"} */ ("tests"),
+    /** The machine shown, as the core last read it, and which is chosen. @type {MachineView | null} */
+    machine: null,
+    machineName: "",
+    namingMachine: false,
     /** The last analysis, for this project. @type {Analysis | null} */
     analysis: null,
     /** The table shown in it, and the last results by table, for this
@@ -280,6 +285,11 @@ export function createCircuit(host) {
     analyseForm: /** @type {HTMLFormElement} */ (q("[data-circuit-analyse-form]")),
     truth: q("[data-circuit-truth]"),
     forms: q("[data-circuit-forms]"),
+    machines: q("[data-circuit-machines]"),
+    machineList: q("[data-circuit-machine-list]"),
+    machineText: /** @type {HTMLTextAreaElement} */ (q("[data-circuit-machine-text]")),
+    diagram: /** @type {HTMLCanvasElement} */ (q("[data-circuit-machine-diagram]")),
+    machineTable: q("[data-circuit-machine-table]"),
   };
   const runEls = {
     status: q("[data-circuit-status]"),
@@ -421,6 +431,11 @@ export function createCircuit(host) {
     panelEls.tests.hidden = state.tab !== "tests";
     panelEls.graph.hidden = state.tab !== "graph";
     panelEls.analysis.hidden = state.tab !== "analysis";
+    panelEls.machines.hidden = state.tab !== "machines";
+    if (state.tab === "machines") {
+      renderMachines();
+      return;
+    }
     if (state.tab === "analysis") {
       panelEls.tools.innerHTML = "";
       renderAnalysis();
@@ -533,6 +548,157 @@ export function createCircuit(host) {
       }
       g.lineWidth = 1;
     });
+  }
+
+  /* The machines: a list, the text of the one chosen, and its diagram and
+     state table as the core reads what is written, a moment after typing. */
+
+  function renderMachines() {
+    const p = state.project;
+    if (!p) return;
+    if (!state.machineName || !p.machines.some(([n]) => n === state.machineName)) {
+      if (!state.namingMachine) state.machineName = p.machines[0]?.[0] ?? "";
+    }
+    panelEls.tools.innerHTML = `<button class="ci-tool" data-circuit-machine-keep${state.machineName ? "" : " disabled"}>Keep</button>
+      <select class="ci-hz" data-circuit-machine-ff aria-label="Flip-flops"><option value="d">D flip-flops</option><option value="jk">JK flip-flops</option></select>
+      <input class="ci-build-name ci-tool-input" data-circuit-machine-circuit placeholder="circuit name" aria-label="Name of the circuit to build" spellcheck="false">
+      <button class="ci-tool" data-circuit-machine-build${state.machineName ? "" : " disabled"}>Build</button>`;
+    panelEls.machineList.innerHTML = p.machines.map(([n]) => `<button class="xl-row${n === state.machineName ? " on" : ""}" data-circuit-machine="${esc(n)}"><span class="xl-row-name">${esc(n)}</span></button>`).join("") +
+      (state.namingMachine
+        ? `<form class="ci-add" data-circuit-machine-form><input type="text" placeholder="Name" aria-label="New machine's name" spellcheck="false"></form>`
+        : `<button class="xl-row" data-circuit-machine-new>${icon("plus")}<span class="xl-row-name">New machine</span></button>`);
+    if (state.namingMachine) /** @type {HTMLInputElement | null} */ (panelEls.machineList.querySelector("input"))?.focus();
+    const text = p.machines.find(([n]) => n === state.machineName)?.[1];
+    if (document.activeElement !== panelEls.machineText) panelEls.machineText.value = text ?? "";
+    panelEls.machineText.disabled = text === undefined;
+    if (text !== undefined && state.machine?.name !== state.machineName && document.activeElement !== panelEls.machineText) {
+      runCommand("circuitMachineShow", { name: state.machineName, text: null });
+    }
+    drawMachine();
+  }
+
+  let machineTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null);
+  panelEls.machineText.addEventListener("input", () => {
+    if (machineTimer) clearTimeout(machineTimer);
+    machineTimer = setTimeout(() => runCommand("circuitMachineShow", { name: null, text: panelEls.machineText.value }), 250);
+  });
+  panelEls.machineText.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") els.stage.focus({ preventScroll: true });
+    if (e.metaKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      keepMachine();
+      host.dispatch({ type: "circuitSave" });
+    }
+  });
+  function keepMachine() {
+    const p = state.project;
+    if (!p || !state.machineName) return;
+    const now = p.machines.find(([n]) => n === state.machineName)?.[1];
+    const text = panelEls.machineText.value;
+    if (now !== text && now !== `${text}\n`) host.dispatch({ type: "circuitMachineSet", generation: p.generation, name: state.machineName, text });
+  }
+
+  /** The states on a ring, the first marked as where it starts; each
+   *  transition an arrow — a loop for one to itself — labelled with its
+   *  condition and outputs; and the state table beside it. */
+  function drawMachine() {
+    const m = state.machine;
+    const c = panelEls.diagram;
+    const box = c.parentElement?.getBoundingClientRect();
+    const w = Math.max(200, Math.round((box?.width ?? 400) * 0.55)), h = Math.max(160, Math.round(box?.height ?? 200) - 8);
+    const dpr = window.devicePixelRatio || 1;
+    c.width = w * dpr; c.height = h * dpr;
+    c.style.width = `${w}px`; c.style.height = `${h}px`;
+    const g = /** @type {CanvasRenderingContext2D} */ (c.getContext("2d"));
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const col = colours();
+    if (!m) {
+      panelEls.machineTable.innerHTML = `<p class="ci-hint">A machine is written as its inputs, its outputs, its states (with a Moore output, <code>state S1 Z=1</code>) and its transitions (<code>S0 -> S1 when X</code>, a Mealy output after <code>/ Z=1</code>). It starts in its first state; at a clock edge it takes the first transition whose condition holds, or stays.</p>`;
+      return;
+    }
+    if (m.error) {
+      panelEls.machineTable.innerHTML = `<p class="ci-failure">${esc(m.error)}</p>`;
+      return;
+    }
+    const n = m.states.length, cx = w / 2, cy = h / 2, ring = Math.min(w, h) / 2 - 34, r = 20;
+    const at = m.states.map((_, i) => n === 1 ? [cx, cy] : [cx + ring * Math.cos((2 * Math.PI * i) / n - Math.PI / 2), cy + ring * Math.sin((2 * Math.PI * i) / n - Math.PI / 2)]);
+    g.font = `11px ui-monospace, "SF Mono", Menlo, monospace`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.lineWidth = 1.3;
+    const arrowHead = (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ angle) => {
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x - 8 * Math.cos(angle - 0.4), y - 8 * Math.sin(angle - 0.4));
+      g.lineTo(x - 8 * Math.cos(angle + 0.4), y - 8 * Math.sin(angle + 0.4));
+      g.closePath();
+      g.fill();
+    };
+    m.transitions.forEach(([from, to, when, outs]) => {
+      const label = [when, outs && `/ ${outs}`].filter(Boolean).join(" ");
+      g.strokeStyle = col.muted;
+      g.fillStyle = col.muted;
+      const [x0, y0] = at[from], [x1, y1] = at[to];
+      if (from === to) {
+        // A loop, outward from the ring's centre.
+        const a = Math.atan2(y0 - cy, x0 - cx) || -Math.PI / 2;
+        const lx = x0 + Math.cos(a) * (r + 10), ly = y0 + Math.sin(a) * (r + 10);
+        g.beginPath();
+        g.arc(lx, ly, 11, 0, Math.PI * 2);
+        g.stroke();
+        g.fillStyle = col.text;
+        g.fillText(label, x0 + Math.cos(a) * (r + 34), y0 + Math.sin(a) * (r + 30));
+        return;
+      }
+      // Bowed outward from the ring's middle, so labels stay apart; where
+      // both A→B and B→A are drawn, the second bows the other way.
+      const mx = (x0 + x1) / 2, my = (y0 + y1) / 2, dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy) || 1;
+      const bow = 24;
+      const out = (/** @type {number} */ sign) => [mx - sign * (dy / len) * bow, my + sign * (dx / len) * bow];
+      const [ax, ay] = out(1), [bx, by] = out(-1);
+      let outward = Math.hypot(ax - cx, ay - cy) >= Math.hypot(bx - cx, by - cy) ? 1 : -1;
+      if (from > to && m.transitions.some(([f, t2]) => f === to && t2 === from)) outward = -outward;
+      const [qx, qy] = out(outward);
+      const a0 = Math.atan2(qy - y0, qx - x0), a1 = Math.atan2(y1 - qy, x1 - qx);
+      const sx = x0 + Math.cos(a0) * r, sy = y0 + Math.sin(a0) * r, ex = x1 - Math.cos(a1) * r, ey = y1 - Math.sin(a1) * r;
+      g.beginPath();
+      g.moveTo(sx, sy);
+      g.quadraticCurveTo(qx, qy, ex, ey);
+      g.stroke();
+      arrowHead(ex, ey, a1);
+      g.fillStyle = col.text;
+      g.fillText(label, qx - outward * (dy / len) * 8, qy + outward * (dx / len) * 8);
+    });
+    m.states.forEach((name, i) => {
+      const [x, y] = at[i];
+      g.fillStyle = col.bg;
+      g.strokeStyle = i === 0 ? col.accent : col.text;
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.fillStyle = col.text;
+      g.fillText(name, x, m.stateOutputs[i] ? y - 5 : y);
+      if (m.stateOutputs[i]) {
+        g.fillStyle = col.high;
+        g.fillText(m.stateOutputs[i], x, y + 7);
+      }
+    });
+    // Where it starts.
+    const [sx, sy] = at[0];
+    g.strokeStyle = col.accent;
+    g.fillStyle = col.accent;
+    g.beginPath();
+    g.moveTo(sx - r - 22, sy);
+    g.lineTo(sx - r - 2, sy);
+    g.stroke();
+    arrowHead(sx - r - 1, sy, 0);
+    const code = (/** @type {number} */ s) => s.toString(2).padStart(m.bits, "0");
+    panelEls.machineTable.innerHTML = `<table class="ci-truth-table"><thead><tr><th>state</th><th>${esc(m.inputs.join(" ") || "—")}</th><th class="sep"></th><th>next</th><th>${esc(m.outputs.join(" ") || "—")}</th></tr></thead><tbody>${
+      m.table.map(([s, ins, next, outs]) => `<tr><td>${esc(m.states[s])} <span class="muted">${code(s)}</span></td><td>${ins || "—"}</td><td class="sep"></td><td>${esc(m.states[next])} <span class="muted">${code(next)}</span></td><td>${outs || "—"}</td></tr>`).join("")
+    }</tbody></table><p class="ci-hint">${m.mealy ? "Mealy: outputs on the transitions." : "Moore: outputs on the states."} ${m.states.length} states in ${m.bits} bit${m.bits === 1 ? "" : "s"}.</p>`;
   }
 
   /** The written table kept, as a held edit. */
@@ -1505,7 +1671,7 @@ export function createCircuit(host) {
     if (t.closest("[data-circuit-fit]")) return void fit();
     const tab = t.closest("[data-circuit-tab]");
     if (tab) {
-      state.tab = /** @type {"tests" | "graph" | "analysis"} */ (/** @type {HTMLElement} */ (tab).dataset.circuitTab);
+      state.tab = /** @type {"tests" | "graph" | "analysis" | "machines"} */ (/** @type {HTMLElement} */ (tab).dataset.circuitTab);
       return void renderPanel();
     }
     if (t.closest("[data-circuit-panel-toggle]")) {
@@ -1531,6 +1697,27 @@ export function createCircuit(host) {
       const p = state.project;
       if (p && state.table) host.dispatch({ type: "circuitTestSet", generation: p.generation, circuit: p.shown, label: state.table, text: null });
       return;
+    }
+    const machine = t.closest("[data-circuit-machine]");
+    if (machine) {
+      keepMachine();
+      state.machineName = /** @type {HTMLElement} */ (machine).dataset.circuitMachine ?? "";
+      state.machine = null;
+      panelEls.machineText.blur();
+      return void renderPanel();
+    }
+    if (t.closest("[data-circuit-machine-new]")) {
+      state.namingMachine = true;
+      return void renderPanel();
+    }
+    if (t.closest("[data-circuit-machine-keep]")) return void keepMachine();
+    if (t.closest("[data-circuit-machine-build]")) {
+      const nameIn = /** @type {HTMLInputElement | null} */ (panelEls.tools.querySelector("[data-circuit-machine-circuit]"));
+      const ff = /** @type {HTMLSelectElement | null} */ (panelEls.tools.querySelector("[data-circuit-machine-ff]"))?.value ?? "d";
+      const circuit = nameIn?.value.trim() ?? "";
+      if (!circuit) return void nameIn?.focus();
+      keepMachine();
+      return void runCommand("circuitMachineBuild", { name: state.machineName, flipflop: ff, circuit });
     }
     if (t.closest("[data-circuit-build]")) {
       const f = panelEls.analyseForm;
@@ -1600,6 +1787,25 @@ export function createCircuit(host) {
 
   runEls.hz.addEventListener("change", () => { if (state.live) setLive(true); });
 
+  panelEls.machineList.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const p = state.project;
+    const name = /** @type {HTMLInputElement | null} */ (panelEls.machineList.querySelector("input"))?.value.trim() ?? "";
+    state.namingMachine = false;
+    if (!p || !name) return void renderPanel();
+    state.machineName = name;
+    state.machine = null;
+    host.dispatch({ type: "circuitMachineSet", generation: p.generation, name, text: "inputs X\noutputs Z\nstate S0\nstate S1 Z=1\nS0 -> S1 when X\nS1 -> S0 when X'\n" });
+  });
+  panelEls.machineList.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.namingMachine) {
+      state.namingMachine = false;
+      renderPanel();
+    }
+    e.stopPropagation();
+  });
+  panelEls.tools.addEventListener("keydown", (e) => e.stopPropagation());
+
   panelEls.analyseForm.addEventListener("submit", (e) => {
     e.preventDefault();
     const expression = /** @type {HTMLInputElement} */ (panelEls.analyseForm.elements.namedItem("expression")).value.trim();
@@ -1644,6 +1850,12 @@ export function createCircuit(host) {
   new ResizeObserver(() => { if (state.panel && state.tab === "graph") drawGraph(); }).observe(panelEls.graph);
 
   return {
+    /** @param {{generation: number, machine: MachineView}} event */
+    machine(event) {
+      if (event.generation !== state.project?.generation) return;
+      state.machine = { ...event.machine, name: event.machine.name ?? state.machineName };
+      if (state.panel && state.tab === "machines") drawMachine();
+    },
     /** @param {{generation: number, analysis: Analysis}} event */
     analysis(event) {
       if (event.generation !== state.project?.generation) return;

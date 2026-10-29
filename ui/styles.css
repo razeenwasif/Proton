@@ -4767,6 +4767,20 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .ci-form-line.muted { color: var(--muted); }
 .ci-kmap { display: block; margin-top: 4px; }
 .ci-hint { margin: 4px 0; color: var(--muted); font: var(--z-2xs)/1.4 var(--zed); }
+.ci-machines { display: grid; grid-template-columns: 140px minmax(160px, 0.8fr) minmax(0, 1.6fr); flex: 1 1 auto; min-height: 0; }
+.ci-machines[hidden] { display: none; }
+.ci-machines textarea {
+  resize: none; border: 0; border-right: 1px solid var(--xl-line); padding: 8px 10px; background: var(--bg); color: var(--text);
+  font: var(--z-2xs)/1.5 ui-monospace, "SF Mono", Menlo, monospace; outline: none; white-space: pre; overflow: auto;
+}
+.ci-machine-view { display: flex; gap: 8px; min-height: 0; overflow: hidden; padding: 4px 8px; }
+.ci-machine-view canvas { flex: none; }
+.ci-machine-table { overflow: auto; min-width: 0; }
+.ci-machine-table .muted { color: var(--muted); }
+.ci-tool-input {
+  height: 24px; padding: 0 8px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head); color: var(--text);
+  font: var(--z-2xs)/1 ui-monospace, "SF Mono", Menlo, monospace;
+}
 .ci-graph { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .ci-graph canvas { position: absolute; inset: 0; display: block; }
 .ci-hold { display: flex; align-items: center; gap: 4px; color: var(--muted); font: var(--z-2xs)/1 var(--zed); white-space: nowrap; cursor: pointer; }

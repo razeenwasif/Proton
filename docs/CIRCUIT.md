@@ -275,6 +275,24 @@ band with their value, high-Z in blue; To Data writes it as
 `.proton/circuit/<project>-<circuit>.csv` and puts a cell reading it as
 `trace_df` in the notebook open (or `from-circuit.ipynb`), as Excel's ranges
 go. A table is capped at two million rows.
+C6 — analysis and synthesis: the panel's Analysis tab takes the circuit
+shown (no state, up to 16 input bits, each bit a variable) or expressions
+(`Y = A·B + C'; Z = A ^ B`, with `'`/`!`/`~`, `&`/`*`/`·`/side by side, `^`,
+`|`/`+`) to a truth table; each output's least sum of products and product
+of sums by Quine–McCluskey — essential primes, then an exact search for the
+cover up to 12 variables (a bounded one, Petrick's method in effect) and a
+greedy one above — and, for 2 to 6 inputs, a Karnaugh map in Gray order with
+each group outlined. Build lays it out as a new circuit, AND/OR, NAND only
+or (from the product of sums) NOR only, every junction a wire's end, its
+truth table attached as the test "truth". The Machines tab is the FSM
+editor, as text rather than drawn: inputs, outputs, states with Moore
+outputs, transitions with conditions and Mealy outputs, drawn as a diagram
+and a state table as it is typed, kept as `machines/<name>.fsm`; Build
+makes `<name>` and `<name>_logic` with D or JK flip-flops (the logic
+minimised through the excitation table, codes no state has as don't
+cares, the parts joined by tunnels) and the machine's own run as its test.
+Not built: a state table read back from a circuit of flip-flops, and
+dragging states about.
 
 | | What | Proved by |
 |---|---|---|

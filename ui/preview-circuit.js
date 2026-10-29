@@ -15,6 +15,10 @@ const RUNNING = {"circuit":"main","wires":[{"bits":1,"hex":"1","z":false,"someZ"
 /** The full adder's main circuit analysed, as the core sent it. */
 const ANALYSIS = {"source":"main","inputs":["A","B","Cin"],"outputs":["Cout","S"],"columns":["00010111","01101001"],"sop":["B·Cin + A·Cin + A·B","A'·B'·Cin + A'·B·Cin' + A·B'·Cin' + A·B·Cin"],"pos":["(B + Cin)·(A + Cin)·(A + B)","(A + B + Cin)·(A + B' + Cin')·(A' + B + Cin')·(A' + B' + Cin)"],"groups":[[[3,3],[5,5],[6,6]],[[1,7],[2,7],[4,7],[7,7]]],"exact":true,"error":null};
 
+/** A machine that says 1 after two 1s in a row, as the core read it. */
+const MACHINE_TEXT = "inputs X\noutputs Z\nstate S0\nstate S1\nstate S2 Z=1\nS0 -> S1 when X\nS1 -> S2 when X\nS1 -> S0 when X'\nS2 -> S0 when !X\n";
+const MACHINE = {"name":null,"inputs":["X"],"outputs":["Z"],"states":["S0","S1","S2"],"stateOutputs":["","","Z=1"],"transitions":[[0,1,"X",""],[1,2,"X",""],[1,0,"X'",""],[2,0,"!X",""]],"mealy":false,"bits":2,"table":[[0,"0",0,"0"],[0,"1",1,"0"],[1,"0",0,"0"],[1,"1",2,"0"],[2,"0",0,"1"],[2,"1",2,"1"]],"error":null};
+
 /** Where a new part's pins go, unturned, for the kinds the sample shows:
  *  Digital's layouts as the core places them. Others are drawn as a box
  *  with no pins — this is a stand-in, the core places them all. */
@@ -44,6 +48,8 @@ export function createCircuitPreview(_deliver) {
   let undone = [];
   /** @type {string[]} */
   let made = [];
+  /** State machines by name. @type {Record<string, string>} */
+  const machines = { ones: MACHINE_TEXT };
   /** Test tables by circuit, then label. @type {Record<string, Record<string, string>>} */
   const tables = { main: { table: "A B Cin Cout S\nloop(i, 8)\n(i>>2&1) (i>>1&1) (i&1) (((i>>2&1)+(i>>1&1)+(i&1))>>1) (((i>>2&1)+(i>>1&1)+(i&1))&1)\nend loop\n" } };
 
@@ -53,7 +59,7 @@ export function createCircuitPreview(_deliver) {
     return {
       type: "circuitProject",
       project: { path: open.path, name: open.name, top: open.top, circuits: open.circuits, shown: open.shown, parts: d.parts, wires: d.wires,
-        tests: Object.keys(tables[open.shown] ?? {}), tables: Object.entries(tables[open.shown] ?? {}), data: [], generation: open.generation, dirty: open.dirty,
+        tests: Object.keys(tables[open.shown] ?? {}), tables: Object.entries(tables[open.shown] ?? {}), data: [], machines: Object.entries(machines), generation: open.generation, dirty: open.dirty,
         canUndo: done.length > 0, canRedo: undone.length > 0, made,
         palette: ["in", "out", "clock", "const", "not", "and", "or", "xor", "nand", "nor", "tunnel", ...open.circuits.filter((c) => c !== open?.shown && c !== "main").map((c) => `sub:${c}`)] },
     };
@@ -194,6 +200,20 @@ export function createCircuitPreview(_deliver) {
           open.dirty = true;
           return [view()];
         }
+        case "circuitMachineSet":
+          if (!open) return [];
+          if (command.text === null) delete machines[command.name];
+          else machines[command.name] = command.text.endsWith("\n") ? command.text : `${command.text}\n`;
+          open.dirty = true;
+          return [view()];
+        case "circuitMachineShow": {
+          if (!open) return [];
+          const text = command.text ?? machines[command.name] ?? "";
+          if (text.trim() !== MACHINE_TEXT.trim()) return [notice("the preview draws only its own machine; the app reads anything")];
+          return [{ type: "circuitMachine", generation: open.generation, machine: { ...MACHINE, name: command.name } }];
+        }
+        case "circuitMachineBuild":
+          return [notice("building is the app's")];
         case "circuitAnalyse":
           if (!open) return [];
           if (command.expression || open.shown !== "main") return [notice("the preview analyses only its full adder; the app analyses anything")];
