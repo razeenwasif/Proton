@@ -32,7 +32,11 @@ data: Array<string>,
 /**
  * The shown circuit's test tables: each label and its text.
  */
-tables: Array<[string, string]>, generation: number, dirty: boolean, canUndo: boolean, canRedo: boolean, 
+tables: Array<[string, string]>, 
+/**
+ * The project's state machines: each name and its text.
+ */
+machines: Array<[string, string]>, generation: number, dirty: boolean, canUndo: boolean, canRedo: boolean, 
 /**
  * The parts the last edit made — placed or pasted — for the window to
  * select.

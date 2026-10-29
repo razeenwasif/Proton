@@ -11,12 +11,14 @@
 //! - [`hex`]: memory contents as text, read and written.
 //! - [`analysis`]: truth tables, minimised expressions, circuits built from
 //!   them.
+//! - [`fsm`]: state machines as text, tabulated and built with flip-flops.
 //! - [`testlang`]: test tables in Digital's language, run against one.
 
 pub mod analysis;
 pub mod circ;
 pub mod dig;
 pub mod edit;
+pub mod fsm;
 pub mod hex;
 pub mod parts;
 pub mod sim;

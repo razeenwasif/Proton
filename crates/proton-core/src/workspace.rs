@@ -1454,7 +1454,10 @@ impl Workspace {
             | Command::CircuitTestRun { .. }
             | Command::CircuitTraceClear { .. }
             | Command::CircuitAnalyse { .. }
-            | Command::CircuitSynthesise { .. }) => {
+            | Command::CircuitSynthesise { .. }
+            | Command::CircuitMachineSet { .. }
+            | Command::CircuitMachineShow { .. }
+            | Command::CircuitMachineBuild { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
                 if events.iter().any(|e| matches!(e, Event::CircuitHome { .. })) {

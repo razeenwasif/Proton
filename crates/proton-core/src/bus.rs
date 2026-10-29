@@ -745,6 +745,27 @@ pub enum Command {
         style: String,
         name: String,
     },
+    /// A state machine written (`text`) or taken away (none): a held edit.
+    CircuitMachineSet {
+        generation: u32,
+        name: String,
+        text: Option<String>,
+    },
+    /// A machine read: the project's by name, or text as written, for its
+    /// diagram and state table.
+    CircuitMachineShow {
+        generation: u32,
+        name: Option<String>,
+        text: Option<String>,
+    },
+    /// A machine built as `circuit` (and `circuit_logic`) with D or JK
+    /// flip-flops — `flipflop` is `d` or `jk` — its run as a test. A held edit.
+    CircuitMachineBuild {
+        generation: u32,
+        name: String,
+        flipflop: String,
+        circuit: String,
+    },
     /// Forget what the run has recorded for the graph.
     CircuitTraceClear {
         generation: u32,
@@ -1613,6 +1634,11 @@ pub enum Event {
     CircuitAnalysis {
         generation: u32,
         analysis: Box<crate::circuit::CircuitAnalysisView>,
+    },
+    /// A state machine read, or why it does not read.
+    CircuitMachine {
+        generation: u32,
+        machine: Box<crate::circuit::CircuitMachineView>,
     },
     /// Test tables run: each one's rows, and the rows that failed.
     CircuitTests {

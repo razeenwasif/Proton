@@ -521,7 +521,8 @@ pub enum Style {
 }
 
 /// A circuit built from a table's minimal forms: its inputs, the gates for
-/// each output, and its outputs, every junction a wire's end.
+/// each output, and its outputs, every junction a wire's end. Its own parts'
+/// ids start with a lower-case letter and `_`, as no signal's does.
 pub fn synthesise(table: &Table, style: Style) -> Result<Drawing, String> {
     let n = table.inputs.len();
     let mut covers = Vec::new();
@@ -582,7 +583,7 @@ pub fn synthesise(table: &Table, style: Style) -> Result<Drawing, String> {
             rails[i][0] = Some((x, y, y));
         }
         if inverted {
-            let id = format!("N{i}");
+            let id = format!("n_{i}");
             let inputs = if not == "not" { vec![] } else { vec![("inputs", "1".to_string())] };
             d.parts.push(part(id, not, x + 1, y, &inputs));
             d.wires.push(Wire::new((x, y), (x + 1, y)));
@@ -596,7 +597,7 @@ pub fn synthesise(table: &Table, style: Style) -> Result<Drawing, String> {
         let out_id = name.clone();
         // A constant: no gates.
         let always = |value: &str, d: &mut Drawing, y: i32| {
-            d.parts.push(part(format!("K{k}"), "const", gates_x, y, &[("value", value.to_string())]));
+            d.parts.push(part(format!("k_{k}"), "const", gates_x, y, &[("value", value.to_string())]));
             d.parts.push(part(out_id.clone(), "out", gates_x + 4, y, &[("label", out_id.clone())]));
             d.wires.push(Wire::new((gates_x, y), (gates_x + 4, y)));
         };
@@ -618,7 +619,7 @@ pub fn synthesise(table: &Table, style: Style) -> Result<Drawing, String> {
             let lits: Vec<(usize, bool)> = (0..n).filter_map(|i| literal(t, i).map(|b| (i, b))).collect();
             let m = lits.len() as i32;
             let slots = if m % 2 == 0 { m + 1 } else { m };
-            let id = format!("G{k}_{j}");
+            let id = format!("g_{k}_{j}");
             d.parts.push(part(id, gate, gates_x, y, &[("inputs", m.to_string())]));
             for (s, (i, b)) in lits.iter().enumerate() {
                 let s = s as i32;
@@ -653,7 +654,7 @@ pub fn synthesise(table: &Table, style: Style) -> Result<Drawing, String> {
             d.wires.push(Wire::new((ox, oy), (ox + 2, oy)));
             continue;
         }
-        d.parts.push(part(format!("F{k}"), last, last_x, ly, &[("inputs", t.to_string())]));
+        d.parts.push(part(format!("f_{k}"), last, last_x, ly, &[("inputs", t.to_string())]));
         for (s, (&(ox, oy), py)) in outs.iter().zip(pins_at(ly)).enumerate() {
             let mx = route_x + s as i32;
             for (a, b) in [((ox, oy), (mx, oy)), ((mx, oy), (mx, py)), ((mx, py), (last_x, py))] {

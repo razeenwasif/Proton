@@ -129,6 +129,8 @@ pub struct CircuitProjectView {
     pub data: Vec<String>,
     /// The shown circuit's test tables: each label and its text.
     pub tables: Vec<(String, String)>,
+    /// The project's state machines: each name and its text.
+    pub machines: Vec<(String, String)>,
     pub generation: u32,
     pub dirty: bool,
     pub can_undo: bool,
@@ -207,6 +209,28 @@ pub struct CircuitAnalysisView {
     pub groups: Vec<Vec<[u32; 2]>>,
     /// Whether every cover is known to be the least.
     pub exact: bool,
+    pub error: Option<String>,
+}
+
+/// A state machine as read: for its diagram, and its state table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitMachineView {
+    /// The project's name for it, if it is one of the project's.
+    pub name: Option<String>,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub states: Vec<String>,
+    /// Each state's outputs as written: `Z=1`.
+    pub state_outputs: Vec<String>,
+    /// Each transition: from, to, its condition, its outputs.
+    pub transitions: Vec<(u32, u32, String, String)>,
+    pub mealy: bool,
+    /// Bits to number the states.
+    pub bits: u32,
+    /// The state table: state, inputs as bits, next state, outputs as bits.
+    pub table: Vec<(u32, String, u32, String)>,
     pub error: Option<String>,
 }
 
@@ -367,7 +391,13 @@ impl Circuits {
     pub fn apply(&mut self, root: &Path, command: Command) -> Vec<Event> {
         let runs = matches!(
             command,
-            Command::CircuitEdit { .. } | Command::CircuitUndo | Command::CircuitRedo | Command::CircuitShow { .. } | Command::CircuitAdd { .. } | Command::CircuitSynthesise { .. }
+            Command::CircuitEdit { .. }
+                | Command::CircuitUndo
+                | Command::CircuitRedo
+                | Command::CircuitShow { .. }
+                | Command::CircuitAdd { .. }
+                | Command::CircuitSynthesise { .. }
+                | Command::CircuitMachineBuild { .. }
         );
         let mut events = self.apply_inner(root, command);
         // A circuit changed, or another shown, while running: built afresh.
@@ -672,6 +702,72 @@ impl Circuits {
                 open.shown = name.clone();
                 record(open, after);
                 vec![notice(format!("built {name}, with its truth table as the test “truth”"), NoticeLevel::Info), self.project_event()]
+            }
+            Command::CircuitMachineSet { generation, name, text } => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else {
+                    return vec![notice("that project is no longer open".into(), NoticeLevel::Warn)];
+                };
+                let name = name.trim().to_string();
+                if !circ::is_name(&name) || name.contains(' ') {
+                    return vec![notice(format!("“{name}” cannot name a machine: letters, digits, - and _"), NoticeLevel::Warn)];
+                }
+                if let Some(t) = &text {
+                    if let Err(why) = proton_circuit::fsm::parse(t) {
+                        return vec![notice(format!("{name}: {why}"), NoticeLevel::Warn)];
+                    }
+                }
+                let mut after = open.project.clone();
+                match text {
+                    Some(t) => {
+                        let t = if t.ends_with('\n') { t } else { format!("{t}\n") };
+                        after.machines.insert(name, t);
+                    }
+                    None => {
+                        after.machines.remove(&name);
+                    }
+                }
+                if after != open.project {
+                    record(open, after);
+                }
+                vec![self.project_event()]
+            }
+            Command::CircuitMachineShow { generation, name, text } => {
+                let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else {
+                    return vec![notice("that project is no longer open".into(), NoticeLevel::Warn)];
+                };
+                let text = match (&text, &name) {
+                    (Some(t), _) => t.clone(),
+                    (None, Some(n)) => match open.project.machines.get(n) {
+                        Some(t) => t.clone(),
+                        None => return vec![notice(format!("there is no machine {n}"), NoticeLevel::Warn)],
+                    },
+                    (None, None) => return Vec::new(),
+                };
+                vec![Event::CircuitMachine { generation, machine: Box::new(machine_view(name, &text)) }]
+            }
+            Command::CircuitMachineBuild { generation, name, flipflop, circuit } => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else {
+                    return vec![notice("that project is no longer open".into(), NoticeLevel::Warn)];
+                };
+                let circuit = circuit.trim().to_string();
+                if !circ::is_name(&circuit) || circuit.contains(' ') {
+                    return vec![notice(format!("“{circuit}” cannot name a circuit: letters, digits, - and _"), NoticeLevel::Warn)];
+                }
+                let ff = match flipflop.as_str() {
+                    "d" => proton_circuit::fsm::FlipFlop::D,
+                    "jk" => proton_circuit::fsm::FlipFlop::Jk,
+                    other => return vec![notice(format!("“{other}” is not a flip-flop to build with: d or jk"), NoticeLevel::Warn)],
+                };
+                let Some(text) = open.project.machines.get(&name) else {
+                    return vec![notice(format!("there is no machine {name}: keep it first"), NoticeLevel::Warn)];
+                };
+                let mut after = open.project.clone();
+                if let Err(why) = proton_circuit::fsm::parse(text).and_then(|m| proton_circuit::fsm::build(&m, ff, &circuit, &mut after)) {
+                    return vec![notice(why, NoticeLevel::Warn)];
+                }
+                open.shown = circuit.clone();
+                record(open, after);
+                vec![notice(format!("built {circuit} and {circuit}_logic from {name}, with its run as the test “machine”"), NoticeLevel::Info), self.project_event()]
             }
             Command::CircuitTraceClear { generation } => {
                 let run = match self.running(generation) {
@@ -995,6 +1091,7 @@ impl Circuits {
                 tests: p.tests.get(&open.shown).map(|t| t.keys().cloned().collect()).unwrap_or_default(),
                 data: p.data.keys().cloned().collect(),
                 tables: p.tests.get(&open.shown).map(|t| t.iter().map(|(l, t)| (l.clone(), t.clone())).collect()).unwrap_or_default(),
+                machines: p.machines.iter().map(|(n, t)| (n.clone(), t.clone())).collect(),
                 generation: open.generation,
                 dirty: open.project != open.saved,
                 can_undo: !open.done.is_empty(),
@@ -1099,6 +1196,30 @@ fn drive(run: &mut Run, sets: &[(PartId, u64)], hold: bool) {
     if !hold {
         run.sample();
     }
+}
+
+/// A machine's text read, for its diagram and table, or why it does not.
+fn machine_view(name: Option<String>, text: &str) -> CircuitMachineView {
+    let mut view = CircuitMachineView { name, inputs: vec![], outputs: vec![], states: vec![], state_outputs: vec![], transitions: vec![], mealy: false, bits: 0, table: vec![], error: None };
+    let m = match proton_circuit::fsm::parse(text) {
+        Ok(m) => m,
+        Err(why) => {
+            view.error = Some(why);
+            return view;
+        }
+    };
+    let set = |outs: &[(String, bool)]| outs.iter().map(|(k, v)| format!("{k}={}", *v as u8)).collect::<Vec<_>>().join(" ");
+    let k = m.inputs.len();
+    let bits = |v: u32, n: usize| (0..n).map(|i| if v >> (n - 1 - i) & 1 == 1 { '1' } else { '0' }).collect::<String>();
+    view.table = m.table().into_iter().map(|r| (r.state as u32, bits(r.inputs, k), r.next as u32, r.outputs.iter().map(|b| if *b { '1' } else { '0' }).collect())).collect();
+    view.inputs = m.inputs.clone();
+    view.outputs = m.outputs.clone();
+    view.states = m.states.clone();
+    view.state_outputs = m.state_outputs.iter().map(|o| set(o)).collect();
+    view.transitions = m.transitions.iter().map(|t| (t.from as u32, t.to as u32, t.when.clone(), set(&t.outputs))).collect();
+    view.mealy = m.mealy();
+    view.bits = m.bits() as u32;
+    view
 }
 
 /// A table of expressions, if given, or else of a circuit of the project.
@@ -1713,6 +1834,40 @@ mod tests {
         let back = analysis(c.apply(&root, Command::CircuitAnalyse { generation: g, circuit: Some("majority".into()), expression: None }));
         assert_eq!(back.columns, vec!["00010111".to_string()]);
         assert!(c.apply(&root, Command::CircuitSynthesise { generation: g, circuit: None, expression: Some("A".into()), style: "wires".into(), name: "x".into() }).iter().any(|e| matches!(e, Event::Notice { .. })));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_state_machine_is_kept_shown_and_built_passing_its_own_run() {
+        let root = scratch("machine");
+        let mut c = Circuits::default();
+        let g = view(&c.apply(&root, Command::CircuitNew { name: "seq".into() })).unwrap().generation;
+        let text = "inputs X\noutputs Z\nstate S0\nstate S1\nstate S2 Z=1\nS0 -> S1 when X\nS1 -> S2 when X\nS1 -> S0 when X'\nS2 -> S0 when !X\n";
+        assert!(c.apply(&root, Command::CircuitMachineSet { generation: g, name: "ones".into(), text: Some("A -> B when Y".into()) }).iter().any(|e| matches!(e, Event::Notice { .. })));
+        let v = view(&c.apply(&root, Command::CircuitMachineSet { generation: g, name: "ones".into(), text: Some(text.into()) })).unwrap();
+        assert_eq!(v.machines, vec![("ones".to_string(), text.to_string())]);
+        let shown = match c.apply(&root, Command::CircuitMachineShow { generation: g, name: Some("ones".into()), text: None }).remove(0) {
+            Event::CircuitMachine { machine, .. } => *machine,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!((shown.states.len(), shown.transitions.len(), shown.bits, shown.mealy, shown.table.len()), (3, 4, 2, false, 6));
+        assert_eq!(shown.state_outputs[2], "Z=1");
+        assert_eq!(shown.table[3], (1, "1".to_string(), 2, "0".to_string()), "S1 on 1 goes to S2, saying 0");
+        let draft = match c.apply(&root, Command::CircuitMachineShow { generation: g, name: None, text: Some("A -> ".into()) }).remove(0) {
+            Event::CircuitMachine { machine, .. } => *machine,
+            other => panic!("{other:?}"),
+        };
+        assert!(draft.error.is_some());
+        let v = view(&c.apply(&root, Command::CircuitMachineBuild { generation: g, name: "ones".into(), flipflop: "jk".into(), circuit: "detector".into() })).unwrap();
+        assert!(v.shown == "detector" && v.circuits.contains(&"detector_logic".to_string()));
+        assert_eq!(v.parts.iter().filter(|p| p.kind == "jkff").count(), 2);
+        let results = match c.apply(&root, Command::CircuitTestRun { generation: g, circuit: "detector".into(), label: None }).remove(0) {
+            Event::CircuitTests { results, .. } => results,
+            other => panic!("{other:?}"),
+        };
+        assert!(results[0].label == "machine" && results[0].failures.is_empty() && results[0].error.is_none(), "{results:?}");
+        c.apply(&root, Command::CircuitSave);
+        assert!(root.join("seq.circuit/machines/ones.fsm").exists() && root.join("seq.circuit/circuits/detector_logic.circ").exists());
         let _ = std::fs::remove_dir_all(root);
     }
 

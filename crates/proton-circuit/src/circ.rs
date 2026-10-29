@@ -7,6 +7,7 @@
 //!   tests/<circuit>.<label>.tests a test table for a circuit, in Digital's language
 //!   data/<name>.hex               a memory's contents (see [`crate::hex`]), named by
 //!                                 a ROM, RAM or table's `file=<name>`
+//!   machines/<name>.fsm           a state machine (see [`crate::fsm`])
 //! ```
 //!
 //! A `.circ` file is a line per part, sorted by id, then a line per wire,
@@ -413,6 +414,8 @@ pub struct Project {
     pub tests: BTreeMap<String, BTreeMap<String, String>>,
     /// Memory contents by name, as `data/<name>.hex` holds them.
     pub data: BTreeMap<String, String>,
+    /// State machines by name, as `machines/<name>.fsm` holds them.
+    pub machines: BTreeMap<String, String>,
 }
 
 /// A name a file can carry: no separators, no dots, nothing hidden.
@@ -489,7 +492,7 @@ pub fn read(dir: &Path) -> Result<Project, String> {
         return Err(format!("{shown} was written by a newer Proton (version {})", stored.version));
     }
     let mut p = Project { top: stored.top, ..Default::default() };
-    for (sub, ext) in [("circuits", "circ"), ("tests", "tests"), ("data", "hex")] {
+    for (sub, ext) in [("circuits", "circ"), ("tests", "tests"), ("data", "hex"), ("machines", "fsm")] {
         let Ok(entries) = std::fs::read_dir(dir.join(sub)) else { continue };
         let mut names: Vec<String> = entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         names.sort();
@@ -504,6 +507,8 @@ pub fn read(dir: &Path) -> Result<Project, String> {
                 p.circuits.insert(stem.to_string(), parse(&text).map_err(|e| format!("{sub}/{file}: {e}"))?);
             } else if ext == "hex" {
                 p.data.insert(stem.to_string(), text);
+            } else if ext == "fsm" {
+                p.machines.insert(stem.to_string(), text);
             } else {
                 let (circuit, label) = stem.split_once('.').unwrap_or((stem, ""));
                 p.tests.entry(circuit.to_string()).or_default().insert(label.to_string(), text);
@@ -532,7 +537,10 @@ pub fn write_project(dir: &Path, p: &Project) -> Result<(), String> {
     for (n, text) in &p.data {
         want.insert(("data", format!("{n}.hex")), text.clone());
     }
-    for sub in ["circuits", "tests", "data"] {
+    for (n, text) in &p.machines {
+        want.insert(("machines", format!("{n}.fsm")), text.clone());
+    }
+    for sub in ["circuits", "tests", "data", "machines"] {
         let d = dir.join(sub);
         if want.keys().any(|(s, _)| *s == sub) {
             std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
@@ -541,7 +549,7 @@ pub fn write_project(dir: &Path, p: &Project) -> Result<(), String> {
     for ((sub, file), text) in &want {
         put(&dir.join(sub).join(file), text)?;
     }
-    for (sub, ext) in [("circuits", ".circ"), ("tests", ".tests"), ("data", ".hex")] {
+    for (sub, ext) in [("circuits", ".circ"), ("tests", ".tests"), ("data", ".hex"), ("machines", ".fsm")] {
         if let Ok(entries) = std::fs::read_dir(dir.join(sub)) {
             for e in entries.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
