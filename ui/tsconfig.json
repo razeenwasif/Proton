@@ -51,6 +51,8 @@
     "study-graphic.js",
     "study-code.js",
     "sheet.js",
+    "circuit.js",
+    "preview-circuit.js",
     "sheet-chart.js",
     "pdf-view.js",
     "document.js"

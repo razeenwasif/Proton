@@ -2091,6 +2091,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"],
 :root[data-mode="research"],
 :root[data-mode="study"],
+:root[data-mode="circuit"],
 :root[data-mode="sheet"] {
   --z-ui:  calc(17.5px * var(--ui-scale));  /* tree, breadcrumb, headers */
   --z-sm:  calc(15px * var(--ui-scale));    /* the agent's prose */
@@ -2131,21 +2132,27 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="research"] .hint,
 :root[data-mode="study"] .hint,
 :root[data-mode="sheet"] .chrome-rail,
+:root[data-mode="circuit"] .chrome-rail,
 :root[data-mode="sheet"] .rail,
+:root[data-mode="circuit"] .rail,
 :root[data-mode="sheet"] .statusline,
+:root[data-mode="circuit"] .statusline,
 :root[data-mode="sheet"] .hint,
-/* The terminal is Codex's; in Chat, Data, Research, Notebook and Excel its toggle
+:root[data-mode="circuit"] .hint,
+/* The terminal is Codex's; in Chat, Data, Research, Notebook, Excel and Circuit its toggle
    would open something that is not on screen. */
 :root[data-mode="chat"] .titlebar [data-term-toggle],
 :root[data-mode="data"] .titlebar [data-term-toggle],
 :root[data-mode="research"] .titlebar [data-term-toggle],
 :root[data-mode="study"] .titlebar [data-term-toggle],
+:root[data-mode="circuit"] .titlebar [data-term-toggle],
 :root[data-mode="sheet"] .titlebar [data-term-toggle] { display: none; }
 :root[data-mode="codex"] .app,
 :root[data-mode="chat"] .app,
 :root[data-mode="data"] .app,
 :root[data-mode="research"] .app,
 :root[data-mode="study"] .app,
+:root[data-mode="circuit"] .app,
 :root[data-mode="sheet"] .app {
   grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2155,6 +2162,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .body,
 :root[data-mode="research"] .body,
 :root[data-mode="sheet"] .body,
+:root[data-mode="circuit"] .body,
 :root[data-mode="study"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
 
 /* Opaque, as Zed is. The window's own fill may be a veil over the desktop;
@@ -2166,8 +2174,10 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="research"] .titlebar,
 :root[data-mode="study"] .titlebar,
 :root[data-mode="sheet"] .titlebar,
+:root[data-mode="circuit"] .titlebar,
 .workspace[data-ws="codex"],
 .workspace[data-ws="sheet"],
+.workspace[data-ws="circuit"],
 .workspace[data-ws="data"] { background: var(--bg); }
 
 :root[data-mode="codex"] .titlebar,
@@ -2175,6 +2185,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
 :root[data-mode="study"] .titlebar,
+:root[data-mode="circuit"] .titlebar,
 :root[data-mode="sheet"] .titlebar {
   grid-row: 1; grid-column: 2;
   display: flex; flex-direction: column; align-items: center; gap: 14px;
@@ -4669,6 +4680,26 @@ button.st-source-name:hover { color: var(--cc-accent); }
 [data-layout="two"] { flex-direction: row !important; flex-wrap: wrap; justify-content: center; align-content: flex-start; align-items: flex-start !important; }
 
 
+
+/* ══ Circuit ═════════════════════════════════════════════════════════
+   A circuit drawn on one canvas (ui/circuit.js), on Codex's ground; the
+   side list and home page are Excel's, with the project's circuits above
+   its projects. */
+.ci-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--xl-line); cursor: grab; outline: none; touch-action: none; }
+.ci-stage:active { cursor: grabbing; }
+.ci-stage canvas { position: absolute; inset: 0; display: block; }
+.ci-empty { position: absolute; left: 0; right: 0; top: 40%; margin: 0; text-align: center; color: var(--muted); font: var(--z-xs)/1.4 var(--zed); pointer-events: none; }
+.ci-empty[hidden] { display: none; }
+.ci-shown { color: var(--muted); font: var(--z-xs)/1 var(--zed); white-space: nowrap; }
+.ci-section { padding: 12px 14px 4px; color: var(--muted); font: 600 var(--z-2xs)/1 var(--zed); text-transform: uppercase; letter-spacing: 0.04em; }
+.ci-make-top { visibility: hidden; cursor: pointer; }
+.xl-row:hover .ci-make-top { visibility: visible; }
+.ci-make-top:hover { color: var(--text); }
+.ci-add { padding: 2px 12px; }
+.ci-add input {
+  width: 100%; height: calc(var(--z-row) - 6px); padding: 0 8px; border: 1px solid var(--xl-line); border-radius: 5px;
+  background: var(--xl-head); color: var(--text); font: var(--z-ui)/1 var(--zed);
+}
 
 /* ══ Excel ═══════════════════════════════════════════════════════════
    A workbook's grid, drawn by the rows on screen (ui/sheet.js): the

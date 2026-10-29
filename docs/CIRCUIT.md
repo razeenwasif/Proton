@@ -225,6 +225,13 @@ The parts a course on digital logic uses, in the first version:
 
 Each lands with its tests passing.
 
+**Built so far** (2026-10-29): C0 — the engine, the `.dig` reader and test
+language, and the `Name.circuit/` folder; C1 — the mode on ⌃7: its home page
+of projects, making and opening one, its circuits listed with the top marked,
+the one shown drawn on a canvas (gate shapes, boxes around other parts' pins,
+wires and junctions; pan, zoom and fit), a circuit added and the top changed
+as held edits, ⌘S and the quit prompt. Editing the drawing is C2.
+
 | | What | Proved by |
 |---|---|---|
 | **C0** | `proton-circuit`: values, nets, gates, flip-flops, registers, RAM, ROM, the event simulator, settling, oscillation and conflicts, the `.circ` format; brought forward, the `.dig` reader and Digital's test language | each part's table; settling; oscillation named; format round trips; the person's CPU passing its own tables |

@@ -199,6 +199,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="research"><svg class="i"><use href="#i-flask"/></svg><span>Research</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="study"><svg class="i"><use href="#i-book"/></svg><span>Notebook</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="sheet"><svg class="i"><use href="#i-table"/></svg><span>Excel</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="circuit"><svg class="i"><use href="#i-bolt"/></svg><span>Circuit</span></button>
       </div>
 
       <div class="rail-drag" aria-hidden="true"></div>
@@ -878,6 +879,52 @@
         </div>
       </aside>
     </section>
+
+    <!-- Circuit: digital logic drawn, run and tested. Down the left the
+         project's circuit projects and, with one open, its circuits; in the
+         middle the circuit on screen, drawn on its grid with each pin where
+         the simulator joins it; or, when none is open, a page to open or
+         make one (ui/circuit.js). -->
+    <section class="workspace xl ci" data-ws="circuit"
+             style="--col-l:240px; grid-template-columns: var(--col-l) 1px minmax(0,1fr);">
+      <aside class="pane side xl-side">
+        <div class="cc-side-head">
+          <button class="cc-new" data-circuit-new title="New circuit project"><svg class="i"><use href="#i-plus"/></svg>New circuit</button>
+        </div>
+        <!-- From Event::CircuitHome, and the open project's circuits. -->
+        <div class="scroll xl-list" data-circuit-list></div>
+      </aside>
+
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
+
+      <main class="pane xl-main">
+        <div class="xl-home" data-circuit-home>
+          <h2>Circuit</h2>
+          <p>Draw gates, flip-flops, memories and buses, run them, and check them against test tables. A project is kept as a <code>.circuit</code> folder of text that diffs: a <code>.circ</code> file a circuit, a line a part or wire.</p>
+          <form class="xl-form" data-circuit-form>
+            <input type="text" placeholder="Name" aria-label="Project name" required>
+            <button type="submit">Make</button>
+          </form>
+          <div class="xl-found" data-circuit-found></div>
+        </div>
+
+        <div class="xl-book" data-circuit-project hidden>
+          <header class="xl-head">
+            <span class="xl-title" data-circuit-title></span>
+            <i class="xl-dirty" data-circuit-dirty title="Unsaved — ⌘S" hidden></i>
+            <span class="ci-shown" data-circuit-shown></span>
+            <span class="grow"></span>
+            <button class="tb-btn" data-circuit-fit title="Fit the circuit to the window  =" aria-label="Fit"><svg class="i"><use href="#i-expand"/></svg></button>
+            <button class="tb-btn" data-circuit-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>
+            <button class="tb-btn" data-circuit-close title="Close the project" aria-label="Close the project"><svg class="i"><use href="#i-close"/></svg></button>
+          </header>
+          <div class="ci-stage" data-circuit-stage tabindex="0" aria-label="Circuit">
+            <canvas data-circuit-canvas></canvas>
+            <p class="ci-empty" data-circuit-empty hidden>This circuit has no parts yet. Placing and wiring them comes next.</p>
+          </div>
+        </div>
+      </main>
+    </section>
   </div>
 
   <!-- ══ title bar — Codex only ═══════════════════════════════════
@@ -885,7 +932,7 @@
        one ground from edge to edge. The title bar it does keep stands on its
        end down the right edge, so the code has the window's full height. It
        holds what the rails held that Codex still needs: the window controls,
-       the modes — so the window can be left by mouse as well as by ⌃1–⌃6 —
+       the modes — so the window can be left by mouse as well as by ⌃1–⌃7 —
        and the panel toggles a hidden statusline would otherwise take with
        it. The empty stretch between them is the window's drag surface.
        After the body in the source because it is after it on screen, so Tab
@@ -905,6 +952,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="research" title="Research  ⌃4"><span>Research</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="study" title="Notebook  ⌃5"><span>Notebook</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="sheet" title="Excel  ⌃6"><span>Excel</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="circuit" title="Circuit  ⌃7"><span>Circuit</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">

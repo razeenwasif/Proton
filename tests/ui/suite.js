@@ -1,9 +1,10 @@
 import {orderingChecks} from './ordering.js';
 import {studyChecks} from './suite-study.js';
 import {sheetChecks} from './suite-sheet.js';
+import {circuitChecks} from './suite-circuit.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = [...['chat', 'codex', 'data', 'research', 'study', 'sheet'].map((mode) => `proton.panes.${mode}`),
+const layoutKeys = [...['chat', 'codex', 'data', 'research', 'study', 'sheet', 'circuit'].map((mode) => `proton.panes.${mode}`),
   // Which artifact each conversation had open.
   'proton.chat.panes'];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
@@ -1407,7 +1408,7 @@ await test('Every mode asks for an opaque window in the theme\'s ground, and nev
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
   const before = asked().length;
-  for (const mode of ['chat', 'data', 'research', 'study', 'sheet', 'codex']) {
+  for (const mode of ['chat', 'data', 'research', 'study', 'sheet', 'circuit', 'codex']) {
     await win.pushEvents([{type: 'modeChanged', mode}]);
   }
   const now = asked().slice(before);
@@ -1772,7 +1773,7 @@ await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s ch
   // Codex, Data and Research side by side, in the title bar and on the rail.
   for (const list of ['.tb-modes', '.mode-rail']) {
     const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
-    assert(order === 'chat,codex,data,research,study,sheet', `${list} is not in the new order: ${order}`);
+    assert(order === 'chat,codex,data,research,study,sheet,circuit', `${list} is not in the new order: ${order}`);
   }
   assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Research is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
@@ -2414,6 +2415,7 @@ await test('A long name in the project panel scrolls sideways instead of being c
 });
 await studyChecks({test, assert, win, doc, $, settle, key, shown});
 await sheetChecks({test, assert, win, doc, $, settle, key, shown});
+await circuitChecks({test, assert, win, doc, $, settle, key, shown});
 await orderingChecks(test, assert);
 document.querySelector('#status').textContent = `${passed} passed · ${failed} failed`;
 document.title = `Proton UI tests: ${passed} passed, ${failed} failed`;

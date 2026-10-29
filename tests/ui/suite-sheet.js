@@ -16,7 +16,7 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
   const cells = (/** @type {any[]} */ list, partial = false, generation = 3) => ({type: 'sheetCells', generation, version: 1, sheet: 0,
     rows: [0, 100], cols: [0, 30], cells: list, partial});
 
-  await test('Excel sits after Notebook: ⌃6 opens it, in Codex\'s chrome and on an opaque ground, and is the last', async () => {
+  await test('Excel sits after Notebook: ⌃6 opens it, in Codex\'s chrome and on an opaque ground, and Circuit follows it on ⌃7', async () => {
     const asked = () => (win.invokes ?? []).filter((/** @type {any} */ c) => c.name === 'set_opaque').map((/** @type {any} */ c) => c.args.color);
     const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
     await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
@@ -33,7 +33,8 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
     assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Excel is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
     const before7 = win.commands.length;
     key('7', {ctrlKey: true}); await settle();
-    assert(!sent(before7, 'setMode').length, '⌃7 asked for a mode');
+    assert(sent(before7, 'setMode').some((c) => c.mode === 'circuit'), '⌃7 did not ask for Circuit');
+    key('6', {ctrlKey: true}); await settle();
   });
 
   await test('With no workbook open, Excel lists the project\'s and makes one as a folder or an .xlsx', async () => {
