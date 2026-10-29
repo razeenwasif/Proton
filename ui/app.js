@@ -3367,6 +3367,8 @@ function renderEvent(event) {
     case "circuitProject":
       circuit?.project(event);
       break;
+    case "circuitExported":
+      break;
     case "circuitMachine":
       circuit?.machine(event);
       break;

@@ -4712,6 +4712,7 @@ button.st-source-name:hover { color: var(--cc-accent); }
 }
 .ci-pop-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font: var(--z-2xs)/1 var(--zed); }
 .ci-pop-row input { flex: 1 1 auto; min-width: 0; }
+.ci-pop-choices { display: flex; gap: 6px; }
 .ci-pop-hint { margin: 0; color: var(--muted); font: var(--z-2xs)/1.4 var(--zed); }
 .ci-add { padding: 2px 12px; }
 /* Running: a wire's colour is its value. Greens for 1 and 0, blue for

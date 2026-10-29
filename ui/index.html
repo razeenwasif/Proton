@@ -900,7 +900,7 @@
       <main class="pane xl-main">
         <div class="xl-home" data-circuit-home>
           <h2>Circuit</h2>
-          <p>Draw gates, flip-flops, memories and buses, run them, and check them against test tables. A project is kept as a <code>.circuit</code> folder of text that diffs: a <code>.circ</code> file a circuit, a line a part or wire.</p>
+          <p>Draw gates, flip-flops, memories and buses, run them, and check them against test tables. A project is kept as a <code>.circuit</code> folder of text that diffs: a <code>.circ</code> file a circuit, a line a part or wire. Digital's <code>.dig</code> files in the folder are listed too, and opening one imports it with the circuits it uses.</p>
           <form class="xl-form" data-circuit-form>
             <input type="text" placeholder="Name" aria-label="Project name" required>
             <button type="submit">Make</button>
@@ -928,6 +928,7 @@
               <button class="tb-btn" data-circuit-live title="Leave the clock running  c" aria-label="Run the clock"><svg class="i"><use href="#i-clock"/></svg></button>
               <button class="tb-btn" data-circuit-quick title="Quick run: the clock as fast as it goes until a Break rises  ⎋ stops" aria-label="Quick run"><svg class="i"><use href="#i-bolt"/></svg></button>
             </span>
+            <button class="tb-btn" data-circuit-export title="Write it out: Verilog, VHDL or SVG" aria-label="Export"><svg class="i"><use href="#i-ext"/></svg></button>
             <button class="tb-btn" data-circuit-panel-toggle title="Tests and the graph  t" aria-label="Tests and the graph"><svg class="i"><use href="#i-target"/></svg></button>
             <button class="tb-btn" data-circuit-fit title="Fit the circuit to the window  =" aria-label="Fit"><svg class="i"><use href="#i-expand"/></svg></button>
             <button class="tb-btn" data-circuit-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>

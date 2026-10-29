@@ -36,7 +36,7 @@ const turn = (part, pin) => ({ ...pin, x: part.x + (pin.y - part.y), y: part.y -
 /** @param {(events: any[]) => void} _deliver */
 export function createCircuitPreview(_deliver) {
   /** @type {{path: string, name: string}[]} */
-  const projects = [{ path: "labs/adder.circuit", name: "adder" }];
+  const projects = [{ path: "labs/adder.circuit", name: "adder", kind: "circuit" }, { path: "course/cpu.dig", name: "cpu", kind: "dig" }];
   /** @type {null | {path: string, name: string, top: string, circuits: string[], shown: string, generation: number, dirty: boolean}} */
   let open = null;
   let generations = 0;
@@ -155,7 +155,7 @@ export function createCircuitPreview(_deliver) {
           const slug = String(command.name).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "circuit";
           const path = `${slug}.circuit`;
           if (projects.some((p) => p.path === path)) return [notice(`${path} is already there`)];
-          projects.push({ path, name: slug });
+          projects.push({ path, name: slug, kind: "circuit" });
           projects.sort((a, b) => a.path.localeCompare(b.path));
           open = { path, name: slug, top: "main", circuits: ["main"], shown: "main", generation: ++generations, dirty: false };
           return [home(), view()];
@@ -218,6 +218,8 @@ export function createCircuitPreview(_deliver) {
           if (!open) return [];
           if (command.expression || open.shown !== "main") return [notice("the preview analyses only its full adder; the app analyses anything")];
           return [{ type: "circuitAnalysis", generation: open.generation, analysis: ANALYSIS }];
+        case "circuitExport": case "circuitImport":
+          return [notice("the preview does not write or import files; the app does")];
         case "circuitTestRun": case "circuitTraceToData": case "circuitTraceClear": case "circuitSynthesise":
           return [notice("the preview does not run tables or record; the app does")];
         case "circuitEdit":

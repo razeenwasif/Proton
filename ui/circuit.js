@@ -346,9 +346,13 @@ export function createCircuit(host) {
 
   function renderList() {
     const p = state.project;
+    // A Digital file is imported when it is opened.
     const projects = state.projects
-      .map((f) => `<button class="xl-row${f.path === p?.path ? " on" : ""}" data-circuit-open="${esc(f.path)}" title="${esc(f.path)}">
-        ${icon("bolt")}<span class="xl-row-name">${esc(f.name)}</span></button>`)
+      .map((f) => f.kind === "dig"
+        ? `<button class="xl-row" data-circuit-import="${esc(f.path)}" title="${esc(f.path)} — import it as a .circuit project beside it">
+          ${icon("file")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">Digital</span></button>`
+        : `<button class="xl-row${f.path === p?.path ? " on" : ""}" data-circuit-open="${esc(f.path)}" title="${esc(f.path)}">
+          ${icon("bolt")}<span class="xl-row-name">${esc(f.name)}</span></button>`)
       .join("");
     const found = els.home.querySelector("[data-circuit-found]");
     if (found) found.innerHTML = projects;
@@ -1297,6 +1301,8 @@ export function createCircuit(host) {
 
   els.stage.addEventListener("pointerdown", (e) => {
     const p = state.project;
+    // A popup over the drawing keeps its own clicks.
+    if (/** @type {HTMLElement} */ (e.target).closest(".ci-pop, .ci-empty")) return;
     if (!p || (e.button !== 0 && e.button !== 1)) return;
     closeForms();
     els.stage.focus({ preventScroll: true });
@@ -1650,6 +1656,26 @@ export function createCircuit(host) {
       e.stopPropagation();
       host.dispatch({ type: "circuitSetTop", circuit: /** @type {HTMLElement} */ (top).dataset.circuitTop });
       return;
+    }
+    const imported = t.closest("[data-circuit-import]");
+    if (imported) return void host.dispatch({ type: "circuitImport", path: /** @type {HTMLElement} */ (imported).dataset.circuitImport });
+    if (t.closest("[data-circuit-export]")) {
+      const p = state.project;
+      if (!p) return;
+      const r = els.stage.getBoundingClientRect();
+      return void popup(`<div class="ci-pop-row"><span>Write ${esc(p.shown)} as</span></div>
+        <div class="ci-pop-choices">
+          <button type="button" class="ci-tool" data-circuit-export-as="verilog">Verilog</button>
+          <button type="button" class="ci-tool" data-circuit-export-as="vhdl">VHDL</button>
+          <button type="button" class="ci-tool" data-circuit-export-as="svg">SVG</button>
+        </div>
+        <p class="ci-pop-hint">Into ${esc(p.path)}/export/. Verilog and VHDL are of the circuit with its subcircuits inline; SVG is the drawing.</p>`,
+      [(r.width - 340 - state.view.ox) / state.view.scale, (8 - state.view.oy) / state.view.scale], () => {});
+    }
+    const as = t.closest("[data-circuit-export-as]");
+    if (as) {
+      closeForms();
+      return void runCommand("circuitExport", { circuit: state.project?.shown, format: /** @type {HTMLElement} */ (as).dataset.circuitExportAs });
     }
     const open = t.closest("[data-circuit-open]");
     if (open) return void host.dispatch({ type: "circuitOpen", path: /** @type {HTMLElement} */ (open).dataset.circuitOpen });

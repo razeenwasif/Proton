@@ -434,6 +434,34 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     key('t'); await settle();
   });
 
+  await test('Export and import: Verilog, VHDL or SVG written out; a Digital file on the home page imported; a popup keeps its clicks', async () => {
+    await win.pushEvents([project(), {type: 'circuitRun', run: null}]); await settle(); await frames();
+    let before = win.commands.length;
+    ws().querySelector('[data-circuit-export]').click(); await settle();
+    const choices = [...ws().querySelectorAll('[data-circuit-export-as]')].map((b) => b.dataset.circuitExportAs);
+    assert(choices.join() === 'verilog,vhdl,svg', `the export menu offers ${choices.join()}`);
+    // A click inside the popup is the popup's: it stays open for it.
+    const stage = ws().querySelector('[data-circuit-stage]');
+    const choice = ws().querySelector('[data-circuit-export-as="vhdl"]');
+    const r = choice.getBoundingClientRect();
+    choice.dispatchEvent(new win.PointerEvent('pointerdown', {clientX: r.left + 4, clientY: r.top + 4, bubbles: true, pointerId: 1, button: 0}));
+    assert(ws().querySelector('.ci-pop'), 'pressing inside the popup closed it');
+    choice.click(); await settle();
+    const asked = sent(before, 'circuitExport')[0];
+    assert(asked?.format === 'vhdl' && asked.circuit === 'half' && asked.generation === 4 && !ws().querySelector('.ci-pop'), `exporting sent ${JSON.stringify(asked)}`);
+    // The home page: a Digital file, marked so, imported when opened.
+    await win.pushEvents([{type: 'circuitHome', projects: [{path: 'labs/adder.circuit', name: 'adder', kind: 'circuit'}, {path: 'course/cpu.dig', name: 'cpu', kind: 'dig'}]}, {type: 'circuitProject', project: null}]);
+    await settle();
+    const dig = ws().querySelector('[data-circuit-list] [data-circuit-import="course/cpu.dig"]');
+    assert(dig?.textContent.includes('Digital'), 'a Digital file is not listed as one');
+    before = win.commands.length;
+    dig.click(); await settle();
+    assert(sent(before, 'circuitImport')[0]?.path === 'course/cpu.dig', 'opening a Digital file did not import it');
+    // The project back, for the checks after.
+    await win.pushEvents([project()]); await settle(); await frames();
+    void stage;
+  });
+
   await test('Clicks and keys: another circuit, a new one, the top, zoom and fit, ⌘S and close', async () => {
     const before = win.commands.length;
     ws().querySelector('[data-circuit-show="main"]').click(); await settle();
