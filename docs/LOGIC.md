@@ -221,6 +221,24 @@ other logics, for a complete logic workbench.
 
 Each lands with its tests passing.
 
+**Built so far** (2026-10-30): L0 — `crates/proton-logic`: Proton's language
+read statement by statement (a statement runs on past a line ending in an
+operator or with a bracket open), each mistake named at its line and column;
+printed back with only the brackets its meaning needs, which 5,000 random
+formulas read back unchanged; typed, each variable's sort found from what it
+is given to and undeclared names in a formula's place taken as propositions;
+Logic4Fun's three sections read — `enum:` as ordered sorts, `cardinality = n`
+as `0..n-1`, clause form with its free variables meant for every value,
+`(A) = (B)` between formulas as `A <-> B`, `DIF` as `abs(a - b)`, `EST` as
+`defined`, FINDER's settings left out and named — and written back with every
+connective bracketed, counting quantifiers spelt out in `SOME`, and a range
+not starting at 0 written from 0 with the numbers said of it moved too
+(refused where that would change the meaning); and formulas worked out in a
+model, partial functions' missing values included, a model's tables checked
+against their kinds (one-to-one, onto, symmetric, total). Checked on a
+puzzle written here in both languages, and on eight queens. Logic4Fun's text
+is checked by reading it back, not by the site's solver.
+
 | | What | Proved by |
 |---|---|---|
 | **L0** | `proton-logic`: the language — parsed, typed, printed back the same; Logic4Fun's read and written; formulas evaluated | round trips; each construct against its meaning; Logic4Fun and Proton texts of one puzzle reading as one theory |

@@ -1,0 +1,11 @@
+[package]
+name = "proton-logic"
+description = "Logic mode's engine: Proton's logic language and Logic4Fun's, read, typed and written; formulas evaluated; truth tables, models and proofs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }

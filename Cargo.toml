@@ -12,6 +12,7 @@ members = [
     "crates/proton-lab",
     "crates/proton-library",
     "crates/proton-literature",
+    "crates/proton-logic",
     "crates/proton-mcp",
     "crates/proton-lsp",
     "crates/proton-plugin",
@@ -47,6 +48,7 @@ proton-sheet = { path = "crates/proton-sheet" }
 proton-index = { path = "crates/proton-index" }
 proton-library = { path = "crates/proton-library" }
 proton-literature = { path = "crates/proton-literature" }
+proton-logic = { path = "crates/proton-logic" }
 proton-mcp = { path = "crates/proton-mcp" }
 proton-lsp = { path = "crates/proton-lsp" }
 proton-plugin = { path = "crates/proton-plugin" }
