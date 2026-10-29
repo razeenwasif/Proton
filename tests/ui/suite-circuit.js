@@ -479,6 +479,50 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     key('Escape');
   });
 
+  await test('A circuit of 2,500 parts: drawn quickly at every zoom, as boxes when far out, only what is on the stage', async () => {
+    const {junctionsOf} = await import('/circuit.js');
+    assert(junctionsOf(HALF, () => false).join() === '2,0,3,2', `the half adder's junctions: ${junctionsOf(HALF, () => false)}`);
+    assert(junctionsOf(HALF, (w) => w.join() === '2,0,2,4').join() === '3,2', 'a wire left out still made a junction');
+    // The half adder 417 times over, as tests/ui/circuit-bench.js lays it out.
+    const parts = [], wires = [];
+    for (let i = 0; i < 417; i++) {
+      const ox = (i % 21) * 12, oy = Math.floor(i / 21) * 9;
+      for (const p of HALF.parts) parts.push({...p, id: `${p.id}${i}`, x: p.x + ox, y: p.y + oy, pins: p.pins.map((q) => ({...q, x: q.x + ox, y: q.y + oy}))});
+      for (const w of HALF.wires) wires.push([w[0] + ox, w[1] + oy, w[2] + ox, w[3] + oy]);
+    }
+    await win.pushEvents([project({parts, wires})]); await settle();
+    const stage = ws().querySelector('[data-circuit-stage]');
+    stage.focus();
+    key('='); await frames();
+    /** The drawing's own time, the median of a dozen, in ms. */
+    const median = () => {
+      const draw = win.circuitDebug().draw, times = [];
+      for (let i = 0; i < 12; i++) {
+        const t = win.performance.now();
+        draw();
+        times.push(win.performance.now() - t);
+      }
+      return times.sort((a, b) => a - b)[6];
+    };
+    assert(win.circuitDebug().view.scale < 6 && inked() > 1000, `fitted, the circuit is not drawn small: ${win.circuitDebug().view.scale}`);
+    // Ten times the measured time (tests/ui/circuit-bench.js): a regression,
+    // not a slow machine, is what fails this.
+    const fitted = median();
+    key('+'); key('+'); key('+'); await frames();
+    const close = median();
+    await win.pushEvents([{type: 'circuitRun', run: {generation: 4, circuit: 'half', wires: wires.map((_, i) => ({bits: 1, hex: String(i % 2), z: false, someZ: false})),
+      values: parts.filter((p) => p.kind === 'in').map((p) => [p.id, {bits: 1, hex: '1', z: false, someZ: false}]), waiting: 0, stepped: [], error: null, quick: null}}]);
+    await settle();
+    const running = median();
+    assert(fitted < 16 && close < 16 && running < 16, `drawing 2,502 parts took ${fitted.toFixed(1)}, ${close.toFixed(1)} and ${running.toFixed(1)} ms`);
+    // Panned so most of it is off the stage, less is drawn, and quicker.
+    const ink = inked();
+    stage.dispatchEvent(new win.WheelEvent('wheel', {deltaX: 2000, deltaY: 600, bubbles: true, cancelable: true})); await frames();
+    assert(inked() < ink, 'panning away drew as much');
+    await win.pushEvents([{type: 'circuitRun', run: null}, project()]); await settle();
+    key('='); await frames();
+  });
+
   await test('Clicks and keys: another circuit, a new one, the top, zoom and fit, ⌘S and close', async () => {
     const before = win.commands.length;
     ws().querySelector('[data-circuit-show="main"]').click(); await settle();

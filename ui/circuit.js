@@ -86,6 +86,8 @@ export function shownValue(v) {
 /** Zoom, in pixels a grid step. */
 const MIN_SCALE = 3;
 const MAX_SCALE = 80;
+/** Below this zoom parts are drawn as boxes and their pins left off. */
+const COARSE_SCALE = 6;
 const FIT_SCALE = 22;
 
 /** The gates drawn as their shapes: their body's width in steps. */
@@ -183,6 +185,108 @@ export function wireDistance(w, x, y) {
   const len = (bx - ax) ** 2 + (by - ay) ** 2;
   const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / len));
   return Math.hypot(x - (ax + t * (bx - ax)), y - (ay + t * (by - ay)));
+}
+
+/** Where three or more things meet at a wire's end — wire ends, and pins
+ *  where a wire ends — as x, y pairs; the wires `skip` says are left out.
+ *  @param {ProjectView} v @param {(w: number[]) => boolean} skip @returns {number[]} */
+export function junctionsOf(v, skip) {
+  // A point as one number: x and y each well inside 2^20 of the origin.
+  const key = (/** @type {number} */ x, /** @type {number} */ y) => (x + 0x80000) * 0x100000 + (y + 0x80000);
+  /** @type {Map<number, number>} */
+  const ends = new Map();
+  for (const w of v.wires) {
+    if (skip(w)) continue;
+    for (const k of [key(w[0], w[1]), key(w[2], w[3])]) ends.set(k, (ends.get(k) ?? 0) + 1);
+  }
+  for (const part of v.parts) for (const pin of part.pins) {
+    const k = key(pin.x, pin.y), n = ends.get(k);
+    if (n !== undefined) ends.set(k, n + 1);
+  }
+  const out = [];
+  for (const [k, n] of ends) if (n >= 3) out.push(Math.floor(k / 0x100000) - 0x80000, (k % 0x100000) - 0x80000);
+  return out;
+}
+
+/** A part's shape on the grid, turned and mirrored as it is: `body` filled
+ *  with the ground and stroked, `lines` only stroked, `ink` filled in the
+ *  text's colour; `f`, its frame (see {@link frame}); and `centre`, the
+ *  middle of its body on the grid, where a value is shown.
+ *  @param {PartView} p */
+export function outline(p) {
+  const solid = new Path2D(), lines = new Path2D(), ink = new Path2D();
+  const f = frame(p), kind = p.kind;
+  const ring = (/** @type {Path2D} */ to, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ r) => {
+    to.moveTo(x + r, y);
+    to.arc(x, y, r, 0, Math.PI * 2);
+  };
+  if (GATES.has(kind)) {
+    // An AND's D or an OR's shield, from its inputs' column to its output.
+    const inv = INVERTED.has(kind);
+    const x1 = f.x1 - (inv ? 1 : 0);
+    const top = f.y0 - 0.5, bot = f.y1 + 0.5, mid = (top + bot) / 2, half = (bot - top) / 2;
+    if (kind === "and" || kind === "nand") {
+      const flat = Math.max(f.x0, x1 - half);
+      solid.moveTo(f.x0, top); solid.lineTo(flat, top);
+      solid.arc(flat, mid, half, -Math.PI / 2, Math.PI / 2);
+      solid.lineTo(f.x0, bot); solid.closePath();
+    } else {
+      const back = f.x0 + (kind.includes("xor") || kind.includes("xnor") ? 0.35 : 0);
+      solid.moveTo(back, top);
+      solid.quadraticCurveTo(back + (x1 - back) * 0.6, top, x1, mid);
+      solid.quadraticCurveTo(back + (x1 - back) * 0.6, bot, back, bot);
+      solid.quadraticCurveTo(back + 0.6, mid, back, top);
+      solid.closePath();
+    }
+    if (kind === "xor" || kind === "xnor") {
+      lines.moveTo(f.x0, top);
+      lines.quadraticCurveTo(f.x0 + 0.6, mid, f.x0, bot);
+    }
+    if (inv) ring(solid, x1 + 0.3, mid, 0.28);
+  } else if (kind === "not") {
+    const x1 = f.x1 - 0.5;
+    solid.moveTo(0, -0.7); solid.lineTo(x1 - 0.3, 0); solid.lineTo(0, 0.7); solid.closePath();
+    ring(solid, x1 - 0.15, 0, 0.28);
+  } else if (kind === "in" || kind === "clock") {
+    solid.rect(-1.4, -0.5, 1.1, 1);
+    if (kind === "clock") {
+      lines.moveTo(-1.2, 0.2); lines.lineTo(-1.0, 0.2); lines.lineTo(-1.0, -0.2); lines.lineTo(-0.7, -0.2); lines.lineTo(-0.7, 0.2); lines.lineTo(-0.5, 0.2);
+    }
+  } else if (kind === "out" || kind === "probe") {
+    solid.rect(0.3, -0.5, 1.1, 1);
+  } else if (kind === "led") {
+    ring(solid, 0.85, 0, 0.55);
+  } else if (kind === "ground" || kind === "vdd") {
+    const dir = kind === "ground" ? 1 : -1;
+    lines.moveTo(0, 0); lines.lineTo(0, 0.4 * dir);
+    lines.moveTo(-0.5, 0.4 * dir); lines.lineTo(0.5, 0.4 * dir);
+    if (kind === "ground") { lines.moveTo(-0.3, 0.6); lines.lineTo(0.3, 0.6); lines.moveTo(-0.12, 0.8); lines.lineTo(0.12, 0.8); }
+  } else if (kind === "tunnel") {
+    solid.moveTo(0, 0); solid.lineTo(0.6, -0.35); solid.lineTo(0.6, 0.35); solid.closePath();
+  } else if (kind === "split") {
+    ink.rect(f.x0 + 0.35, f.y0 - 0.3, 0.3, f.y1 - f.y0 + 0.6);
+  } else if (DISPLAYS.has(kind)) {
+    const b = body(p);
+    solid.rect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+  } else if (kind === "pullup" || kind === "pulldown") {
+    const dir = kind === "pullup" ? -1 : 1;
+    lines.moveTo(0, 0); lines.lineTo(0, 0.3 * dir);
+    lines.rect(-0.18, Math.min(0.3 * dir, 1 * dir), 0.36, 0.7);
+    if (kind === "pullup") { lines.moveTo(-0.35, -1.15); lines.lineTo(0.35, -1.15); }
+  } else if (kind !== "const" && kind !== "text") {
+    // A box exactly around its pins.
+    const x0 = f.x0, x1 = Math.max(f.x1, f.x0 + 2);
+    solid.rect(x0, f.y0 - 0.5, x1 - x0, f.y1 - f.y0 + 1);
+  }
+  // Out of the part's own frame: mirrored, then turned, then moved to it.
+  let m = new DOMMatrix().translate(p.x, p.y).rotate(-90 * (p.rot % 4));
+  if (p.mirror) m = m.scale(1, -1);
+  const b = body(p);
+  const out = { body: new Path2D(), lines: new Path2D(), ink: new Path2D(), f, centre: world(p, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2) };
+  out.body.addPath(solid, m);
+  out.lines.addPath(lines, m);
+  out.ink.addPath(ink, m);
+  return out;
 }
 
 /** The legs of a wire from `a` to `b`: across, then down. @param {[number, number]} a @param {[number, number]} b @returns {[number, number][]} */
@@ -304,8 +408,25 @@ export function createCircuit(host) {
     const r = state.run, p = state.project;
     return r && p && r.generation === p.generation && r.circuit === p.shown ? r : null;
   };
+  /** Each run's values by part, made when first asked for. @type {WeakMap<object, Map<string, Value>>} */
+  const valuesBy = new WeakMap();
   /** A part's value while running. @param {string} id */
-  const valueOf = (id) => runOf()?.values.find(([k]) => k === id)?.[1];
+  const valueOf = (id) => {
+    const r = runOf();
+    if (!r) return undefined;
+    let m = valuesBy.get(r);
+    if (!m) valuesBy.set(r, m = new Map(r.values));
+    return m.get(id);
+  };
+  /** Each part's box on the grid, worked out once for each part the core sends. @type {WeakMap<PartView, ReturnType<typeof box>>} */
+  const boxes = new WeakMap();
+  const boxOf = (/** @type {PartView} */ p) => {
+    let b = boxes.get(p);
+    if (!b) boxes.set(p, b = box(p));
+    return b;
+  };
+  /** Where three or more wire ends and pins meet, for each circuit as sent. @type {WeakMap<object, number[]>} */
+  const junctions = new WeakMap();
 
   const wireKey = (/** @type {number[]} */ w) => w.join(",");
   /** Changes to the circuit shown, sent as one step. @param {any[]} ops */
@@ -936,7 +1057,9 @@ export function createCircuit(host) {
       const x0 = Math.floor(-ox / s), x1 = Math.ceil((r.width - ox) / s);
       const y0 = Math.floor(-oy / s), y1 = Math.ceil((r.height - oy) / s);
       const d = Math.max(1, s / 14);
-      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) g.fillRect(ox + x * s - d / 2, oy + y * s - d / 2, d, d);
+      g.beginPath();
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) g.rect(ox + x * s - d / 2, oy + y * s - d / 2, d, d);
+      g.fill();
     }
 
     g.save();
@@ -944,16 +1067,20 @@ export function createCircuit(host) {
     g.scale(s, s);
     g.lineCap = "round";
     g.lineJoin = "round";
+    // Only what is on the stage is drawn: the grid seen, and a margin for
+    // labels that reach out of a part's box.
+    const seen = { x0: -ox / s - 6, y0: -oy / s - 6, x1: (r.width - ox) / s + 6, y1: (r.height - oy) / s + 6 };
+    const inView = (/** @type {number} */ x0, /** @type {number} */ y0, /** @type {number} */ x1, /** @type {number} */ y1) => x1 >= seen.x0 && x0 <= seen.x1 && y1 >= seen.y0 && y0 <= seen.y1;
     // Wires, and a dot where three or more ends meet.
     const d = state.drag;
     const shift = d?.kind === "move" && d.moved ? [d.to[0] - d.from[0], d.to[1] - d.from[1]] : [0, 0];
+    const moving = shift[0] !== 0 || shift[1] !== 0;
+    const picked = (/** @type {number[]} */ w) => state.wires.size > 0 && state.wires.has(wireKey(w));
     g.lineWidth = Math.max(1.5 / s, 0.09);
-    /** @type {Map<string, number>} */
-    const ends = new Map();
     const run = runOf();
     /** A wire's colour: selected, then its value when running. @param {number} i */
     const wireColour = (i) => {
-      if (state.wires.has(wireKey(p.wires[i]))) return col.accent;
+      if (picked(p.wires[i])) return col.accent;
       const v = run?.wires[i];
       if (!v) return col.muted;
       if (v.z) return col.z;
@@ -962,9 +1089,12 @@ export function createCircuit(host) {
     };
     const byColour = /** @type {Map<string, number[]>} */ (new Map());
     p.wires.forEach((w, i) => {
+      const [dx, dy] = moving && picked(w) ? shift : [0, 0];
+      if (!inView(Math.min(w[0], w[2]) + dx, Math.min(w[1], w[3]) + dy, Math.max(w[0], w[2]) + dx, Math.max(w[1], w[3]) + dy)) return;
       const c = wireColour(i);
-      byColour.set(c, [...(byColour.get(c) ?? []), i]);
-      if (!state.wires.has(wireKey(w)) || !d?.moved) for (const k of [`${w[0]},${w[1]}`, `${w[2]},${w[3]}`]) ends.set(k, (ends.get(k) ?? 0) + 1);
+      const list = byColour.get(c);
+      if (list) list.push(i);
+      else byColour.set(c, [i]);
     });
     for (const [colour, list] of byColour) {
       g.strokeStyle = colour;
@@ -972,7 +1102,7 @@ export function createCircuit(host) {
       g.beginPath();
       for (const i of list) {
         const w = p.wires[i];
-        const [dx, dy] = state.wires.has(wireKey(w)) ? shift : [0, 0];
+        const [dx, dy] = moving && picked(w) ? shift : [0, 0];
         g.moveTo(w[0] + dx, w[1] + dy);
         g.lineTo(w[2] + dx, w[3] + dy);
       }
@@ -981,62 +1111,83 @@ export function createCircuit(host) {
     g.lineWidth = Math.max(1.5 / s, 0.09);
     // A bus says its value, at the middle of each wire long enough to hold it.
     if (run) {
-      p.wires.forEach((w, i) => {
-        const v = run.wires[i];
-        if (!v || v.bits === 1 || Math.abs(w[2] - w[0]) + Math.abs(w[3] - w[1]) < 2) return;
+      for (const list of byColour.values()) for (const i of list) {
+        const w = p.wires[i], v = run.wires[i];
+        if (!v || v.bits === 1 || Math.abs(w[2] - w[0]) + Math.abs(w[3] - w[1]) < 2) continue;
         text(g, shownValue(v), (w[0] + w[2]) / 2, (w[1] + w[3]) / 2 - 0.4, v.z ? col.z : col.bus, 0.5, "center");
-      });
-    }
-    for (const part of p.parts) for (const pin of part.pins) {
-      const k = `${pin.x},${pin.y}`;
-      if (ends.has(k)) ends.set(k, /** @type {number} */ (ends.get(k)) + 1);
-    }
-    g.fillStyle = col.muted;
-    for (const [k, n] of ends) {
-      if (n < 3) continue;
-      const [x, y] = k.split(",").map(Number);
-      g.beginPath();
-      g.arc(x, y, 0.16, 0, Math.PI * 2);
-      g.fill();
-    }
-
-    for (const part of p.parts) {
-      const on = state.parts.has(part.id);
-      if (on && (shift[0] || shift[1])) {
-        g.save();
-        g.translate(shift[0], shift[1]);
-        drawPart(g, part, col, s, true);
-        g.restore();
-      } else {
-        drawPart(g, part, col, s, on);
       }
     }
+    // The junctions: worked out once a circuit, but afresh while wires move.
+    let dots = moving ? null : junctions.get(p);
+    if (!dots) {
+      dots = junctionsOf(p, moving ? picked : () => false);
+      if (!moving) junctions.set(p, dots);
+    }
+    g.fillStyle = col.muted;
+    g.beginPath();
+    for (let i = 0; i < dots.length; i += 2) {
+      const x = dots[i], y = dots[i + 1];
+      if (!inView(x, y, x, y)) continue;
+      g.moveTo(x + 0.16, y);
+      g.arc(x, y, 0.16, 0, Math.PI * 2);
+    }
+    g.fill();
 
-    // While running: inputs and displays show their values; a high LED lights.
+    /** @type {PartView[]} */
+    const shown = [];
+    for (const part of p.parts) {
+      const on = state.parts.has(part.id);
+      const b = boxOf(part), [dx, dy] = on && moving ? shift : [0, 0];
+      if (inView(b.x0 + dx, b.y0 + dy, b.x1 + dx, b.y1 + dy)) shown.push(part);
+    }
+    // Zoomed far out, with a gate a dozen pixels across, each part is drawn
+    // as its box: a path for all of them, the selected in another.
+    if (s < COARSE_SCALE) {
+      for (const on of [false, true]) {
+        const [dx, dy] = on ? shift : [0, 0];
+        g.beginPath();
+        for (const part of shown) {
+          if (state.parts.has(part.id) !== on) continue;
+          const b = boxOf(part);
+          g.rect(b.x0 + dx, b.y0 + dy, b.x1 - b.x0, b.y1 - b.y0);
+        }
+        g.fillStyle = col.bg;
+        g.strokeStyle = on ? col.accent : col.text;
+        g.lineWidth = Math.max(1.5 / s, 0.08) * (on ? 1.5 : 1);
+        g.fill();
+        g.stroke();
+      }
+    }
+    if (s >= COARSE_SCALE) drawParts(g, shown, col, s, shift);
+    drawPins(g, shown, col, s, shift);
+
+    // While running: inputs and displays show their values; a high LED
+    // lights. The highlights go in a path, the values are drawn together.
     if (run) {
-      for (const part of p.parts) {
+      const lit = new Path2D();
+      held = new Map();
+      for (const part of shown) {
         const v = valueOf(part.id);
         if (!v) continue;
-        const b = body(part);
-        const [x, y] = world(part, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+        const [x, y] = outlineOf(part).centre, kind = part.kind;
         const high = v.bits === 1 && v.hex === "1" && !v.z;
-        if (DISPLAYS.has(part.kind)) {
+        if (DISPLAYS.has(kind)) {
           face(g, part, v, col);
-        } else if (part.kind === "led") {
+        } else if (kind === "led") {
           g.fillStyle = high ? col.high : col.bg;
           g.beginPath();
           g.arc(x, y, 0.42, 0, Math.PI * 2);
           g.fill();
         } else {
-          if (high) {
-            g.fillStyle = col.high;
-            g.globalAlpha = 0.3;
-            g.fillRect(x - 0.5, y - 0.45, 1, 0.9);
-            g.globalAlpha = 1;
-          }
+          if (high) lit.rect(x - 0.5, y - 0.45, 1, 0.9);
           text(g, shownValue(v), x, y, v.z ? col.z : col.text, 0.6, "center");
         }
       }
+      g.fillStyle = col.high;
+      g.globalAlpha = 0.3;
+      g.fill(lit);
+      g.globalAlpha = 1;
+      drawHeld(g);
     }
 
     // A wire being drawn, by the mouse or from the keyboard.
@@ -1078,106 +1229,111 @@ export function createCircuit(host) {
     g.restore();
   }
 
-  /** @param {CanvasRenderingContext2D} g @param {PartView} p @param {ReturnType<typeof colours>} colours_ @param {number} s @param {boolean} on selected: drawn in the accent */
-  function drawPart(g, p, colours_, s, on) {
-    const col = on ? { ...colours_, text: colours_.accent } : colours_;
-    const line = Math.max(1.5 / s, 0.08) * (on ? 1.5 : 1);
-    if (p.problem) {
-      g.save();
-      g.strokeStyle = col.danger;
-      g.setLineDash([0.2, 0.15]);
-      g.lineWidth = line;
-      g.strokeRect(p.x - 0.5, p.y - 0.5, 3, 2);
-      g.restore();
-      text(g, p.kind, p.x + 1, p.y + 0.5, col.danger, 0.55, "center");
-      return;
+  /** Each part's outline on the grid, made once for each part the core sends. @type {WeakMap<PartView, ReturnType<typeof outline>>} */
+  const outlines = new WeakMap();
+  const outlineOf = (/** @type {PartView} */ p) => {
+    let o = outlines.get(p);
+    if (!o) outlines.set(p, o = outline(p));
+    return o;
+  };
+
+  /** The parts drawn, each from its outline, so all of them take a fill
+   *  and two strokes, and the selected another; then their labels, and
+   *  any part the core could not place, as a dashed box naming its kind.
+   *  @param {CanvasRenderingContext2D} g @param {PartView[]} parts @param {ReturnType<typeof colours>} colours_ @param {number} s @param {number[]} shift */
+  function drawParts(g, parts, colours_, s, shift) {
+    for (const on of [false, true]) {
+      const body = new Path2D(), lines = new Path2D(), ink = new Path2D();
+      const moved = on && (shift[0] !== 0 || shift[1] !== 0) ? new DOMMatrix().translate(shift[0], shift[1]) : undefined;
+      for (const p of parts) {
+        if (p.problem || state.parts.has(p.id) !== on) continue;
+        const o = outlineOf(p);
+        body.addPath(o.body, moved);
+        lines.addPath(o.lines, moved);
+        ink.addPath(o.ink, moved);
+      }
+      g.lineWidth = Math.max(1.5 / s, 0.08) * (on ? 1.5 : 1);
+      g.fillStyle = colours_.bg;
+      g.strokeStyle = on ? colours_.accent : colours_.text;
+      g.fill(body);
+      g.stroke(body);
+      g.stroke(lines);
+      g.fillStyle = on ? colours_.accent : colours_.text;
+      g.fill(ink);
     }
-    g.save();
-    g.translate(p.x, p.y);
-    g.rotate((-Math.PI / 2) * (p.rot % 4));
-    if (p.mirror) g.scale(1, -1);
-    g.lineWidth = line;
-    g.strokeStyle = col.text;
-    g.fillStyle = col.bg;
-    const f = frame(p);
-    const label = setting(p, "label");
-    const kind = p.kind;
-    if (GATES.has(kind)) {
-      gate(g, kind, f);
-    } else if (kind === "not") {
-      const x1 = f.x1 - 0.5;
-      g.beginPath();
-      g.moveTo(0, -0.7); g.lineTo(x1 - 0.3, 0); g.lineTo(0, 0.7); g.closePath();
-      g.fill(); g.stroke();
-      bubble(g, x1 - 0.15, 0);
-    } else if (kind === "in" || kind === "clock") {
-      g.beginPath();
-      g.rect(-1.4, -0.5, 1.1, 1);
-      g.fill(); g.stroke();
-      if (kind === "clock") {
+    held = new Map();
+    for (const p of parts) {
+      const on = state.parts.has(p.id);
+      const col = on ? { ...colours_, text: colours_.accent } : colours_;
+      const moved = on && (shift[0] !== 0 || shift[1] !== 0);
+      if (moved) {
+        g.save();
+        g.translate(shift[0], shift[1]);
+      }
+      if (p.problem) {
+        g.save();
+        g.strokeStyle = col.danger;
+        g.setLineDash([0.2, 0.15]);
+        g.lineWidth = Math.max(1.5 / s, 0.08) * (on ? 1.5 : 1);
+        g.strokeRect(p.x - 0.5, p.y - 0.5, 3, 2);
+        g.restore();
+        text(g, p.kind, p.x + 1, p.y + 0.5, col.danger, 0.55, "center");
+      } else if (0.6 * s >= 5) {
+        labels(g, p, outlineOf(p).f, col);
+      }
+      if (moved) g.restore();
+    }
+    drawHeld(g);
+  }
+
+  /** The words on a part, upright wherever it is turned: its label, a
+   *  constant's value, a tunnel's net, a box's kind.
+   *  @param {CanvasRenderingContext2D} g @param {PartView} p @param {{x0: number, x1: number, y0: number, y1: number}} f @param {ReturnType<typeof colours>} col */
+  function labels(g, p, f, col) {
+    const at = (/** @type {string} */ t, /** @type {number} */ lx, /** @type {number} */ ly, /** @type {string} */ colour, /** @type {number} */ size, /** @type {CanvasTextAlign} */ align) => {
+      const [x, y] = world(p, lx, ly);
+      text(g, t, x, y, colour, size, align);
+    };
+    const label = setting(p, "label"), kind = p.kind;
+    if (kind === "in" || kind === "clock") at(label, -1.6, 0, col.text, 0.6, "right");
+    else if (kind === "out" || kind === "led" || kind === "probe") at(label, 1.6, 0, col.text, 0.6, "left");
+    else if (kind === "const") at(setting(p, "value") || "1", -0.25, 0, col.text, 0.6, "right");
+    else if (kind === "tunnel") at(setting(p, "net"), 0.8, 0, col.muted, 0.55, "left");
+    else if (kind === "text") at(setting(p, "text"), 0, 0, col.muted, 0.6, "left");
+    else if (GATES.has(kind)) at(label, (f.x0 + f.x1) / 2, f.y0 - 1, col.muted, 0.5, "center");
+    else if (!["not", "ground", "vdd", "split", "pullup", "pulldown"].includes(kind) && !DISPLAYS.has(kind)) {
+      const x0 = f.x0, x1 = Math.max(f.x1, f.x0 + 2);
+      const name = kind.startsWith("sub:") ? kind.slice(4) : BOX_NAMES[kind] ?? kind;
+      at(name, (x0 + x1) / 2, (f.y0 + f.y1) / 2, col.text, 0.55, "center");
+      if (label) at(label, (x0 + x1) / 2, f.y0 - 0.95, col.muted, 0.5, "center");
+    }
+  }
+
+  /** The pins of the parts drawn, inputs hollow and outputs filled, in a
+   *  path for each, a selected part's in the accent; too small to see when
+   *  zoomed far out, so left off.
+   *  @param {CanvasRenderingContext2D} g @param {PartView[]} parts @param {ReturnType<typeof colours>} col @param {number} s @param {number[]} shift */
+  function drawPins(g, parts, col, s, shift) {
+    if (s < COARSE_SCALE) return;
+    for (const on of [false, true]) {
+      const [dx, dy] = on ? shift : [0, 0];
+      g.lineWidth = Math.max(1.5 / s, 0.08) * (on ? 1.5 : 1);
+      g.strokeStyle = on ? col.accent : col.text;
+      for (const input of [true, false]) {
         g.beginPath();
-        g.moveTo(-1.2, 0.2); g.lineTo(-1.0, 0.2); g.lineTo(-1.0, -0.2); g.lineTo(-0.7, -0.2); g.lineTo(-0.7, 0.2); g.lineTo(-0.5, 0.2);
+        for (const part of parts) {
+          if (state.parts.has(part.id) !== on || part.problem) continue;
+          for (const pin of part.pins) {
+            if (pin.input !== input) continue;
+            g.moveTo(pin.x + dx + 0.12, pin.y + dy);
+            g.arc(pin.x + dx, pin.y + dy, 0.12, 0, Math.PI * 2);
+          }
+        }
+        g.fillStyle = input ? col.bg : on ? col.accent : col.text;
+        g.fill();
         g.stroke();
       }
-      text(g, label, -1.6, 0, col.text, 0.6, "right");
-    } else if (kind === "out" || kind === "led" || kind === "probe") {
-      g.beginPath();
-      if (kind === "led") g.arc(0.85, 0, 0.55, 0, Math.PI * 2);
-      else g.rect(0.3, -0.5, 1.1, 1);
-      g.fill(); g.stroke();
-      text(g, label, 1.6, 0, col.text, 0.6, "left");
-    } else if (kind === "const") {
-      text(g, setting(p, "value") || "1", -0.25, 0, col.text, 0.6, "right");
-    } else if (kind === "ground" || kind === "vdd") {
-      g.beginPath();
-      const dir = kind === "ground" ? 1 : -1;
-      g.moveTo(0, 0); g.lineTo(0, 0.4 * dir);
-      g.moveTo(-0.5, 0.4 * dir); g.lineTo(0.5, 0.4 * dir);
-      if (kind === "ground") { g.moveTo(-0.3, 0.6); g.lineTo(0.3, 0.6); g.moveTo(-0.12, 0.8); g.lineTo(0.12, 0.8); }
-      g.stroke();
-    } else if (kind === "tunnel") {
-      g.beginPath();
-      g.moveTo(0, 0); g.lineTo(0.6, -0.35); g.lineTo(0.6, 0.35); g.closePath();
-      g.fill(); g.stroke();
-      text(g, setting(p, "net"), 0.8, 0, col.muted, 0.55, "left");
-    } else if (kind === "split") {
-      g.fillStyle = col.text;
-      g.fillRect(f.x0 + 0.35, f.y0 - 0.3, 0.3, f.y1 - f.y0 + 0.6);
-    } else if (DISPLAYS.has(kind)) {
-      const b = body(p);
-      g.beginPath();
-      g.rect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
-      g.fill(); g.stroke();
-    } else if (kind === "pullup" || kind === "pulldown") {
-      const dir = kind === "pullup" ? -1 : 1;
-      g.beginPath();
-      g.moveTo(0, 0); g.lineTo(0, 0.3 * dir);
-      g.rect(-0.18, Math.min(0.3 * dir, 1 * dir), 0.36, 0.7);
-      g.stroke();
-      if (kind === "pullup") { g.beginPath(); g.moveTo(-0.35, -1.15); g.lineTo(0.35, -1.15); g.stroke(); }
-    } else if (kind === "text") {
-      text(g, setting(p, "text"), 0, 0, col.muted, 0.6, "left");
-    } else {
-      // A box exactly around its pins; a subcircuit is named for its circuit.
-      const x0 = f.x0, x1 = Math.max(f.x1, f.x0 + 2);
-      g.beginPath();
-      g.rect(x0, f.y0 - 0.5, x1 - x0, f.y1 - f.y0 + 1);
-      g.fill(); g.stroke();
-      const name = kind.startsWith("sub:") ? kind.slice(4) : BOX_NAMES[kind] ?? kind;
-      text(g, name, (x0 + x1) / 2, (f.y0 + f.y1) / 2, col.text, 0.55, "center");
-      if (label) text(g, label, (x0 + x1) / 2, f.y0 - 0.95, col.muted, 0.5, "center");
     }
-    // Pins: inputs hollow, outputs filled.
-    for (const pin of p.pins) {
-      const [x, y] = local(p, pin.x, pin.y);
-      g.beginPath();
-      g.arc(x, y, 0.12, 0, Math.PI * 2);
-      g.fillStyle = pin.input ? col.bg : col.text;
-      g.fill();
-      g.stroke();
-    }
-    if (label && GATES.has(kind)) text(g, label, (f.x0 + f.x1) / 2, f.y0 - 1, col.muted, 0.5, "center");
-    g.restore();
   }
 
   /** A display lit from its value: segments a–g and the point; a digit and
@@ -1219,51 +1375,23 @@ export function createCircuit(host) {
     g.restore();
   }
 
-  /** An AND's D or an OR's shield, from its inputs' column to its output.
-   *  @param {CanvasRenderingContext2D} g @param {string} kind @param {{x0: number, x1: number, y0: number, y1: number}} f */
-  function gate(g, kind, f) {
-    const inv = INVERTED.has(kind);
-    const x1 = f.x1 - (inv ? 1 : 0);
-    const top = f.y0 - 0.5, bot = f.y1 + 0.5, mid = (top + bot) / 2, half = (bot - top) / 2;
-    g.beginPath();
-    if (kind === "and" || kind === "nand") {
-      const flat = Math.max(f.x0, x1 - half);
-      g.moveTo(f.x0, top); g.lineTo(flat, top);
-      g.arc(flat, mid, half, -Math.PI / 2, Math.PI / 2);
-      g.lineTo(f.x0, bot); g.closePath();
-    } else {
-      const back = f.x0 + (kind.includes("xor") || kind.includes("xnor") ? 0.35 : 0);
-      g.moveTo(back, top);
-      g.quadraticCurveTo(back + (x1 - back) * 0.6, top, x1, mid);
-      g.quadraticCurveTo(back + (x1 - back) * 0.6, bot, back, bot);
-      g.quadraticCurveTo(back + 0.6, mid, back, top);
-      g.closePath();
-    }
-    g.fill(); g.stroke();
-    if (kind === "xor" || kind === "xnor") {
-      g.beginPath();
-      g.moveTo(f.x0, top);
-      g.quadraticCurveTo(f.x0 + 0.6, mid, f.x0, bot);
-      g.stroke();
-    }
-    if (inv) bubble(g, x1 + 0.3, mid);
-  }
-
-  /** @param {CanvasRenderingContext2D} g @param {number} x @param {number} y */
-  function bubble(g, x, y) {
-    g.beginPath();
-    g.arc(x, y, 0.28, 0, Math.PI * 2);
-    g.fill(); g.stroke();
-  }
 
   /** Text at a point of the part's frame, drawn in screen pixels so it is
    *  crisp at any zoom and upright however the part is turned.
    *  @param {CanvasRenderingContext2D} g @param {string} t @param {number} x @param {number} y @param {string} colour @param {number} size @param {CanvasTextAlign} align */
   function text(g, t, x, y, colour, size, align) {
-    if (!t) return;
-    const at = g.getTransform().transformPoint(new DOMPoint(x, y));
+    // Under five of the stage's own pixels high, text is too small to read.
+    if (!t || size * state.view.scale < 5) return;
     const px = size * state.view.scale * (window.devicePixelRatio || 1);
-    if (px < 5) return;
+    const m = g.getTransform();
+    const at = { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f };
+    if (held) {
+      const key = `${px}|${colour}|${align}`;
+      const list = held.get(key);
+      if (list) list.push(t, at.x, at.y);
+      else held.set(key, [t, at.x, at.y]);
+      return;
+    }
     g.save();
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = colour;
@@ -1271,6 +1399,28 @@ export function createCircuit(host) {
     g.textAlign = align;
     g.textBaseline = "middle";
     g.fillText(t, at.x, at.y);
+    g.restore();
+  }
+
+  /** Text held to be drawn together, by size, colour and alignment, while
+   *  many parts' labels are drawn: one font set for each kind, not each word.
+   *  @type {Map<string, (string | number)[]> | null} */
+  let held = null;
+  /** The text held, drawn. @param {CanvasRenderingContext2D} g */
+  function drawHeld(g) {
+    const all = held;
+    held = null;
+    if (!all) return;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.textBaseline = "middle";
+    for (const [key, list] of all) {
+      const [px, colour, align] = key.split("|");
+      g.fillStyle = colour;
+      g.font = `${px}px ui-monospace, "SF Mono", Menlo, monospace`;
+      g.textAlign = /** @type {CanvasTextAlign} */ (align);
+      for (let i = 0; i < list.length; i += 3) g.fillText(String(list[i]), Number(list[i + 1]), Number(list[i + 2]));
+    }
     g.restore();
   }
 
@@ -1951,7 +2101,9 @@ export function createCircuit(host) {
     },
     /** For the tests: the view, and the parts as drawn. */
     debug() {
-      return { view: { ...state.view }, project: state.project, run: state.run, live: !!state.live };
+      return { view: { ...state.view }, project: state.project, run: state.run, live: !!state.live,
+        /** The circuit drawn now, for a measure of how long it takes. */
+        draw };
     },
   };
 }
