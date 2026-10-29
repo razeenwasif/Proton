@@ -535,7 +535,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 21, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 22, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -1286,6 +1286,30 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(!ws().querySelector('[data-study-pick]') && !ws().querySelector('[data-study-remove]'), 'it can still be changed');
     assert(ws().querySelector('[data-study-tick="S01"]').disabled, 'its sources can still be ticked');
     await win.pushEvents([notebook([row('S01')])]); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+  await test('Circuit practice: asked for from its tile, its problems shown with their tables and references, each built in Circuit', async () => {
+    const circuitsMade = {id: 'C001', kind: 'circuits', title: 'Gates', made: 1, by: 'Claude Code', task: 'J0012'};
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [circuitsMade], languages: [], pythons: []}]); await settle();
+    ws().querySelector('[data-study-tile="circuits"]').click(); await settle();
+    let before = win.commands.length;
+    ws().querySelector('[data-study-make-form="circuits"]').requestSubmit(); await settle();
+    assert(sent(before, 'studyMake')[0]?.kind === 'circuits', 'circuit practice was not asked for');
+    const problem = {id: 'c1', title: 'XOR from NAND', statement: 'Build XOR from NAND gates [[S01 p. 3]].', inputs: [{name: 'A', bits: 1}, {name: 'B', bits: 1}],
+      outputs: [{name: 'Y', bits: 1}], clocked: false, table: 'A B Y\n0 0 0\n0 1 1\n1 0 1\n1 1 0\n', referenceKind: 'expressions', reference: 'Y = A ^ B\n',
+      hints: ['Four NANDs will do.'], explanation: 'XOR is true when they differ.', difficulty: 'easy', topic: 'Gates', cites: ['S01 p. 3']};
+    await win.pushEvents([{type: 'studyMadeOpen', made: circuitsMade, citations: [cite(1, 'S01 p. 3')], body: {shape: 'circuits', title: 'Gates', problems: [problem]}}]); await settle();
+    const card = ws().querySelector('[data-study-circuit="c1"]');
+    assert(card?.querySelector('h3')?.textContent === 'XOR from NAND' && card.textContent.includes('In A B · out Y'), 'the problem is not shown with its signals');
+    assert(card.querySelector('pre')?.textContent.startsWith('A B Y'), 'its table is not shown');
+    assert([...card.querySelectorAll('summary')].map((x) => x.textContent).join() === 'Its test table,Hints,A reference answer', 'the table, hints and reference are not behind their summaries');
+    before = win.commands.length;
+    card.querySelector('[data-study-circuit-build="c1"]').click(); await settle();
+    const modes = sent(before, 'setMode'), practice = sent(before, 'circuitPractice')[0];
+    assert(modes.some((c) => c.mode === 'circuit'), 'building did not go to Circuit');
+    assert(practice?.project === 'Gates' && practice.circuit === 'XOR from NAND' && JSON.stringify(practice.inputs) === '[["A",1],["B",1]]' && practice.table.startsWith('A B Y') && practice.clocked === false,
+      `building sent ${JSON.stringify(practice)}`);
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 }

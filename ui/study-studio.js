@@ -31,6 +31,7 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["quiz", "Quiz", "check", "Questions of every kind, each marked as you answer it"],
   ["practice", "Practice problems", "bulb", "Problems to work through, with hints and worked solutions"],
   ["coding", "Coding practice", "code", "Problems to solve in code here, each run against its tests as you go"],
+  ["circuits", "Circuit practice", "bolt", "Digital logic to build in Circuit, each checked by a test table its answer passes"],
   ["overview", "Learning overview", "layers", "The course topic by topic: taught, mapped, carded and checked"],
   ["audio", "Audio overview", "audio", "Two hosts talking the sources through, spoken by Fish Audio"],
   ["slides", "Slide deck", "desktop", "A lecture's slides, with speaker notes, for PowerPoint"],
@@ -57,6 +58,7 @@ const AMOUNTS = /** @type {Record<string, [string, string][]>} */ ({
   quiz: [["fewer", "Fewer — about 5"], ["standard", "About 10"], ["more", "More — about 20"]],
   practice: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
   coding: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
+  circuits: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
 });
 
 const STATES = /** @type {Record<string, string>} */ ({ waiting: "Waiting its turn", running: "Being made", repairing: "Being mended",
@@ -148,6 +150,19 @@ export function madeHtml(e, readOnly, found = { have: new Map(), unpicked: new S
   } else if (body.shape === "slides" || body.shape === "slide" || body.shape === "graphic" || body.shape === "coding") {
     // Each opens as its own (study-slides.js, study-graphic.js, study-code.js).
     content = "";
+  } else if (body.shape === "circuits") {
+    // Each problem: what to build, its signals, and its table; the reference
+    // shown when asked for; built in Circuit with its table as a test.
+    const signals = (/** @type {{name: string, bits: number}[]} */ list) => list.map((s) => s.bits > 1 ? `${esc(s.name)}[${s.bits}]` : esc(s.name)).join(" ") || "—";
+    content = `<ol class="st-circuits" data-turn="made">${body.problems.map((p) => `<li class="st-circuit" data-study-circuit="${esc(p.id)}">
+      <div class="st-circuit-head"><h3>${esc(p.title)}</h3><span class="st-faint">${esc(p.difficulty)}${p.topic ? ` · ${esc(p.topic)}` : ""}</span>${chips(p.cites)}</div>
+      <div class="md">${answerHtml(p.statement, citations)}</div>
+      <p class="st-faint">In ${signals(p.inputs)}${p.clocked ? " and the clock Clk" : ""} · out ${signals(p.outputs)}</p>
+      <div class="st-circuit-tools">${readOnly ? "" : `<button class="cc-quiet" data-study-circuit-build="${esc(p.id)}" title="A circuit with these inputs and outputs, in Circuit, its table as the test “practice”">${icon("bolt")}Build in Circuit</button>`}</div>
+      <details><summary>Its test table</summary><pre class="st-code">${esc(p.table)}</pre></details>
+      ${p.hints.length ? `<details><summary>Hints</summary><ol>${p.hints.map((h) => `<li>${answerHtml(h, citations)}</li>`).join("")}</ol></details>` : ""}
+      <details><summary>A reference answer</summary><pre class="st-code">${esc(p.reference)}</pre><div class="md">${answerHtml(p.explanation, citations)}</div></details>
+    </li>`).join("")}</ol>`;
   } else if (body.shape === "audio") {
     // An audio overview opens as one (study-audio.js); this is only its words.
     content = `<div class="st-transcript" data-turn="made">${body.segments.map((s) => `<p>${answerHtml(s.display, citations)}</p>`).join("")}</div>`;

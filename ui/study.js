@@ -757,6 +757,18 @@ export function createStudy(host) {
     }
     const task = at_("[data-study-task]");
     if (task) return host.dispatch({ type: "studyShowTask", id: task.dataset.studyTask });
+    // A circuit problem, set up in Circuit to be built: its signals placed,
+    // its table the test "practice", in a project named for the set.
+    const building = at_("[data-study-circuit-build]");
+    if (building && state.shown.kind === "made" && state.shown.made.body.shape === "circuits") {
+      const { made, body } = state.shown.made;
+      const p = body.problems.find((q) => q.id === building.dataset.studyCircuitBuild);
+      if (!p) return;
+      host.dispatch({ type: "setMode", mode: "circuit" });
+      host.dispatch({ type: "circuitPractice", project: made.title, circuit: p.title, inputs: p.inputs.map((s) => [s.name, s.bits]), outputs: p.outputs.map((s) => [s.name, s.bits]),
+        clocked: p.clocked, table: p.table, note: p.statement });
+      return;
+    }
     // What was found on the web, added: the sources ticked, or the report.
     if (at_("[data-study-found-add]") && state.shown.kind === "made" && state.shown.made.body.shape === "found") {
       const have = webSources();

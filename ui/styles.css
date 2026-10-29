@@ -4681,6 +4681,15 @@ button.st-source-name:hover { color: var(--cc-accent); }
 
 
 
+/* Notebook's circuit practice: a problem a card. */
+.st-circuits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.st-circuit { border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); border-radius: 8px; padding: 12px 14px; }
+.st-circuit-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.st-circuit-head h3 { margin: 0; }
+.st-circuit-tools { display: flex; gap: 8px; margin: 6px 0; }
+.st-circuit details { margin-top: 6px; }
+.st-circuit summary { cursor: pointer; color: var(--muted); }
+
 /* ══ Circuit ═════════════════════════════════════════════════════════
    A circuit drawn on one canvas (ui/circuit.js), on Codex's ground; the
    side list and home page are Excel's, with the project's circuits above
