@@ -99,7 +99,10 @@ pub fn parse(text: &str) -> Result<Machine, String> {
         index.insert(name.to_string(), m.states.len() - 1);
         Ok(m.states.len() - 1)
     };
-    let mut pending: Vec<(usize, usize, String, Vec<(String, bool)>, usize)> = Vec::new();
+    // Transitions as written — from, to, condition, outputs, line — read
+    // once every state and the inputs are known.
+    type Written = (usize, usize, String, Vec<(String, bool)>, usize);
+    let mut pending: Vec<Written> = Vec::new();
     for (n, line) in text.lines().enumerate() {
         let n = n + 1;
         let line = line.split('#').next().unwrap_or("").trim();
