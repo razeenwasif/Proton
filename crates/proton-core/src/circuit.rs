@@ -879,6 +879,75 @@ impl Circuits {
                 record(open, after);
                 vec![notice(format!("{id}'s contents are kept as data/{name}.hex, saved with ⌘S"), NoticeLevel::Info), self.project_event()]
             }
+            Command::CircuitPractice { project, circuit, inputs, outputs, clocked, table, note } => {
+                let folder = format!("{}.{EXTENSION}", slug(&project));
+                let dir = match inside(root, &folder) {
+                    Ok(d) => d,
+                    Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                };
+                let mut events = Vec::new();
+                if self.open.as_ref().is_none_or(|o| o.path != dir) {
+                    if self.dirty() {
+                        return vec![notice("save or discard the open circuit's changes before practising".into(), NoticeLevel::Warn)];
+                    }
+                    if dir.exists() {
+                        match circ::read(&dir) {
+                            Ok(p) => self.show(root, dir, p),
+                            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                        }
+                    } else {
+                        let mut p = Project::new();
+                        p.circuits.clear();
+                        p.top = "start".into();
+                        p.circuits.insert("start".into(), Drawing::default());
+                        if let Err(why) = circ::write_project(&dir, &p) {
+                            return vec![notice(why, NoticeLevel::Warn)];
+                        }
+                        self.show(root, dir, p);
+                    }
+                }
+                let Some(open) = &mut self.open else { return Vec::new() };
+                // The circuit named for the problem, made unique.
+                let base: String = slug(&circuit).replace('-', "_");
+                let base = if base.is_empty() || !base.starts_with(|c: char| c.is_ascii_alphabetic()) { format!("p_{base}") } else { base };
+                let name = (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}_{n}") }).find(|n| !open.project.circuits.contains_key(n)).unwrap_or(base);
+                let part = |id: String, kind: &str, x: i32, y: i32, attrs: Vec<(&str, String)>| Part {
+                    id,
+                    kind: kind.into(),
+                    x,
+                    y,
+                    rot: 0,
+                    mirror: false,
+                    attrs: attrs.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+                };
+                let mut d = Drawing::default();
+                let bits = |b: u8| if b > 1 { vec![("bits", b.to_string())] } else { vec![] };
+                for (i, (n, b)) in inputs.iter().enumerate() {
+                    let mut attrs = bits(*b);
+                    attrs.push(("label", n.clone()));
+                    d.parts.push(part(format!("I{}", i + 1), "in", 0, 2 * i as i32, attrs));
+                }
+                if clocked {
+                    d.parts.push(part(format!("I{}", inputs.len() + 1), "clock", 0, 2 * inputs.len() as i32, vec![("label", "Clk".into())]));
+                }
+                for (j, (n, b)) in outputs.iter().enumerate() {
+                    let mut attrs = bits(*b);
+                    attrs.push(("label", n.clone()));
+                    d.parts.push(part(format!("O{}", j + 1), "out", 20, 2 * j as i32, attrs));
+                }
+                let first = note.lines().next().unwrap_or("").chars().take(120).collect::<String>();
+                if !first.is_empty() {
+                    d.parts.push(part("Note1".into(), "text", 0, -3, vec![("text", first)]));
+                }
+                let mut after = open.project.clone();
+                after.circuits.insert(name.clone(), circ::parse(&circ::write(&d)).unwrap_or(d));
+                after.tests.entry(name.clone()).or_default().insert("practice".into(), if table.ends_with('\n') { table } else { format!("{table}\n") });
+                open.shown = name.clone();
+                record(open, after);
+                events.extend(self.events(root));
+                events.push(notice(format!("{name} is set up to be built: its inputs and outputs are placed, and the test “practice” checks it — t opens the tests"), NoticeLevel::Info));
+                events
+            }
             Command::CircuitSelect { generation, circuit, ids, wires } => {
                 if let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) {
                     open.selected = (circuit, ids, wires);
@@ -2297,6 +2366,51 @@ mod tests {
         c.apply(&root, Command::CircuitClose { discard: false });
         assert!(c.apply(&root, Command::CircuitImport { path: "course/wire.dig".into() }).iter().any(|e| matches!(e, Event::Notice { .. })), "it is there already");
         assert!(c.apply(&root, Command::CircuitImport { path: "../x.dig".into() }).iter().any(|e| matches!(e, Event::Notice { .. })));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_practice_problem_is_set_up_to_be_built_and_its_test_checks_it() {
+        let root = scratch("practice");
+        let mut c = Circuits::default();
+        let practice = |c: &mut Circuits, title: &str| {
+            c.apply(&root, Command::CircuitPractice {
+                project: "Logic practice".into(),
+                circuit: title.into(),
+                inputs: vec![("A".into(), 1), ("B".into(), 1)],
+                outputs: vec![("Y".into(), 1)],
+                clocked: false,
+                table: "A B Y\n0 0 0\n0 1 1\n1 0 1\n1 1 0".into(),
+                note: "Build an XOR from NANDs.\nMore lines.".into(),
+            })
+        };
+        let v = view(&practice(&mut c, "XOR from NAND")).unwrap();
+        assert_eq!((v.path.as_str(), v.shown.as_str()), ("logic-practice.circuit", "xor_from_nand"));
+        assert_eq!(v.parts.iter().map(|p| p.kind.as_str()).collect::<Vec<_>>(), vec!["in", "in", "text", "out"]);
+        assert_eq!(v.tables[0].0, "practice");
+        let g = v.generation;
+        // Not built yet: the practice test fails.
+        let run = |c: &mut Circuits| match c.apply(&root, Command::CircuitTestRun { generation: g, circuit: "xor_from_nand".into(), label: None }).remove(0) {
+            Event::CircuitTests { results, .. } => results,
+            other => panic!("{other:?}"),
+        };
+        assert!(!run(&mut c)[0].failures.is_empty() || run(&mut c)[0].error.is_some());
+        // Built: XOR placed and wired; the test passes.
+        c.apply(&root, Command::CircuitEdit {
+            generation: g,
+            circuit: "xor_from_nand".into(),
+            ops: vec![
+                CircuitOp::Place { kind: "xor".into(), x: 10, y: 0, rot: 0, mirror: false, settings: vec![] },
+                CircuitOp::Wire { points: vec![[0, 0], [10, 0]] },
+                CircuitOp::Wire { points: vec![[0, 2], [10, 2]] },
+                CircuitOp::Wire { points: vec![[13, 1], [16, 1], [16, 0], [20, 0]] },
+            ],
+        });
+        let results = run(&mut c);
+        assert!(results[0].failures.is_empty() && results[0].error.is_none(), "{results:?}");
+        // A second problem goes in the same project, beside it.
+        let v = view(&practice(&mut c, "XOR from NAND")).unwrap();
+        assert_eq!((v.generation, v.shown.as_str()), (g, "xor_from_nand_2"));
         let _ = std::fs::remove_dir_all(root);
     }
 

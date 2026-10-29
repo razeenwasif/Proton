@@ -309,6 +309,20 @@ inputs and outputs given ids in file order (Digital's pin order), test
 cases as tables, slanting wires kept, and parts with no Proton kind left
 out and named. Imported this way, the person's whole CPU passes all 79 of
 its test tables from the `.circuit` files.
+C8 — the agent and Notebook: seven tools, through the window's own
+commands so an agent's edit is a held step like any other — `circuit_info`,
+`circuit_open` (also making a project or importing a `.dig`), `circuit_read`
+(the `.circ` text and every part's pins), `circuit_edit` (the window's ops),
+`circuit_test` (the tables, or one given in the call), `circuit_analyse`
+and `circuit_synthesise`; `@circuit` sends the circuit on screen with its
+pins, what is selected and the last tables run; Circuit's dock is the agent.
+Notebook's studio makes Circuit practice: problems from the sources, each
+with its inputs and outputs, a test table, and a reference answer —
+expressions, or a state machine — that Proton builds and runs against the
+table before keeping the problem, so no table is wrong; "Build in Circuit"
+sets the problem up in a practice project named for the set, its signals
+placed and its table the test "practice", which checks the student's
+circuit.
 
 | | What | Proved by |
 |---|---|---|

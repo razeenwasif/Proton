@@ -22,6 +22,7 @@
 //! another.
 
 pub mod audio;
+pub mod circuits;
 pub mod cite;
 pub mod clock;
 pub mod code;

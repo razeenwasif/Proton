@@ -13,6 +13,8 @@ serde_json = { workspace = true }
 ts-rs = { workspace = true }
 proton-library = { workspace = true }
 proton-research = { workspace = true }
+# Circuit practice: each problem's reference built and run against its table.
+proton-circuit = { workspace = true }
 # A source's digest: the same file added twice is said, not kept twice.
 sha2 = "0.10"
 # Notes open with TOML front matter, as Research's hypotheses do.

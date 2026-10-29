@@ -1460,7 +1460,8 @@ impl Workspace {
             | Command::CircuitMachineBuild { .. }
             | Command::CircuitExport { .. }
             | Command::CircuitImport { .. }
-            | Command::CircuitSelect { .. }) => {
+            | Command::CircuitSelect { .. }
+            | Command::CircuitPractice { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
                 if events.iter().any(|e| matches!(e, Event::CircuitHome { .. } | Event::CircuitExported { .. })) {

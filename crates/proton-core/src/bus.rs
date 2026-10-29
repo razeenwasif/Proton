@@ -786,6 +786,19 @@ pub enum Command {
     CircuitTraceToData {
         generation: u32,
     },
+    /// A practice problem from Notebook, set up to be built: the project
+    /// named opened (or made), a circuit with the problem's inputs and
+    /// outputs placed and a note of it, its table as the test "practice".
+    /// A held edit.
+    CircuitPractice {
+        project: String,
+        circuit: String,
+        inputs: Vec<(String, u8)>,
+        outputs: Vec<(String, u8)>,
+        clocked: bool,
+        table: String,
+        note: String,
+    },
     /// What is selected in the circuit on screen, for `@circuit`.
     CircuitSelect {
         generation: u32,

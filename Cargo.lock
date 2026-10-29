@@ -4533,6 +4533,7 @@ name = "proton-study"
 version = "0.0.1"
 dependencies = [
  "libc",
+ "proton-circuit",
  "proton-library",
  "proton-research",
  "serde",
