@@ -120,6 +120,8 @@ pub struct CircuitProjectView {
     pub wires: Vec<[i32; 4]>,
     /// The labels of the shown circuit's test tables.
     pub tests: Vec<String>,
+    /// The project's memory contents, `data/<name>.hex`, by name.
+    pub data: Vec<String>,
     pub generation: u32,
     pub dirty: bool,
     pub can_undo: bool,
@@ -224,7 +226,7 @@ struct Run {
 
 /// The kinds a click sets, and those that show a value.
 const SETTABLE: [&str; 3] = ["in", "clock", "button"];
-const SHOWN: [&str; 3] = ["out", "led", "probe"];
+const SHOWN: [&str; 6] = ["out", "led", "probe", "seg7", "hexdisplay", "rgbled"];
 
 /// A step to undo: the project before and after, and the circuit shown.
 #[derive(Debug, Clone)]
@@ -481,6 +483,28 @@ impl Circuits {
                 run.last_quick = None;
                 vec![self.run_event()]
             }
+            Command::CircuitSaveMemory { generation, id, name } => {
+                let name = name.trim().trim_start_matches("data/").trim_end_matches(".hex").to_string();
+                if !circ::is_name(&name) || name.contains(' ') {
+                    return vec![notice(format!("“{name}” cannot name a data file: letters, digits, - and _"), NoticeLevel::Warn)];
+                }
+                let run = match self.running(generation) {
+                    Ok(run) => run,
+                    Err(events) => return events,
+                };
+                let Some((part, kind)) = run.parts.get(&id).cloned() else {
+                    return vec![notice(format!("there is no part {id}"), NoticeLevel::Warn)];
+                };
+                if kind != "ram" && kind != "ram2" {
+                    return vec![notice(format!("{id} is not a RAM"), NoticeLevel::Warn)];
+                }
+                let text = proton_circuit::hex::write(run.sim.as_ref().map(|s| s.memory(part)).unwrap_or_default());
+                let Some(open) = &mut self.open else { return Vec::new() };
+                let mut after = open.project.clone();
+                after.data.insert(name.clone(), text);
+                record(open, after);
+                vec![notice(format!("{id}'s contents are kept as data/{name}.hex, saved with ⌘S"), NoticeLevel::Info), self.project_event()]
+            }
             Command::CircuitCopy { generation, circuit, ids, wires } => {
                 let open = match self.checked(generation, &circuit) {
                     Ok(open) => open,
@@ -729,6 +753,7 @@ impl Circuits {
                 parts,
                 wires: drawing.wires.iter().map(|w| [w.a.0, w.a.1, w.b.0, w.b.1]).collect(),
                 tests: p.tests.get(&open.shown).map(|t| t.keys().cloned().collect()).unwrap_or_default(),
+                data: p.data.keys().cloned().collect(),
                 generation: open.generation,
                 dirty: open.project != open.saved,
                 can_undo: !open.done.is_empty(),
@@ -1277,6 +1302,38 @@ mod tests {
         // The circuit runs on from where the quick run left it.
         let r = run_of(&c.apply(&root, Command::CircuitClock { generation: g, hold: false })).unwrap();
         assert!(r.error.is_none() && !r.wires.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_ram_written_while_running_is_kept_as_a_data_file() {
+        let root = scratch("ram");
+        let mut c = Circuits::default();
+        let g = view(&c.apply(&root, Command::CircuitNew { name: "mem".into() })).unwrap().generation;
+        let text = "part Ad in at 0,0 bits=2 label=Ad\npart Di in at 0,1 bits=8 label=Di\npart St in at 0,2 label=St\npart Clk clock at 0,3 label=Clk\n\
+                    part K const at 1,4\npart M ram at 2,0 addr=2 bits=8\npart D out at 7,0 bits=8 label=D\n\
+                    wire 0,0 2,0\nwire 0,1 2,1\nwire 0,2 2,2\nwire 0,3 2,3\nwire 1,4 2,4\nwire 5,0 7,0\n";
+        c.apply(&root, Command::CircuitEdit { generation: g, circuit: "main".into(), ops: vec![CircuitOp::Paste { text: text.into(), dx: 0, dy: 0 }] });
+        c.apply(&root, Command::CircuitStart { generation: g });
+        for (id, v) in [("Ad", "1"), ("Di", "0x5a"), ("St", "1")] {
+            c.apply(&root, Command::CircuitSet { generation: g, id: id.into(), value: v.into(), hold: false });
+        }
+        let r = run_of(&c.apply(&root, Command::CircuitClock { generation: g, hold: false })).unwrap();
+        assert_eq!(r.values.iter().find(|(k, _)| k == "D").unwrap().1.hex, "5a", "written, and read back as ld is high");
+        assert!(c.apply(&root, Command::CircuitSaveMemory { generation: g, id: "D".into(), name: "x".into() }).iter().any(|e| matches!(e, Event::Notice { .. })));
+        let events = c.apply(&root, Command::CircuitSaveMemory { generation: g, id: "M".into(), name: "boot".into() });
+        let v = view(&events).unwrap();
+        assert!(v.dirty && v.data == vec!["boot".to_string()]);
+        c.apply(&root, Command::CircuitSave);
+        assert_eq!(std::fs::read_to_string(root.join("mem.circuit/data/boot.hex")).unwrap(), "v2.0 raw\n0 5a\n");
+        // A ROM reads it by name.
+        let v = view(&c.apply(&root, Command::CircuitEdit {
+            generation: g,
+            circuit: "main".into(),
+            ops: vec![CircuitOp::Place { kind: "rom".into(), x: 20, y: 0, rot: 0, mirror: false, settings: vec![("addr".into(), "2".into()), ("bits".into(), "8".into()), ("file".into(), "boot".into())] }],
+        }))
+        .unwrap();
+        assert!(v.parts.iter().find(|p| p.kind == "rom").unwrap().problem.is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -707,6 +707,13 @@ pub enum Command {
     CircuitQuick {
         generation: u32,
     },
+    /// A running RAM's contents kept as `data/<name>.hex`: a held edit, as
+    /// any other, for a ROM's `file=` to read.
+    CircuitSaveMemory {
+        generation: u32,
+        id: String,
+        name: String,
+    },
     /// The parts and wires named, as `.circ` text for the clipboard.
     CircuitCopy {
         generation: u32,

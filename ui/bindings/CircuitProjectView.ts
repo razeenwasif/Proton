@@ -24,7 +24,11 @@ wires: Array<[number, number, number, number]>,
 /**
  * The labels of the shown circuit's test tables.
  */
-tests: Array<string>, generation: number, dirty: boolean, canUndo: boolean, canRedo: boolean, 
+tests: Array<string>, 
+/**
+ * The project's memory contents, `data/<name>.hex`, by name.
+ */
+data: Array<string>, generation: number, dirty: boolean, canUndo: boolean, canRedo: boolean, 
 /**
  * The parts the last edit made — placed or pasted — for the window to
  * select.

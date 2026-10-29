@@ -5,6 +5,8 @@
 //!   project.json                  which circuit is the top
 //!   circuits/<name>.circ          a circuit: a line per part, a line per wire
 //!   tests/<circuit>.<label>.tests a test table for a circuit, in Digital's language
+//!   data/<name>.hex               a memory's contents (see [`crate::hex`]), named by
+//!                                 a ROM, RAM or table's `file=<name>`
 //! ```
 //!
 //! A `.circ` file is a line per part, sorted by id, then a line per wire,
@@ -118,6 +120,19 @@ const KINDS: &[(&str, &str)] = &[
     ("jkff", "JK_FF"),
     ("rsff", "RS_FF"),
     ("ram2", "RAMDualAccess"),
+    ("ram", "RAMDualPort"),
+    ("rom", "ROM"),
+    ("lut", "LookUpTable"),
+    ("counter", "Counter"),
+    ("driver", "Driver"),
+    ("driverinv", "DriverInvSel"),
+    ("pullup", "PullUp"),
+    ("pulldown", "PullDown"),
+    ("bitext", "BitExtender"),
+    ("bitsel", "BitSelector"),
+    ("seg7", "Seven-Seg"),
+    ("hexdisplay", "Seven-Seg-Hex"),
+    ("rgbled", "RGBLED"),
 ];
 
 /// How a setting is typed in Digital's files.
@@ -143,6 +158,11 @@ const ATTRS: &[(&str, &str, Ty)] = &[
     ("mode", "barrelShifterMode", Ty::Str),
     ("dir", "direction", Ty::Str),
     ("text", "Description", Ty::Str),
+    ("inbits", "inputBits", Ty::Int),
+    ("outbits", "outputBits", Ty::Int),
+    ("data", "Data", Ty::Str),
+    // Resolved to `data` from the project's data/<name>.hex when built.
+    ("file", "file", Ty::Str),
     ("wide", "wideShape", Ty::Bool),
     ("flip", "flipSelPos", Ty::Bool),
     ("signed", "signed", Ty::Bool),
@@ -332,7 +352,13 @@ pub fn ordered(d: &Drawing) -> Vec<&Part> {
 
 /// A circuit as the reader takes it: Digital's names, Digital's units.
 /// Its wires are in the drawing's order; a built circuit's `top_wires` too.
+/// A part's `file=` is left as it is; [`Project`] reads it.
 pub fn to_dig(d: &Drawing) -> Result<dig::Circuit, String> {
+    to_dig_with(d, &BTreeMap::new())
+}
+
+/// As [`to_dig`], each `file=<name>` read from these contents by name.
+pub fn to_dig_with(d: &Drawing, data: &BTreeMap<String, String>) -> Result<dig::Circuit, String> {
     // In and out parts first, in id order: they are the pins.
     let parts = ordered(d);
     let mut elements = Vec::new();
@@ -353,6 +379,11 @@ pub fn to_dig(d: &Drawing) -> Result<dig::Circuit, String> {
                 Ty::Bool => Attr::Bool(matches!(v.as_str(), "true" | "yes" | "1")),
             };
             attrs.insert(key.to_string(), val);
+        }
+        if let Some(Attr::Str(file)) = attrs.remove("file") {
+            let name = file.trim_start_matches("data/").trim_end_matches(".hex");
+            let text = data.get(name).ok_or_else(|| format!("{}: there is no data/{name}.hex", p.id))?;
+            attrs.insert("Data".into(), Attr::Str(text.clone()));
         }
         if p.rot % 4 != 0 {
             attrs.insert("rotation".into(), Attr::Rotation(p.rot % 4));
@@ -380,6 +411,8 @@ pub struct Project {
     pub circuits: BTreeMap<String, Drawing>,
     /// Test tables by circuit, then label.
     pub tests: BTreeMap<String, BTreeMap<String, String>>,
+    /// Memory contents by name, as `data/<name>.hex` holds them.
+    pub data: BTreeMap<String, String>,
 }
 
 /// A name a file can carry: no separators, no dots, nothing hidden.
@@ -399,7 +432,7 @@ impl Project {
     fn library(&self) -> Result<dig::Library, String> {
         let mut lib = HashMap::new();
         for (n, d) in &self.circuits {
-            lib.insert(format!("{n}.circ"), to_dig(d).map_err(|e| format!("{n}: {e}"))?);
+            lib.insert(format!("{n}.circ"), to_dig_with(d, &self.data).map_err(|e| format!("{n}: {e}"))?);
         }
         Ok(dig::Library::of(lib))
     }
@@ -412,7 +445,7 @@ impl Project {
         let mut lib = HashMap::new();
         for (n, d) in &self.circuits {
             // A circuit that does not convert places nothing; its parts say why.
-            if let Ok(c) = to_dig(d) {
+            if let Ok(c) = to_dig_with(d, &self.data) {
                 lib.insert(format!("{n}.circ"), c);
             }
         }
@@ -421,7 +454,7 @@ impl Project {
             .iter()
             .map(|p| {
                 let one = Drawing { parts: vec![p.clone()], wires: Vec::new(), width: None };
-                let placed = to_dig(&one).and_then(|c| dig::pins_of(&c.elements[0], &mut lib)).map(|pins| {
+                let placed = to_dig_with(&one, &self.data).and_then(|c| dig::pins_of(&c.elements[0], &mut lib)).map(|pins| {
                     pins.into_iter().map(|((x, y), input)| PinAt { x: x.div_euclid(G), y: y.div_euclid(G), input }).collect()
                 });
                 (p.id.clone(), placed)
@@ -456,7 +489,7 @@ pub fn read(dir: &Path) -> Result<Project, String> {
         return Err(format!("{shown} was written by a newer Proton (version {})", stored.version));
     }
     let mut p = Project { top: stored.top, ..Default::default() };
-    for (sub, ext) in [("circuits", "circ"), ("tests", "tests")] {
+    for (sub, ext) in [("circuits", "circ"), ("tests", "tests"), ("data", "hex")] {
         let Ok(entries) = std::fs::read_dir(dir.join(sub)) else { continue };
         let mut names: Vec<String> = entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         names.sort();
@@ -469,6 +502,8 @@ pub fn read(dir: &Path) -> Result<Project, String> {
             let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             if ext == "circ" {
                 p.circuits.insert(stem.to_string(), parse(&text).map_err(|e| format!("{sub}/{file}: {e}"))?);
+            } else if ext == "hex" {
+                p.data.insert(stem.to_string(), text);
             } else {
                 let (circuit, label) = stem.split_once('.').unwrap_or((stem, ""));
                 p.tests.entry(circuit.to_string()).or_default().insert(label.to_string(), text);
@@ -494,7 +529,10 @@ pub fn write_project(dir: &Path, p: &Project) -> Result<(), String> {
             want.insert(("tests", file), t.clone());
         }
     }
-    for sub in ["circuits", "tests"] {
+    for (n, text) in &p.data {
+        want.insert(("data", format!("{n}.hex")), text.clone());
+    }
+    for sub in ["circuits", "tests", "data"] {
         let d = dir.join(sub);
         if want.keys().any(|(s, _)| *s == sub) {
             std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
@@ -503,7 +541,7 @@ pub fn write_project(dir: &Path, p: &Project) -> Result<(), String> {
     for ((sub, file), text) in &want {
         put(&dir.join(sub).join(file), text)?;
     }
-    for (sub, ext) in [("circuits", ".circ"), ("tests", ".tests")] {
+    for (sub, ext) in [("circuits", ".circ"), ("tests", ".tests"), ("data", ".hex")] {
         if let Ok(entries) = std::fs::read_dir(dir.join(sub)) {
             for e in entries.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
@@ -629,6 +667,81 @@ wire 8,4 8,5
         // The (5,1)-(7,1) wire and the (6,1)-(6,3) one share no end, so the
         // Break is fed only through its own leg.
         assert!(sim.shown(b.breaks[0]).is_z() || sim.shown(b.breaks[0]).get() == 0);
+    }
+
+    fn run(p: &Project) -> (dig::Built, crate::Sim) {
+        let b = p.build("main").unwrap();
+        let sim = crate::Sim::new(b.netlist.clone(), 1).unwrap();
+        (b, sim)
+    }
+
+    fn project(main: &str) -> Project {
+        let mut p = Project::new();
+        p.circuits.insert("main".into(), parse(main).unwrap());
+        p
+    }
+
+    #[test]
+    fn a_counter_addresses_a_rom_whose_contents_are_a_data_file() {
+        let mut p = project(
+            "part K1 const at 0,0\npart Clk clock at 0,1 label=Clk\npart K0 const at 0,2 value=0\npart N counter at 2,0 bits=2\n\
+             part R rom at 7,0 addr=2 bits=8 file=table\npart K2 const at 6,1\npart D out at 12,0 bits=8 label=D\n\
+             wire 0,0 2,0\nwire 0,1 2,1\nwire 0,2 2,2\nwire 5,0 7,0\nwire 6,1 7,1\nwire 10,0 12,0\n",
+        );
+        assert!(p.build("main").unwrap_err().contains("data/table.hex"), "a file that is not there is said");
+        p.data.insert("table".into(), "v2.0 raw\n11 22 33 44\n".into());
+        let (b, mut sim) = run(&p);
+        let (clk, d) = (b.inputs["Clk"].0, b.outputs["D"]);
+        let mut seen = vec![sim.shown(d).get()];
+        for _ in 0..4 {
+            sim.tick(clk).unwrap();
+            seen.push(sim.shown(d).get());
+        }
+        assert_eq!(seen, vec![0x11, 0x22, 0x33, 0x44, 0x11]);
+        // The folder keeps it as data/table.hex.
+        let dir = std::env::temp_dir().join(format!("proton-circuit-data-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_project(&dir, &p).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("data/table.hex")).unwrap(), "v2.0 raw\n11 22 33 44\n");
+        assert_eq!(read(&dir).unwrap(), p);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn displays_drivers_pulls_tables_and_bit_parts_run() {
+        // A tri-state driver onto a pulled-down net; a hex display; a
+        // table of XOR; a bit picked and a value sign-extended.
+        let p = project(
+            "part A in at 0,0 label=A\npart E in at 0,1 label=E\npart T driver at 2,0\npart P pulldown at 6,0\npart Y out at 6,0 label=Y\n\
+             part Dg in at 0,4 bits=4 label=Dg\npart H hexdisplay at 2,4 label=H\n\
+             part X1 in at 0,7 label=X1\npart X2 in at 0,8 label=X2\npart L lut at 2,7 inputs=2 data=0,1,1,0\npart Q out at 6,7 label=Q\n\
+             part V in at 0,11 bits=4 label=V\npart S bitext at 2,11 inbits=4 outbits=8\npart W out at 6,11 bits=8 label=W\n\
+             part Sel in at 0,14 bits=2 label=Sel\npart Vb in at 0,13 bits=4 label=Vb\npart B bitsel at 2,13 bits=4 sel=2\npart Bt out at 5,13 label=Bt\n\
+             wire 0,0 2,0\nwire 0,1 2,1\nwire 4,0 6,0\nwire 0,4 2,4\nwire 0,7 2,7\nwire 0,8 2,8\nwire 5,7 6,7\n\
+             wire 0,11 2,11\nwire 5,11 6,11\nwire 0,13 2,13\nwire 0,14 2,14\nwire 4,13 5,13\n",
+        );
+        let (b, mut sim) = run(&p);
+        let set = |sim: &mut crate::Sim, k: &str, v: u64| {
+            sim.set(b.inputs[k].0, v).unwrap();
+        };
+        let out = |sim: &crate::Sim, k: &str| sim.shown(b.outputs[k]);
+        set(&mut sim, "A", 1);
+        assert_eq!(out(&sim, "Y").get(), 0, "the driver is off: the net is pulled down");
+        set(&mut sim, "E", 1);
+        assert_eq!(out(&sim, "Y").get(), 1);
+        set(&mut sim, "Dg", 0xa);
+        let h = out(&sim, "H");
+        assert_eq!((h.bits, h.get() & 0xf), (5, 0xa), "the digit, with its point beside it on one bus");
+        for (x1, x2) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            set(&mut sim, "X1", x1);
+            set(&mut sim, "X2", x2);
+            assert_eq!(out(&sim, "Q").get(), x1 ^ x2);
+        }
+        set(&mut sim, "V", 0b1010);
+        assert_eq!(out(&sim, "W").get(), 0xfa, "sign-extended");
+        set(&mut sim, "Vb", 0b0100);
+        set(&mut sim, "Sel", 2);
+        assert_eq!(out(&sim, "Bt").get(), 1);
     }
 
     #[test]

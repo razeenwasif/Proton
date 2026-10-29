@@ -199,6 +199,12 @@ pub fn parse(xml: &str) -> Result<Circuit, String> {
                             el.attrs.insert(k.clone(), Attr::Bool(text.trim() == "true"));
                         }
                     }
+                    // A memory's contents, hex words with commas between.
+                    "data" if parent == "entry" && in_el => {
+                        if let (Some(el), Some(k)) = (&mut el, &key) {
+                            el.attrs.insert(k.clone(), Attr::Str(text.clone()));
+                        }
+                    }
                     "dataString" => {
                         if let (Some(el), Some(k)) = (&mut el, &key) {
                             el.attrs.insert(k.clone(), Attr::Test(text.clone()));
@@ -422,6 +428,36 @@ fn place(el: &Element, lib: &mut Library) -> Result<Vec<Pin>, String> {
             v.extend(outs.iter().enumerate().map(|(i, (_, w))| out(G, i as i32 * spread, Some(*w))));
             v
         }
+        // Parts not in the drawings these layouts were worked out from:
+        // inputs down the left, outputs to the right, as Proton lays them.
+        "Driver" | "DriverInvSel" | "BitSelector" => {
+            let sel = if el.name == "BitSelector" { el.int("Selector Bits", 1).clamp(1, 6) as u8 } else { 1 };
+            let out_bits = if el.name == "BitSelector" { 1 } else { bits };
+            vec![inp(0, 0, Some(bits)), inp(0, G, Some(sel)), out(2 * G, 0, Some(out_bits))]
+        }
+        "PullUp" | "PullDown" => vec![Pin { at: (0, 0), input: true, bits: None }],
+        "BitExtender" => {
+            let (i, o) = (el.int("inputBits", 8).clamp(1, 64) as u8, el.int("outputBits", 16).clamp(1, 64) as u8);
+            vec![inp(0, 0, Some(i)), out(3 * G, 0, Some(o))]
+        }
+        "Counter" => vec![inp(0, 0, Some(1)), inp(0, G, Some(1)), inp(0, 2 * G, Some(1)), out(3 * G, 0, Some(bits)), out(3 * G, G, Some(1))],
+        "ROM" => {
+            let a = el.int("AddrBits", 8).clamp(1, 24) as u8;
+            vec![inp(0, 0, Some(a)), inp(0, G, Some(1)), out(3 * G, 0, Some(bits))]
+        }
+        "RAMDualPort" => {
+            let a = el.int("AddrBits", 8).clamp(1, 24) as u8;
+            vec![inp(0, 0, Some(a)), inp(0, G, Some(bits)), inp(0, 2 * G, Some(1)), inp(0, 3 * G, Some(1)), inp(0, 4 * G, Some(1)), out(3 * G, 0, Some(bits))]
+        }
+        "LookUpTable" => {
+            let n = el.int("Inputs", 2).clamp(1, 16) as i32;
+            let mut v: Vec<Pin> = (0..n).map(|i| inp(0, i * G, Some(1))).collect();
+            v.push(out(3 * G, 0, Some(bits)));
+            v
+        }
+        "Seven-Seg" => (0..8).map(|i| inp(0, i * G, Some(1))).collect(),
+        "Seven-Seg-Hex" => vec![inp(0, 0, Some(4)), inp(0, G, Some(1))],
+        "RGBLED" => (0..3).map(|i| inp(0, i * G, Some(bits))).collect(),
         "Text" | "Testcase" | "Rectangle" => Vec::new(),
         name if is_sub(name) => {
             let (ins, outs, w) = sub_pins(lib.get(name)?);
@@ -771,6 +807,53 @@ fn instance_part(
             "Reset" => {
                 nl.part(Kind::Reset, &pname, &[], &outs);
             }
+            "Driver" | "DriverInvSel" => {
+                nl.part(Kind::Driver { inverted: el.name == "DriverInvSel" }, &pname, &ins, &outs);
+            }
+            "PullUp" | "PullDown" => {
+                nl.pull(ins[0], el.name == "PullUp");
+            }
+            "BitExtender" => {
+                nl.part(Kind::BitExtender { signed: true }, &pname, &ins, &outs);
+            }
+            "BitSelector" => {
+                nl.part(Kind::BitSelector, &pname, &ins, &outs);
+            }
+            "Counter" => {
+                let id = nl.part(Kind::Counter, &pname, &ins, &outs);
+                if !label.is_empty() && el.flag("valueIsProbe") {
+                    built.registers.insert(label.to_string(), id);
+                }
+            }
+            "ROM" => {
+                let data = crate::hex::read(el.str("Data")).map_err(|e| format!("{pname}: {e}"))?;
+                nl.part(Kind::Rom { data }, &pname, &ins, &outs);
+            }
+            "RAMDualPort" => {
+                let id = nl.part(Kind::RamPort { addr_bits: el.int("AddrBits", 8).clamp(1, 24) as u8 }, &pname, &ins, &outs);
+                nl.preload(id, crate::hex::read(el.str("Data")).map_err(|e| format!("{pname}: {e}"))?);
+                if el.flag("isProgramMemory") {
+                    built.program = Some(id);
+                }
+            }
+            "LookUpTable" => {
+                let table = crate::hex::read(el.str("Data")).map_err(|e| format!("{pname}: {e}"))?;
+                nl.part(Kind::Lut { table }, &pname, &ins, &outs);
+            }
+            "Seven-Seg" | "Seven-Seg-Hex" | "RGBLED" => {
+                // A display's inputs merged onto one bus, which it shows:
+                // segments a–g and the point, a digit and its point, or R, G, B.
+                let widths: Vec<u8> = pins.iter().map(|p| p.bits.unwrap_or(1)).collect();
+                let total: u8 = widths.iter().sum();
+                let bus = nl.net(total, &format!("{pname}/shown"));
+                let id = nl.part(Kind::Output, &pname, &[bus], &[]);
+                let mut lo = 0;
+                let groups: Vec<(u8, u8)> = widths.iter().map(|w| { let g = (lo, *w); lo += w; g }).collect();
+                nl.part(Kind::Splitter { ins: groups, outs: vec![(0, total)] }, &format!("{pname}/merge"), &ins, &[bus]);
+                if top && !label.is_empty() {
+                    built.outputs.insert(label.to_string(), id);
+                }
+            }
             "Break" => {
                 let id = nl.part(Kind::Break, &pname, &ins, &[]);
                 built.breaks.push(id);
@@ -855,6 +938,7 @@ fn instance_part(
             }
             "RAMDualAccess" => {
                 let id = nl.part(Kind::RamDual { addr_bits: el.int("AddrBits", 8).clamp(1, 24) as u8 }, &pname, &ins, &outs);
+                nl.preload(id, crate::hex::read(el.str("Data")).map_err(|e| format!("{pname}: {e}"))?);
                 if el.flag("isProgramMemory") {
                     built.program = Some(id);
                 }

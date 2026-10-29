@@ -98,6 +98,11 @@ impl Netlist {
         id
     }
 
+    /// A memory part's contents before it runs: a RAM's first words.
+    pub fn preload(&mut self, part: PartId, words: Vec<u64>) {
+        self.parts[part].state.mem = words;
+    }
+
     pub fn nets(&self) -> usize {
         self.nets.len()
     }

@@ -26,7 +26,12 @@ pub fn prefix(kind: &str) -> &'static str {
         "led" | "probe" => "L",
         "mux" | "demux" | "decoder" | "priority" => "M",
         "register" | "dff" | "tff" | "jkff" | "rsff" => "R",
-        "ram2" => "RAM",
+        "ram2" | "ram" => "RAM",
+        "rom" => "ROM",
+        "lut" => "LUT",
+        "counter" => "Cnt",
+        "pullup" | "pulldown" => "Pull",
+        "seg7" | "hexdisplay" | "rgbled" => "Disp",
         k if k.starts_with("sub:") => "S",
         _ => "U",
     }

@@ -8,11 +8,13 @@
 //!   reader.
 //! - [`edit`]: what editing does to a drawing: wires split where they meet,
 //!   fresh ids, copy and paste.
+//! - [`hex`]: memory contents as text, read and written.
 //! - [`testlang`]: test tables in Digital's language, run against one.
 
 pub mod circ;
 pub mod dig;
 pub mod edit;
+pub mod hex;
 pub mod parts;
 pub mod sim;
 pub mod testlang;

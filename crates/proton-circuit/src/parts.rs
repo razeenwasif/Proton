@@ -71,6 +71,8 @@ pub enum Kind {
     Register,
     /// In: str, C, ld, 1A, 1Din, 2A. Out: 1D (high-Z unless ld), 2D.
     RamDual { addr_bits: u8 },
+    /// In: A, Din, str, C, ld. Out: D (high-Z unless ld).
+    RamPort { addr_bits: u8 },
     /// In: A, sel. Out: D (high-Z unless sel).
     Rom { data: Vec<u64> },
     /// In: n one-bit inputs. Out: the table's entry for them.
@@ -248,11 +250,19 @@ pub fn eval(kind: &Kind, state: &mut State, ins: &[Value], outs: &[u8], settled:
                 vec![w(state.q), w(!state.q)]
             }
         }
+        Kind::RamPort { addr_bits } => {
+            // Contents loaded before the first look are kept: grown, not wiped.
+            let size = 1usize << (*addr_bits).min(24);
+            state.mem.resize(size, 0);
+            let a = (all(0) as usize) & (size - 1);
+            if rising(state, &ins[3], settled) && ins[2].bit(0) {
+                state.mem[a] = all(1) & mask(ob(0));
+            }
+            vec![if ins[4].bit(0) { w(state.mem[a]) } else { Value::high_z(ob(0)) }]
+        }
         Kind::RamDual { addr_bits } => {
             let size = 1usize << (*addr_bits).min(24);
-            if state.mem.len() != size {
-                state.mem = vec![0; size];
-            }
+            state.mem.resize(size, 0);
             let str_ = ins[0].bit(0);
             let ld = ins[2].bit(0);
             let a1 = (all(3) as usize) & (size - 1);
@@ -301,7 +311,7 @@ pub fn eval(kind: &Kind, state: &mut State, ins: &[Value], outs: &[u8], settled:
 pub fn is_clocked(kind: &Kind) -> bool {
     matches!(
         kind,
-        Kind::Counter | Kind::DFlipFlop | Kind::TFlipFlop | Kind::JKFlipFlop | Kind::RSFlipFlop | Kind::Register | Kind::RamDual { .. }
+        Kind::Counter | Kind::DFlipFlop | Kind::TFlipFlop | Kind::JKFlipFlop | Kind::RSFlipFlop | Kind::Register | Kind::RamDual { .. } | Kind::RamPort { .. }
     )
 }
 
