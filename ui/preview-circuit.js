@@ -12,6 +12,9 @@ const DRAWN = {"main":{"parts":[{"id":"A","kind":"in","x":0,"y":0,"rot":0,"mirro
  *  preview shows this one state; running anything else is the app's. */
 const RUNNING = {"circuit":"main","wires":[{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"0","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"0","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"0","z":false,"someZ":false},{"bits":1,"hex":"0","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false},{"bits":1,"hex":"1","z":false,"someZ":false}],"values":[["A",{"bits":1,"hex":"1","z":false,"someZ":false}],["B",{"bits":1,"hex":"0","z":false,"someZ":false}],["Cin",{"bits":1,"hex":"1","z":false,"someZ":false}],["Cout",{"bits":1,"hex":"1","z":false,"someZ":false}],["S",{"bits":1,"hex":"0","z":false,"someZ":false}]],"waiting":0,"stepped":[],"error":null,"quick":null};
 
+/** The full adder's main circuit analysed, as the core sent it. */
+const ANALYSIS = {"source":"main","inputs":["A","B","Cin"],"outputs":["Cout","S"],"columns":["00010111","01101001"],"sop":["B·Cin + A·Cin + A·B","A'·B'·Cin + A'·B·Cin' + A·B'·Cin' + A·B·Cin"],"pos":["(B + Cin)·(A + Cin)·(A + B)","(A + B + Cin)·(A + B' + Cin')·(A' + B + Cin')·(A' + B' + Cin)"],"groups":[[[3,3],[5,5],[6,6]],[[1,7],[2,7],[4,7],[7,7]]],"exact":true,"error":null};
+
 /** Where a new part's pins go, unturned, for the kinds the sample shows:
  *  Digital's layouts as the core places them. Others are drawn as a box
  *  with no pins — this is a stand-in, the core places them all. */
@@ -191,7 +194,11 @@ export function createCircuitPreview(_deliver) {
           open.dirty = true;
           return [view()];
         }
-        case "circuitTestRun": case "circuitTraceToData": case "circuitTraceClear":
+        case "circuitAnalyse":
+          if (!open) return [];
+          if (command.expression || open.shown !== "main") return [notice("the preview analyses only its full adder; the app analyses anything")];
+          return [{ type: "circuitAnalysis", generation: open.generation, analysis: ANALYSIS }];
+        case "circuitTestRun": case "circuitTraceToData": case "circuitTraceClear": case "circuitSynthesise":
           return [notice("the preview does not run tables or record; the app does")];
         case "circuitEdit":
           return edit(command.ops);

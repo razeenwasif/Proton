@@ -4745,6 +4745,28 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .ci-badge { width: 14px; text-align: center; font: 600 var(--z-2xs)/1 var(--zed); }
 .ci-badge.ok { color: var(--ci-high); }
 .ci-badge.bad { color: var(--danger, #e55); }
+.ci-analysis { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.ci-analysis[hidden] { display: none; }
+.ci-analyse { display: flex; align-items: center; gap: 6px; padding: 0 10px 6px; flex: none; }
+.ci-analyse input {
+  height: 26px; padding: 0 8px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head); color: var(--text);
+  font: var(--z-2xs)/1 ui-monospace, "SF Mono", Menlo, monospace; min-width: 0;
+}
+.ci-analyse input[name=expression] { flex: 1 1 auto; }
+.ci-build-name { width: 110px; }
+.ci-analysis-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 10px 8px; }
+.ci-truth, .ci-forms { overflow: auto; min-height: 0; }
+.ci-truth-table { border-collapse: collapse; font: var(--z-2xs)/1.4 ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
+.ci-truth-table th { position: sticky; top: 0; background: var(--bg); color: var(--text); font-weight: 600; padding: 0 6px; }
+.ci-truth-table td { padding: 0 6px; text-align: center; }
+.ci-truth-table .sep { width: 8px; border-left: 1px solid var(--xl-line); padding: 0; }
+.ci-truth-table .v1 { color: var(--ci-high); }
+.ci-truth-table .vx { color: var(--ci-z); }
+.ci-form { margin-bottom: 10px; }
+.ci-form-line { color: var(--text); font: var(--z-xs)/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+.ci-form-line.muted { color: var(--muted); }
+.ci-kmap { display: block; margin-top: 4px; }
+.ci-hint { margin: 4px 0; color: var(--muted); font: var(--z-2xs)/1.4 var(--zed); }
 .ci-graph { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .ci-graph canvas { position: absolute; inset: 0; display: block; }
 .ci-hold { display: flex; align-items: center; gap: 4px; color: var(--muted); font: var(--z-2xs)/1 var(--zed); white-space: nowrap; cursor: pointer; }

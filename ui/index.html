@@ -944,6 +944,7 @@
             <nav class="ci-tabs" role="tablist">
               <button role="tab" data-circuit-tab="tests" aria-selected="true">Tests</button>
               <button role="tab" data-circuit-tab="graph" aria-selected="false">Graph</button>
+              <button role="tab" data-circuit-tab="analysis" aria-selected="false">Analysis</button>
               <span class="grow"></span>
               <span class="ci-tab-tools" data-circuit-tools></span>
             </nav>
@@ -952,6 +953,24 @@
               <div class="ci-table">
                 <textarea data-circuit-table-text spellcheck="false" aria-label="Test table" placeholder="A B   Y&#10;0 0   0&#10;loop(i, 4)&#10;  (i&gt;&gt;1) (i&amp;1)  ((i&gt;&gt;1)&amp;(i&amp;1))&#10;end loop"></textarea>
                 <div class="ci-results" data-circuit-results></div>
+              </div>
+            </div>
+            <!-- Analysis (C6): a truth table of the circuit or of expressions,
+                 its least sums and products, a Karnaugh map, and a circuit
+                 built from it. -->
+            <div class="ci-analysis" data-circuit-analysis hidden>
+              <form class="ci-analyse" data-circuit-analyse-form>
+                <input name="expression" placeholder="Expressions — Y = A·B + C'; Z = A ^ B — or leave empty for this circuit" aria-label="Expressions" spellcheck="false">
+                <button class="ci-tool" type="submit">Analyse</button>
+                <select name="style" aria-label="Build as" class="ci-hz">
+                  <option value="andOr">AND / OR</option><option value="nand">NAND only</option><option value="nor">NOR only</option>
+                </select>
+                <input name="name" placeholder="new circuit" aria-label="Name of the circuit to build" spellcheck="false" class="ci-build-name">
+                <button class="ci-tool" type="button" data-circuit-build>Build</button>
+              </form>
+              <div class="ci-analysis-body">
+                <div class="ci-truth" data-circuit-truth></div>
+                <div class="ci-forms" data-circuit-forms></div>
               </div>
             </div>
             <div class="ci-graph" data-circuit-graph hidden>

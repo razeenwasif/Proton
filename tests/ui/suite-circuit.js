@@ -342,6 +342,47 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     await win.pushEvents([{type: 'circuitRun', run: null}]); await settle();
   });
 
+  await test('Analysis: a circuit or expressions analysed, the table, the least forms and a Karnaugh map drawn, and a circuit built', async () => {
+    await win.pushEvents([project(), {type: 'circuitRun', run: null}]); await settle(); await frames();
+    const stage = ws().querySelector('[data-circuit-stage]');
+    stage.focus();
+    if (!shown(ws().querySelector('[data-circuit-panel]'))) key('t');
+    await settle();
+    ws().querySelector('[data-circuit-tab="analysis"]').click(); await settle();
+    const form = ws().querySelector('[data-circuit-analyse-form]');
+    let before = win.commands.length;
+    form.requestSubmit(); await settle();
+    const asked = sent(before, 'circuitAnalyse')[0];
+    assert(asked?.circuit === 'half' && asked.expression === null && asked.generation === 4, `analysing sent ${JSON.stringify(asked)}`);
+    form.elements.namedItem('expression').value = "Y = A B + C'";
+    before = win.commands.length;
+    form.requestSubmit(); await settle();
+    assert(sent(before, 'circuitAnalyse')[0]?.expression === "Y = A B + C'", 'expressions were not sent');
+    // A full adder's analysis, as the core sends it.
+    await win.pushEvents([{type: 'circuitAnalysis', generation: 4, analysis: {"source":"main","inputs":["A","B","Cin"],"outputs":["Cout","S"],"columns":["00010111","01101001"],"sop":["B·Cin + A·Cin + A·B","A'·B'·Cin + A'·B·Cin' + A·B'·Cin' + A·B·Cin"],"pos":["(B + Cin)·(A + Cin)·(A + B)","(A + B + Cin)·(A + B' + Cin')·(A' + B + Cin')·(A' + B' + Cin)"],"groups":[[[3,3],[5,5],[6,6]],[[1,7],[2,7],[4,7],[7,7]]],"exact":true,"error":null}}]); await settle(); await frames();
+    const rows = ws().querySelectorAll('.ci-truth-table tbody tr');
+    assert(rows.length === 8 && rows[7].textContent.replace(/\s/g, '') === '11111', `the truth table has ${rows.length} rows: ${rows[7]?.textContent}`);
+    const forms = [...ws().querySelectorAll('.ci-form-line')].map((l) => l.textContent);
+    assert(forms[0] === 'Cout = B·Cin + A·Cin + A·B' && forms[1].startsWith('Cout = (B + Cin)'), `the forms are ${JSON.stringify(forms.slice(0, 2))}`);
+    const maps = ws().querySelectorAll('[data-circuit-kmap]');
+    assert(maps.length === 2 && maps[0].width > 0, 'the Karnaugh maps are not drawn');
+    // Build: a name is asked for, then the style and source sent.
+    before = win.commands.length;
+    form.elements.namedItem('expression').value = '';
+    ws().querySelector('[data-circuit-build]').click(); await settle();
+    assert(!sent(before, 'circuitSynthesise').length && doc.activeElement === form.elements.namedItem('name'), 'building without a name did not ask for one');
+    form.elements.namedItem('name').value = 'adder2';
+    form.elements.namedItem('style').value = 'nor';
+    ws().querySelector('[data-circuit-build]').click(); await settle();
+    const built = sent(before, 'circuitSynthesise')[0];
+    assert(built?.name === 'adder2' && built.style === 'nor' && built.circuit === 'half' && built.expression === null, `building sent ${JSON.stringify(built)}`);
+    // A circuit that cannot be tabulated says why.
+    await win.pushEvents([{type: 'circuitAnalysis', generation: 4, analysis: {source: 'half', inputs: [], outputs: [], columns: [], sop: [], pos: [], groups: [], exact: true, error: 'this circuit keeps state'}}]); await settle();
+    assert(ws().querySelector('.ci-truth .ci-failure')?.textContent.includes('keeps state'), 'the reason there is no table is not said');
+    stage.focus();
+    key('t'); await settle();
+  });
+
   await test('Clicks and keys: another circuit, a new one, the top, zoom and fit, ⌘S and close', async () => {
     const before = win.commands.length;
     ws().querySelector('[data-circuit-show="main"]').click(); await settle();
