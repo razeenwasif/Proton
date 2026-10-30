@@ -164,7 +164,9 @@ fn nand_and_nor_forms_compute_the_formula() {
     }
     let (_, f) = formula("? p and q");
     assert_eq!(f.forms.nand.as_deref(), Some("nand(nand(p, q))"));
-    assert_eq!(f.forms.nor.as_deref(), Some("nor(nor(q), nor(p))"));
+    assert_eq!(f.forms.nor.as_deref(), Some("nor(nor(q, q), nor(p, p))"));
+    let (_, f) = formula("? p -> q");
+    assert_eq!(f.forms.nand.as_deref(), Some("nand(p, nand(q, q))"));
 }
 
 /// Every form of a formula, read back, has the formula's truth table.

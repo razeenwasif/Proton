@@ -799,6 +799,51 @@ pub enum Command {
         table: String,
         note: String,
     },
+    /// A Logic file made: `name.logic`, a `theory` or a `worksheet` to start.
+    LogicNew {
+        name: String,
+        kind: String,
+    },
+    /// A `.logic`, `.proof` or `.l4f` file of the project opened.
+    LogicOpen {
+        path: String,
+    },
+    /// The file put away; unsaved changes kept from it only with `discard`.
+    LogicClose {
+        discard: bool,
+    },
+    /// The file written, as typed.
+    LogicSave,
+    /// The file as typed now: held until saved.
+    LogicEdit {
+        generation: u32,
+        text: String,
+    },
+    /// The statement at `line` (from 1) answered: a question, a formula, a
+    /// declaration. `more` finds the least forms past what is found as typed.
+    LogicAsk {
+        generation: u32,
+        line: u32,
+        more: bool,
+    },
+    /// A truth table's column — `0`, `1`, `x` — read back as formulas over
+    /// the names given (spaces or commas between), or `p`, `q`, `r`.
+    LogicFromTable {
+        names: String,
+        column: String,
+    },
+    /// A truth table built as a circuit, from Logic: the project named opened
+    /// (or made), a circuit of `inputs` and one output `Y` whose column is
+    /// `column` (`0`, `1` or `x` a row, the first input the top bit), in
+    /// `style` — `andOr`, `nand` or `nor` — its table the test "truth". A
+    /// held edit.
+    CircuitFromTable {
+        project: String,
+        circuit: String,
+        inputs: Vec<String>,
+        column: String,
+        style: String,
+    },
     /// What is selected in the circuit on screen, for `@circuit`.
     CircuitSelect {
         generation: u32,
@@ -1648,6 +1693,19 @@ pub enum Event {
     /// every output in it.
     CellSelected {
         index: usize,
+    },
+    /// The project's `.logic`, `.proof` and `.l4f` files, for Logic's home page.
+    LogicHome {
+        files: Vec<crate::logic::LogicFound>,
+    },
+    /// The Logic file open, as typed, and what is wrong with it — or none.
+    LogicFile {
+        file: Option<Box<crate::logic::LogicFileView>>,
+    },
+    /// What the statement at the cursor is, or a table read back; none when
+    /// there is nothing to say.
+    LogicAnswer {
+        answer: Option<Box<crate::logic::LogicAnswerView>>,
     },
     /// The project's circuit projects, for Circuit mode's home page.
     CircuitHome {

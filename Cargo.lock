@@ -4370,6 +4370,7 @@ dependencies = [
  "proton-lab",
  "proton-library",
  "proton-literature",
+ "proton-logic",
  "proton-lsp",
  "proton-plugin",
  "proton-research",

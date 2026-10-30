@@ -880,37 +880,12 @@ impl Circuits {
                 vec![notice(format!("{id}'s contents are kept as data/{name}.hex, saved with ⌘S"), NoticeLevel::Info), self.project_event()]
             }
             Command::CircuitPractice { project, circuit, inputs, outputs, clocked, table, note } => {
-                let folder = format!("{}.{EXTENSION}", slug(&project));
-                let dir = match inside(root, &folder) {
-                    Ok(d) => d,
-                    Err(why) => return vec![notice(why, NoticeLevel::Warn)],
-                };
-                let mut events = Vec::new();
-                if self.open.as_ref().is_none_or(|o| o.path != dir) {
-                    if self.dirty() {
-                        return vec![notice("save or discard the open circuit's changes before practising".into(), NoticeLevel::Warn)];
-                    }
-                    if dir.exists() {
-                        match circ::read(&dir) {
-                            Ok(p) => self.show(root, dir, p),
-                            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
-                        }
-                    } else {
-                        let mut p = Project::new();
-                        p.circuits.clear();
-                        p.top = "start".into();
-                        p.circuits.insert("start".into(), Drawing::default());
-                        if let Err(why) = circ::write_project(&dir, &p) {
-                            return vec![notice(why, NoticeLevel::Warn)];
-                        }
-                        self.show(root, dir, p);
-                    }
+                if let Err(events) = self.open_or_make(root, &project, "practising") {
+                    return events;
                 }
+                let mut events = Vec::new();
                 let Some(open) = &mut self.open else { return Vec::new() };
-                // The circuit named for the problem, made unique.
-                let base: String = slug(&circuit).replace('-', "_");
-                let base = if base.is_empty() || !base.starts_with(|c: char| c.is_ascii_alphabetic()) { format!("p_{base}") } else { base };
-                let name = (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}_{n}") }).find(|n| !open.project.circuits.contains_key(n)).unwrap_or(base);
+                let name = fresh_circuit(open, &circuit);
                 let part = |id: String, kind: &str, x: i32, y: i32, attrs: Vec<(&str, String)>| Part {
                     id,
                     kind: kind.into(),
@@ -946,6 +921,36 @@ impl Circuits {
                 record(open, after);
                 events.extend(self.events(root));
                 events.push(notice(format!("{name} is set up to be built: its inputs and outputs are placed, and the test “practice” checks it — t opens the tests"), NoticeLevel::Info));
+                events
+            }
+            Command::CircuitFromTable { project, circuit, inputs, column, style } => {
+                let style = match style.as_str() {
+                    "andOr" => proton_circuit::analysis::Style::AndOr,
+                    "nand" => proton_circuit::analysis::Style::Nand,
+                    "nor" => proton_circuit::analysis::Style::Nor,
+                    other => return vec![notice(format!("“{other}” is not a way to build: andOr, nand or nor"), NoticeLevel::Warn)],
+                };
+                let values: Vec<u8> = column.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+                if inputs.is_empty() || values.len() != 1 << inputs.len().min(31) || values.iter().any(|b| !matches!(b, b'0' | b'1' | b'x')) {
+                    return vec![notice(format!("a column of {} rows of 0, 1 or x was expected for {} inputs", 1u64 << inputs.len().min(31), inputs.len()), NoticeLevel::Warn)];
+                }
+                let table = proton_circuit::analysis::Table { inputs, outputs: vec!["Y".into()], values: vec![values] };
+                let drawing = match proton_circuit::analysis::synthesise(&table, style) {
+                    Ok(d) => d,
+                    Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                };
+                if let Err(events) = self.open_or_make(root, &project, "building") {
+                    return events;
+                }
+                let Some(open) = &mut self.open else { return Vec::new() };
+                let name = fresh_circuit(open, &circuit);
+                let mut after = open.project.clone();
+                after.circuits.insert(name.clone(), drawing);
+                after.tests.entry(name.clone()).or_default().insert("truth".into(), proton_circuit::analysis::as_test(&table));
+                open.shown = name.clone();
+                record(open, after);
+                let mut events = self.events(root);
+                events.push(notice(format!("built {name}, with its truth table as the test “truth”"), NoticeLevel::Info));
                 events
             }
             Command::CircuitSelect { generation, circuit, ids, wires } => {
@@ -1378,6 +1383,32 @@ impl Circuits {
             open.done.push(step);
         }
         vec![self.project_event()]
+    }
+
+    /// The project named opened, or made with one empty circuit, `start`,
+    /// for something to be put in it; refused while another has unsaved
+    /// changes.
+    fn open_or_make(&mut self, root: &Path, project: &str, doing: &str) -> Result<(), Vec<Event>> {
+        let folder = format!("{}.{EXTENSION}", slug(project));
+        let dir = inside(root, &folder).map_err(|why| vec![notice(why, NoticeLevel::Warn)])?;
+        if self.open.as_ref().is_some_and(|o| o.path == dir) {
+            return Ok(());
+        }
+        if self.dirty() {
+            return Err(vec![notice(format!("save or discard the open circuit's changes before {doing}"), NoticeLevel::Warn)]);
+        }
+        if dir.exists() {
+            let p = circ::read(&dir).map_err(|why| vec![notice(why, NoticeLevel::Warn)])?;
+            self.show(root, dir, p);
+        } else {
+            let mut p = Project::new();
+            p.circuits.clear();
+            p.top = "start".into();
+            p.circuits.insert("start".into(), Drawing::default());
+            circ::write_project(&dir, &p).map_err(|why| vec![notice(why, NoticeLevel::Warn)])?;
+            self.show(root, dir, p);
+        }
+        Ok(())
     }
 
     fn new_project(&mut self, root: &Path, name: &str) -> Vec<Event> {
@@ -1891,6 +1922,14 @@ fn within(root: &Path, rel: &str, ext: &str) -> Result<PathBuf, String> {
         return Err(format!("{rel} leads outside the project"));
     }
     Ok(path)
+}
+
+/// A circuit's name from words, as the project has none of yet: lower
+/// case, `_` between words, a letter first, a number after if taken.
+fn fresh_circuit(open: &Open, words: &str) -> String {
+    let base: String = slug(words).replace('-', "_");
+    let base = if base.is_empty() || !base.starts_with(|c: char| c.is_ascii_alphabetic()) { format!("p_{base}") } else { base };
+    (1..).map(|n| if n == 1 { base.clone() } else { format!("{base}_{n}") }).find(|n| !open.project.circuits.contains_key(n)).unwrap_or(base)
 }
 
 fn slug(name: &str) -> String {

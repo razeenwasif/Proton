@@ -284,6 +284,71 @@ fn circuit_shows_its_projects_and_the_quit_prompt_names_an_unsaved_one() {
 }
 
 #[test]
+fn logic_shows_its_files_answers_the_line_at_the_cursor_and_the_quit_prompt_names_an_unsaved_one() {
+    let root = project("logic");
+    std::fs::create_dir_all(root.join("week1")).unwrap();
+    std::fs::write(root.join("week1/sheet.logic"), "? p -> q\n").unwrap();
+    let mut space = Workspace::rooted(root.clone());
+    let events = space.apply(Command::SetMode { mode: ModeId::Logic });
+    let layout = layout_in(&events).expect("a mode change carries its layout");
+    assert_eq!((layout.stage, layout.document), (Slot::Worksheet, DocumentKind::LogicFile));
+    let found = events.iter().find_map(|e| match e {
+        Event::LogicHome { files } => Some(files.iter().map(|f| f.path.clone()).collect::<Vec<_>>()),
+        _ => None,
+    });
+    assert_eq!(found, Some(vec!["week1/sheet.logic".to_string()]));
+    let generation = space
+        .apply(Command::LogicOpen { path: "week1/sheet.logic".into() })
+        .iter()
+        .find_map(|e| match e {
+            Event::LogicFile { file: Some(f) } => Some(f.generation),
+            _ => None,
+        })
+        .expect("the file open");
+    let status = space.apply(Command::LogicAsk { generation, line: 1, more: false }).iter().find_map(|e| match e {
+        Event::LogicAnswer { answer: Some(a) } => a.status.clone(),
+        _ => None,
+    });
+    assert_eq!(status.as_deref(), Some("contingent"));
+    space.apply(Command::LogicEdit { generation, text: "? p or not p\n".into() });
+    assert!(space.is_modified());
+    assert_eq!(space.unsaved(), vec!["week1/sheet.logic".to_string()]);
+    assert!(space.save_unsaved().is_empty());
+    assert_eq!(std::fs::read_to_string(root.join("week1/sheet.logic")).unwrap(), "? p or not p\n");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_truth_table_from_logic_is_built_in_circuit_with_its_table_as_a_test() {
+    let root = project("logic-circuit");
+    let mut space = Workspace::rooted(root.clone());
+    space.apply(Command::SetMode { mode: ModeId::Circuit });
+    let events = space.apply(Command::CircuitFromTable { project: "logic".into(), circuit: "majority".into(), inputs: vec!["a".into(), "b".into(), "c".into()], column: "00010111".into(), style: "nand".into() });
+    let view = events
+        .iter()
+        .find_map(|e| match e {
+            Event::CircuitProject { project: Some(p) } => Some(p.clone()),
+            _ => None,
+        })
+        .expect("the project open");
+    assert_eq!((view.path.as_str(), view.shown.as_str()), ("logic.circuit", "majority"));
+    assert!(view.parts.iter().all(|p| !matches!(p.kind.as_str(), "and" | "or")) && view.parts.iter().any(|p| p.kind == "nand"));
+    let results = space
+        .apply(Command::CircuitTestRun { generation: view.generation, circuit: "majority".into(), label: None })
+        .into_iter()
+        .find_map(|e| match e {
+            Event::CircuitTests { results, .. } => Some(results),
+            _ => None,
+        })
+        .unwrap();
+    assert!(results.len() == 1 && results[0].failures.is_empty() && results[0].error.is_none() && results[0].rows == 8, "{results:?}");
+    // A column of the wrong length is refused.
+    let bad = space.apply(Command::CircuitFromTable { project: "logic".into(), circuit: "x".into(), inputs: vec!["a".into()], column: "010".into(), style: "andOr".into() });
+    assert!(matches!(bad[0], Event::Notice { .. }));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn a_circuit_runs_graph_goes_to_data_as_a_dataframe() {
     let root = project("circuit-data");
     std::fs::create_dir_all(root.join("inv.circuit/circuits")).unwrap();

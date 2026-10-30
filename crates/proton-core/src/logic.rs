@@ -1,0 +1,711 @@
+//! Logic mode: a project's `.logic`, `.proof` and `.l4f` files, the one
+//! open as it is typed — held until ⌘S, and in the quit prompt until then —
+//! and the calculator's answer for the statement at the cursor.
+//!
+//! A statement is answered with the file's declarations, not its other
+//! constraints, so a mistake elsewhere in the file does not keep a line
+//! from being answered. The answer is the engine's (`proton_logic::calc`),
+//! made into what the window draws: the truth table's columns, what the
+//! formula is, its forms, and the terms its Karnaugh map rings.
+
+use std::path::{Path, PathBuf};
+
+use proton_logic::ast::{Item, Question, SortKind, Theory};
+use proton_logic::calc::{self, What};
+use proton_logic::{check, print};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::bus::{Command, Event, NoticeLevel};
+use crate::workspace::notice;
+
+/// The files Logic opens, by extension.
+pub const EXTENSIONS: [&str; 3] = ["logic", "proof", "l4f"];
+
+/// A file of the project, for the home page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicFound {
+    /// As the project names it.
+    pub path: String,
+    pub name: String,
+    /// Its extension: `logic`, `proof` or `l4f`.
+    pub kind: String,
+}
+
+/// Something wrong with the file, and where: lines and columns from 1, a
+/// column of 0 for the whole line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicDiag {
+    pub line: u32,
+    pub col: u32,
+    pub message: String,
+}
+
+/// The file open, as typed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicFileView {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub text: String,
+    pub dirty: bool,
+    pub generation: u32,
+    pub diagnostics: Vec<LogicDiag>,
+    /// What a Logic4Fun file says that Proton does not keep.
+    pub notes: Vec<String>,
+}
+
+/// A column of a truth table: its heading and a `0` or `1` a row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicColumn {
+    pub name: String,
+    pub values: String,
+}
+
+/// A form of a formula: what it is called, and it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicForm {
+    pub name: String,
+    pub text: String,
+}
+
+/// What the statement at the cursor is.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicAnswerView {
+    pub generation: u32,
+    /// The statement's first line, from 1; 0 for a table's answer.
+    pub line: u32,
+    /// `formula`, `argument`, `same`, `table`, `declaration`, `theory` (a
+    /// constraint with more than propositions: the solver's), `error` or
+    /// `nothing`.
+    pub kind: String,
+    /// The statement as read, in Proton's language.
+    pub text: String,
+    /// For a declaration, a theory's constraint, or a mistake: what to say.
+    pub message: Option<String>,
+    pub atoms: Vec<String>,
+    /// The truth table's columns, the propositions' own left out: row `r`
+    /// is their bits, the first the most significant.
+    pub columns: Vec<LogicColumn>,
+    /// `tautology`, `contradiction` or `contingent`.
+    pub status: Option<String>,
+    pub models: Option<u32>,
+    pub model: Option<Vec<bool>>,
+    pub falsifier: Option<Vec<bool>>,
+    pub valid: Option<bool>,
+    pub countermodel: Option<Vec<bool>>,
+    pub same: Option<bool>,
+    pub differ: Option<Vec<bool>>,
+    pub forms: Vec<LogicForm>,
+    /// Whether the least forms are known to be least.
+    pub exact: bool,
+    /// Whether there are too many propositions for the least forms found
+    /// as typed, so they can be asked for.
+    pub more: bool,
+    /// The formula's own column, for its Karnaugh map and Build in Circuit.
+    pub column: Option<String>,
+    /// The terms of the least sum and product, `(value, care)`, as Circuit's
+    /// Karnaugh maps ring them.
+    pub sop_terms: Vec<(u32, u32)>,
+    pub pos_terms: Vec<(u32, u32)>,
+}
+
+#[derive(Debug)]
+struct Open {
+    path: PathBuf,
+    shown_path: String,
+    name: String,
+    kind: String,
+    text: String,
+    saved: String,
+    generation: u32,
+}
+
+/// The file open in Logic, in a project.
+#[derive(Debug, Default)]
+pub struct Logics {
+    open: Option<Open>,
+    generations: u32,
+}
+
+impl Logics {
+    pub fn events(&self, root: &Path) -> Vec<Event> {
+        vec![Event::LogicHome { files: find(root) }, self.file_event()]
+    }
+
+    pub fn apply(&mut self, root: &Path, command: Command) -> Vec<Event> {
+        match command {
+            Command::LogicNew { name, kind } => self.new_file(root, &name, &kind),
+            Command::LogicOpen { path } => {
+                let file = match inside(root, &path) {
+                    Ok(f) => f,
+                    Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                };
+                if self.open.as_ref().is_some_and(|o| o.path == file) {
+                    return self.events(root);
+                }
+                if self.dirty() {
+                    return vec![notice("save or discard the open file's changes before opening another".into(), NoticeLevel::Warn)];
+                }
+                match std::fs::read_to_string(&file) {
+                    Ok(text) => {
+                        self.show(root, file, text);
+                        vec![self.file_event(), Event::LogicAnswer { answer: None }]
+                    }
+                    Err(e) => vec![notice(format!("{path}: {e}"), NoticeLevel::Warn)],
+                }
+            }
+            Command::LogicClose { discard } => {
+                if !discard && self.dirty() {
+                    return vec![notice("the file has unsaved changes".into(), NoticeLevel::Warn)];
+                }
+                self.open = None;
+                let mut events = self.events(root);
+                events.push(Event::LogicAnswer { answer: None });
+                events
+            }
+            Command::LogicSave => {
+                let failed = self.save_unsaved();
+                if let Some(why) = failed.into_iter().next() {
+                    return vec![notice(why, NoticeLevel::Warn)];
+                }
+                self.events(root)
+            }
+            Command::LogicEdit { generation, text } => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
+                if open.text == text {
+                    return Vec::new();
+                }
+                open.text = text;
+                vec![self.file_event()]
+            }
+            Command::LogicAsk { generation, line, more } => {
+                let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
+                let answer = answer_line(&open.text, open.kind == "l4f", line as usize, more);
+                vec![Event::LogicAnswer { answer: Some(Box::new(LogicAnswerView { generation, ..answer })) }]
+            }
+            Command::LogicFromTable { names, column } => {
+                let names: Vec<String> = names.split(|c: char| c.is_whitespace() || c == ',').filter(|s| !s.is_empty()).map(String::from).collect();
+                let generation = self.open.as_ref().map_or(0, |o| o.generation);
+                let view = match calc::from_column(&names, &column) {
+                    Ok(t) => {
+                        let mut v = LogicAnswerView { generation, kind: "table".into(), atoms: t.atoms, ..Default::default() };
+                        put_forms(&mut v, &t.forms);
+                        v.column = Some(column.chars().filter(|c| !c.is_whitespace() && *c != ',').map(|c| match c {
+                            '0' | 'F' | 'f' => '0',
+                            '1' | 'T' | 't' => '1',
+                            _ => 'x',
+                        }).collect());
+                        v.text = v.column.clone().unwrap_or_default();
+                        v
+                    }
+                    Err(why) => LogicAnswerView { generation, kind: "error".into(), message: Some(why), ..Default::default() },
+                };
+                vec![Event::LogicAnswer { answer: Some(Box::new(view)) }]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn new_file(&mut self, root: &Path, name: &str, kind: &str) -> Vec<Event> {
+        let name = name.trim();
+        if name.is_empty() {
+            return vec![notice("a new file needs a name".into(), NoticeLevel::Warn)];
+        }
+        if self.dirty() {
+            return vec![notice("save or discard the open file's changes before making another".into(), NoticeLevel::Warn)];
+        }
+        let start = match kind {
+            "worksheet" => WORKSHEET,
+            "theory" => THEORY,
+            other => return vec![notice(format!("“{other}” is not a kind of file to make: a theory or a worksheet"), NoticeLevel::Warn)],
+        };
+        let rel = format!("{}.logic", slug(name));
+        let file = match inside(root, &rel) {
+            Ok(f) => f,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        if file.exists() {
+            return vec![notice(format!("{rel} is already there"), NoticeLevel::Warn)];
+        }
+        if let Err(e) = std::fs::write(&file, start) {
+            return vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)];
+        }
+        self.show(root, file, start.to_string());
+        let mut events = self.events(root);
+        events.push(Event::LogicAnswer { answer: None });
+        events.push(notice(format!("made {rel}"), NoticeLevel::Info));
+        events
+    }
+
+    fn show(&mut self, root: &Path, path: PathBuf, text: String) {
+        self.generations += 1;
+        let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let rel = path.strip_prefix(root).or_else(|_| path.strip_prefix(&real));
+        let kind = path.extension().and_then(|e| e.to_str()).unwrap_or("logic").to_string();
+        let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        self.open = Some(Open {
+            shown_path: rel.map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| path.display().to_string()),
+            path,
+            name,
+            kind,
+            saved: text.clone(),
+            text,
+            generation: self.generations,
+        });
+    }
+
+    fn dirty(&self) -> bool {
+        self.open.as_ref().is_some_and(|o| o.text != o.saved)
+    }
+
+    /// The file with unsaved changes, as the project names it.
+    pub fn unsaved(&self) -> Vec<String> {
+        match &self.open {
+            Some(o) if o.text != o.saved => vec![o.shown_path.clone()],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Save it, as ⌘S and quitting do; what could not be, and why.
+    pub fn save_unsaved(&mut self) -> Vec<String> {
+        let Some(open) = &mut self.open else { return Vec::new() };
+        if open.text == open.saved {
+            return Vec::new();
+        }
+        match std::fs::write(&open.path, &open.text) {
+            Ok(()) => {
+                open.saved = open.text.clone();
+                Vec::new()
+            }
+            Err(e) => vec![format!("{}: {e}", open.shown_path)],
+        }
+    }
+
+    pub fn file_event(&self) -> Event {
+        Event::LogicFile {
+            file: self.open.as_ref().map(|o| {
+                let (diagnostics, notes) = diagnose(&o.text, o.kind == "l4f");
+                Box::new(LogicFileView {
+                    path: o.shown_path.clone(),
+                    name: o.name.clone(),
+                    kind: o.kind.clone(),
+                    text: o.text.clone(),
+                    dirty: o.text != o.saved,
+                    generation: o.generation,
+                    diagnostics,
+                    notes,
+                })
+            }),
+        }
+    }
+}
+
+const WORKSHEET: &str = "\
+# A worksheet: a line beginning ? is asked. Put the cursor on one.
+? p -> q
+? p, p -> q |= q
+? p -> q == not q -> not p
+? (p and q) or (not p and r)
+";
+
+const THEORY: &str = "\
+# A theory: sorts, then what is named, then what is true of them.
+person = Ann | Bo | Cy
+age = 1..3
+of: person -> age  one-to-one
+
+of(Ann) > of(Bo)
+of(Cy) != 3
+";
+
+/// What is wrong with the file as a whole, and Logic4Fun's notes.
+fn diagnose(text: &str, l4f: bool) -> (Vec<LogicDiag>, Vec<String>) {
+    match proton_logic::read(text, l4f) {
+        Err(d) => (vec![LogicDiag { line: d.line as u32, col: d.col as u32, message: d.message }], Vec::new()),
+        Ok((theory, notes)) => match check(&theory) {
+            Ok(_) => (Vec::new(), notes),
+            Err(ds) => (ds.into_iter().map(|d| LogicDiag { line: d.line as u32, col: d.col as u32, message: d.message }).collect(), notes),
+        },
+    }
+}
+
+/// The statement at `line` (from 1) of a file, answered.
+pub fn answer_line(text: &str, l4f: bool, line: usize, more: bool) -> LogicAnswerView {
+    let say = |kind: &str, at: usize, text: String, message: String| LogicAnswerView { line: at as u32, kind: kind.into(), text, message: Some(message), ..Default::default() };
+    let theory = match proton_logic::read(text, l4f) {
+        Ok((t, _)) => t,
+        Err(d) if d.line <= line => return say("error", d.line, String::new(), d.message),
+        // A mistake further down: what comes before it is read on its own.
+        Err(d) => {
+            let head: String = text.lines().take(d.line.saturating_sub(1)).collect::<Vec<_>>().join("\n");
+            match proton_logic::read(&head, l4f) {
+                Ok((t, _)) => t,
+                Err(d) => return say("error", d.line, String::new(), d.message),
+            }
+        }
+    };
+    // The statement the line is in: the last to start at or before it, if
+    // nothing else starts between.
+    let Some(k) = theory.lines.iter().rposition(|l| l.at <= line && l.at > 0) else {
+        return LogicAnswerView { kind: "nothing".into(), ..Default::default() };
+    };
+    let Some(item) = theory.lines[k].item.clone() else {
+        return LogicAnswerView { line: theory.lines[k].at as u32, kind: "nothing".into(), ..Default::default() };
+    };
+    let at = theory.lines[k].at;
+    let shown = print::item(&item);
+    // Its declarations, and it.
+    let mut alone = Theory { lines: theory.lines.iter().filter(|l| matches!(l.item, Some(Item::Sort(_) | Item::Symbol(_)))).cloned().collect() };
+    let is_decl = matches!(item, Item::Sort(_) | Item::Symbol(_));
+    if !is_decl {
+        alone.lines.push(theory.lines[k].clone());
+    }
+    let checked = match check(&alone) {
+        Ok(c) => c,
+        Err(ds) => {
+            let mine: Vec<String> = ds.iter().filter(|d| d.line == at).map(|d| d.message.clone()).collect();
+            let message = if mine.is_empty() { ds.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("; ") } else { mine.join("; ") };
+            return say("error", at, shown, message);
+        }
+    };
+    let question = match checked.theory.lines.last().and_then(|l| l.item.clone()) {
+        _ if is_decl => return say("declaration", at, shown, describe(&item)),
+        Some(Item::Question(q)) => q,
+        Some(Item::Constraint(e)) => Question::Formula(e),
+        _ => return LogicAnswerView { kind: "nothing".into(), ..Default::default() },
+    };
+    let least = if more { proton_circuit::analysis::MOST_VARIABLES } else { calc::MOST_LEAST };
+    match calc::ask_up_to(&checked, &question, least) {
+        Ok(a) => view(a, at, shown),
+        Err(why) if matches!(item, Item::Constraint(_)) => say("theory", at, shown, format!("{why} — a constraint of the theory, whose models the solver finds")),
+        Err(why) => say("error", at, shown, why),
+    }
+}
+
+/// A declaration said in words.
+fn describe(item: &Item) -> String {
+    match item {
+        Item::Sort(s) => match &s.kind {
+            SortKind::Named(n) => format!("{}: {} elements, in no order — {}", s.name, n.len(), n.join(", ")),
+            SortKind::Ordered(n) => format!("{}: {} elements, least first — {}", s.name, n.len(), n.join(" < ")),
+            SortKind::Range(a, b) => format!("{}: the numbers {a} to {b}, {} of them", s.name, b - a + 1),
+            SortKind::Size(n) => format!("{}: {n} elements, {}1 to {}{n}", s.name, s.name, s.name),
+            SortKind::Sizes(a, b) => format!("{}: {a} to {b} elements, as many as a model needs", s.name),
+        },
+        Item::Symbol(s) => {
+            let kinds: Vec<&str> = [(s.props.one_to_one, "one-to-one"), (s.props.onto, "onto"), (s.props.partial, "partial"), (s.props.symmetric, "symmetric")].into_iter().filter(|(on, _)| *on).map(|(_, w)| w).collect();
+            let what = if s.args.is_empty() {
+                if s.result == "bool" {
+                    "a proposition".to_string()
+                } else {
+                    format!("a constant in {}", s.result)
+                }
+            } else if s.result == "bool" {
+                format!("a predicate of {}", s.args.join(", "))
+            } else {
+                format!("a function from {} to {}", s.args.join(", "), s.result)
+            };
+            format!("{}: {what}{}", s.names.join(", "), if kinds.is_empty() { String::new() } else { format!(", {}", kinds.join(", ")) })
+        }
+        _ => String::new(),
+    }
+}
+
+fn view(a: calc::Answer, line: usize, text: String) -> LogicAnswerView {
+    let mut v = LogicAnswerView { line: line as u32, text, atoms: a.atoms, ..Default::default() };
+    v.columns = a.table.unwrap_or_default().into_iter().map(|c| LogicColumn { name: c.name, values: c.values }).collect();
+    match a.what {
+        What::Formula(f) => {
+            v.kind = "formula".into();
+            v.status = Some(match f.status {
+                calc::Status::Tautology => "tautology",
+                calc::Status::Contradiction => "contradiction",
+                calc::Status::Contingent => "contingent",
+            }
+            .into());
+            v.models = f.models.map(|m| m.min(u32::MAX as u64) as u32);
+            v.model = f.model;
+            v.falsifier = f.falsifier;
+            v.column = v.columns.last().map(|c| c.values.clone());
+            v.more = v.atoms.len() > calc::MOST_LEAST && v.atoms.len() <= proton_circuit::analysis::MOST_VARIABLES && f.forms.least_sop.is_none() && f.forms.sop_terms.is_empty();
+            put_forms(&mut v, &f.forms);
+        }
+        What::Argument { valid, countermodel } => {
+            v.kind = "argument".into();
+            v.valid = Some(valid);
+            v.countermodel = countermodel;
+        }
+        What::Same { same, differ } => {
+            v.kind = "same".into();
+            v.same = Some(same);
+            v.differ = differ;
+        }
+    }
+    v
+}
+
+fn put_forms(v: &mut LogicAnswerView, f: &calc::Forms) {
+    let all = [
+        ("Least sum of products", &f.least_sop),
+        ("Least product of sums", &f.least_pos),
+        ("Conjunctive normal form", &f.cnf),
+        ("Disjunctive normal form", &f.dnf),
+        ("Negation normal form", &f.nnf),
+        ("Full DNF", &f.full_dnf),
+        ("Full CNF", &f.full_cnf),
+        ("NAND only", &f.nand),
+        ("NOR only", &f.nor),
+    ];
+    v.forms = all.into_iter().filter_map(|(name, text)| text.as_ref().map(|t| LogicForm { name: name.into(), text: t.clone() })).collect();
+    v.exact = f.exact;
+    v.sop_terms = f.sop_terms.clone();
+    v.pos_terms = f.pos_terms.clone();
+}
+
+/// The Logic files in a folder, three folders deep.
+fn find(root: &Path) -> Vec<LogicFound> {
+    const SKIP: &[&str] = &["node_modules", "target", "dist", "build", "vendor"];
+    let mut out = Vec::new();
+    let mut stack = vec![(root.to_path_buf(), 0u32)];
+    let mut looked = 0;
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            looked += 1;
+            if looked > 5000 || out.len() >= 500 {
+                break;
+            }
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            if path.is_dir() {
+                if depth < 3 {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|e| e.to_str()).filter(|e| EXTENSIONS.contains(e)) else { continue };
+            let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            out.push(LogicFound { path: rel, name: stem, kind: ext.to_string() });
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
+}
+
+/// A file named relative to the project, kept inside it.
+fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let named = Path::new(rel);
+    if rel.is_empty() || !named.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        return Err(format!("{rel} is not in the project"));
+    }
+    if !named.extension().and_then(|e| e.to_str()).is_some_and(|e| EXTENSIONS.contains(&e)) {
+        return Err(format!("{rel} is not a .logic, .proof or .l4f file"));
+    }
+    let base = std::fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    let path = base.join(named);
+    let mut held = path.as_path();
+    let real = loop {
+        match std::fs::canonicalize(held) {
+            Ok(real) => break real,
+            Err(_) => match held.parent() {
+                Some(up) => held = up,
+                None => return Err(format!("{rel} is nowhere")),
+            },
+        }
+    };
+    if !real.starts_with(&base) {
+        return Err(format!("{rel} leads outside the project"));
+    }
+    Ok(path)
+}
+
+fn slug(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.trim().chars() {
+        if c.is_alphanumeric() {
+            out.extend(c.to_lowercase());
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    let out = out.trim_end_matches('-').to_string();
+    if out.is_empty() {
+        "logic".into()
+    } else {
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("proton-core-logic-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn file(events: &[Event]) -> Option<LogicFileView> {
+        events.iter().rev().find_map(|e| match e {
+            Event::LogicFile { file } => file.as_deref().cloned(),
+            _ => None,
+        })
+    }
+
+    fn answer(events: &[Event]) -> LogicAnswerView {
+        events
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                Event::LogicAnswer { answer: Some(a) } => Some((**a).clone()),
+                _ => None,
+            })
+            .expect("an answer")
+    }
+
+    /// The answers the browser preview shows for the new worksheet's lines,
+    /// and a column read back, as the core makes them: pasted into
+    /// `ui/preview-logic.js`.
+    #[test]
+    #[ignore = "prints the preview's answers"]
+    fn dump_answers_for_the_preview() {
+        let mut answers = serde_json::Map::new();
+        for line in 1..=WORKSHEET.lines().count() {
+            let a = answer_line(WORKSHEET, false, line, false);
+            if a.kind != "nothing" {
+                answers.insert(line.to_string(), serde_json::to_value(&a).unwrap());
+            }
+        }
+        println!("WORKSHEET {}", serde_json::to_string(WORKSHEET).unwrap());
+        println!("ANSWERS {}", serde_json::Value::Object(answers));
+        let mut l = Logics::default();
+        let t = answer(&l.apply(&std::env::temp_dir(), Command::LogicFromTable { names: "a b c".into(), column: "00010111".into() }));
+        println!("TABLE {}", serde_json::to_string(&t).unwrap());
+    }
+
+    #[test]
+    fn a_worksheet_is_made_found_edited_held_and_saved() {
+        let root = scratch("made");
+        let mut l = Logics::default();
+        let events = l.apply(&root, Command::LogicNew { name: "Week 3".into(), kind: "worksheet".into() });
+        let f = file(&events).unwrap();
+        assert_eq!((f.path.as_str(), f.kind.as_str(), f.dirty), ("week-3.logic", "logic", false));
+        assert!(f.text.starts_with("# A worksheet"));
+        assert!(matches!(&events[0], Event::LogicHome { files } if files.len() == 1 && files[0].name == "week-3"));
+        // Typed: held, not written.
+        let f = file(&l.apply(&root, Command::LogicEdit { generation: f.generation, text: "? p or q\n".into() })).unwrap();
+        assert!(f.dirty);
+        assert_eq!(l.unsaved(), vec!["week-3.logic"]);
+        assert!(std::fs::read_to_string(root.join("week-3.logic")).unwrap().starts_with("# A worksheet"));
+        // A second file waits for this one to be saved.
+        assert!(matches!(l.apply(&root, Command::LogicNew { name: "other".into(), kind: "theory".into() })[0], Event::Notice { .. }));
+        l.apply(&root, Command::LogicSave);
+        assert_eq!(std::fs::read_to_string(root.join("week-3.logic")).unwrap(), "? p or q\n");
+        assert!(l.unsaved().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_line_at_the_cursor_is_answered() {
+        let text = "# notes\n? p -> q\n\n? q, p -> q |= p\nperson = Ann | Bo\nf: person -> person  one-to-one\n? p -> q == not q -> not p\nall x: f(x) != x\n? p and\n  q\n";
+        let a = answer_line(text, false, 2, false);
+        assert_eq!((a.kind.as_str(), a.line, a.text.as_str()), ("formula", 2, "? p -> q"));
+        assert_eq!(a.status.as_deref(), Some("contingent"));
+        assert_eq!(a.column.as_deref(), Some("1101"));
+        assert_eq!(a.models, Some(3));
+        assert!(a.forms.iter().any(|f| f.name == "Least sum of products" && f.text == "not p or q"));
+        assert_eq!(a.sop_terms.len(), 2);
+        let a = answer_line(text, false, 4, false);
+        assert_eq!((a.kind.as_str(), a.valid, a.countermodel.clone()), ("argument", Some(false), Some(vec![true, false])));
+        // A blank line, a comment: nothing.
+        assert_eq!(answer_line(text, false, 3, false).kind, "nothing");
+        assert_eq!(answer_line(text, false, 1, false).kind, "nothing");
+        let a = answer_line(text, false, 5, false);
+        assert_eq!(a.kind, "declaration");
+        assert_eq!(a.message.as_deref(), Some("person: 2 elements, in no order — Ann, Bo"));
+        assert_eq!(answer_line(text, false, 6, false).message.as_deref(), Some("f: a function from person to person, one-to-one"));
+        assert_eq!(answer_line(text, false, 7, false).same, Some(true));
+        let a = answer_line(text, false, 8, false);
+        assert_eq!(a.kind, "theory");
+        // A statement over two lines, answered from either.
+        assert_eq!(answer_line(text, false, 10, false).text, "? p and q");
+    }
+
+    #[test]
+    fn mistakes_elsewhere_do_not_stop_a_line_being_answered() {
+        // Line 3 refers to nothing declared; line 2 is still answered, and line 3 says why it is not.
+        let text = "? p -> p\n? p, q |= q\ng(a) = b\n? (p\n";
+        assert_eq!(answer_line(text, false, 1, false).status.as_deref(), Some("tautology"));
+        assert_eq!(answer_line(text, false, 2, false).valid, Some(true));
+        let a = answer_line(text, false, 3, false);
+        assert_eq!(a.kind, "error");
+        assert!(a.message.unwrap().contains("g is not declared"));
+        assert_eq!(answer_line(text, false, 4, false).kind, "error");
+        let (diags, _) = diagnose(text, false);
+        assert_eq!(diags[0].line, 4);
+    }
+
+    #[test]
+    fn more_propositions_than_are_minimised_as_typed_can_be_asked_for() {
+        let f = (1..=11).map(|i| format!("x{i}")).collect::<Vec<_>>().join(" and ");
+        let text = format!("? {f}\n");
+        let a = answer_line(&text, false, 1, false);
+        assert!(a.more && !a.forms.iter().any(|f| f.name.starts_with("Least")));
+        let a = answer_line(&text, false, 1, true);
+        assert!(!a.more);
+        assert!(a.forms.iter().any(|f| f.name == "Least sum of products" && f.text.starts_with("x1 and x2")));
+    }
+
+    #[test]
+    fn a_column_typed_in_is_read_back_as_formulas() {
+        let root = scratch("table");
+        let mut l = Logics::default();
+        let a = answer(&l.apply(&root, Command::LogicFromTable { names: "a b c".into(), column: "0001 0111".into() }));
+        assert_eq!((a.kind.as_str(), a.column.as_deref()), ("table", Some("00010111")));
+        assert_eq!(a.forms[0].text, "b and c or a and c or a and b");
+        let a = answer(&l.apply(&root, Command::LogicFromTable { names: String::new(), column: "011".into() }));
+        assert_eq!(a.kind, "error");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn logic4fun_files_are_found_opened_and_their_settings_named() {
+        let root = scratch("l4f");
+        std::fs::create_dir_all(root.join("puzzles")).unwrap();
+        std::fs::write(root.join("puzzles/pets.l4f"), "Sorts:\npet enum: cat, dog.\nVocabulary:\nname p : bool {hidden}\nfunction f(pet) : pet {all_different}\nConstraints:\nf(cat) = dog.\np IMP p.\n").unwrap();
+        std::fs::write(root.join("notes.txt"), "not a logic file").unwrap();
+        let mut l = Logics::default();
+        let events = l.events(&root);
+        assert!(matches!(&events[0], Event::LogicHome { files } if files.len() == 1 && files[0].kind == "l4f"));
+        let f = file(&l.apply(&root, Command::LogicOpen { path: "puzzles/pets.l4f".into() })).unwrap();
+        assert!(f.diagnostics.is_empty(), "{:?}", f.diagnostics);
+        assert!(f.notes.iter().any(|n| n.contains("hidden")));
+        let a = answer(&l.apply(&root, Command::LogicAsk { generation: f.generation, line: 8, more: false }));
+        assert_eq!((a.kind.as_str(), a.status.as_deref()), ("formula", Some("tautology")));
+        assert_eq!(answer(&l.apply(&root, Command::LogicAsk { generation: f.generation, line: 7, more: false })).kind, "theory");
+        // Outside the project, or not a Logic file: refused.
+        for bad in ["../x.logic", "notes.txt", "/etc/passwd.logic"] {
+            assert!(matches!(l.apply(&root, Command::LogicOpen { path: bad.into() })[0], Event::Notice { .. }), "{bad}");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

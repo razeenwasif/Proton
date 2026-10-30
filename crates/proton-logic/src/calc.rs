@@ -217,10 +217,16 @@ pub struct Forms {
 
 /// A question asked of a checked theory's signature.
 pub fn ask(c: &Checked, q: &Question) -> Result<Answer, String> {
+    ask_up_to(c, q, MOST_LEAST)
+}
+
+/// The same, the least forms found for up to `least` propositions — as many
+/// as Circuit minimises (16) when asked for, at the time that takes.
+pub fn ask_up_to(c: &Checked, q: &Question, least: usize) -> Result<Answer, String> {
     match q {
         Question::Formula(e) => {
             let (atoms, ps) = propositional(&c.sig, &[e])?;
-            formula(atoms, &ps[0], e)
+            formula(atoms, &ps[0], e, least)
         }
         Question::Entails(premises, goal) => {
             let all: Vec<&Expr> = premises.iter().chain(std::iter::once(goal)).collect();
@@ -260,7 +266,7 @@ fn columns(n: usize, cols: &[(String, &P)]) -> Option<Vec<Column>> {
     (n <= MOST_SHOWN).then(|| cols.iter().map(|(name, p)| Column { name: name.clone(), values: (0..1u64 << n).map(|r| if p.eval(n, r) { '1' } else { '0' }).collect() }).collect())
 }
 
-fn formula(atoms: Vec<String>, p: &P, e: &Expr) -> Result<Answer, String> {
+fn formula(atoms: Vec<String>, p: &P, e: &Expr, least: usize) -> Result<Answer, String> {
     let n = atoms.len();
     let (status, models, model, falsifier) = if n <= MOST_COUNTED {
         let mut count = 0u64;
@@ -304,7 +310,7 @@ fn formula(atoms: Vec<String>, p: &P, e: &Expr) -> Result<Answer, String> {
     } else {
         columns(n, &[(print::expr(e), p)])
     };
-    let forms = forms(&atoms, p);
+    let forms = forms(&atoms, p, least);
     Ok(Answer { atoms, table, what: What::Formula(Box::new(FormulaAnswer { status, models, model, falsifier, forms })) })
 }
 
@@ -330,7 +336,7 @@ type Lit = (usize, bool);
 /// A conjunction or disjunction of literals, sorted, each once.
 type Clause = Vec<Lit>;
 
-pub fn forms(atoms: &[String], p: &P) -> Forms {
+pub fn forms(atoms: &[String], p: &P, most_least: usize) -> Forms {
     let n = atoms.len();
     let mut f = Forms::default();
     // `<->` and `xor` double what they hold in negation normal form: its
@@ -350,7 +356,7 @@ pub fn forms(atoms: &[String], p: &P) -> Forms {
         if column.len() - ones <= MOST_FULL {
             f.full_cnf = Some(print::expr(&full(atoms, &column, b'0')));
         }
-        if n <= MOST_LEAST {
+        if n <= most_least {
             if let Ok(m) = analysis::minimise(n, &column) {
                 least(&mut f, atoms, &m);
             }
@@ -579,12 +585,20 @@ pub fn gates(atoms: &[String], terms: &[analysis::Term], nor: bool) -> Gate {
     let firsts: Vec<Gate> = terms
         .iter()
         .map(|t| {
-            let lits: Vec<Gate> = (0..n).filter(|i| t.care >> (n - 1 - i) & 1 == 1).map(|i| literal(i, t.value >> (n - 1 - i) & 1 == 1)).collect();
-            if lits.is_empty() {
+            let lits: Vec<(usize, bool)> = (0..n).filter(|i| t.care >> (n - 1 - i) & 1 == 1).map(|i| (i, t.value >> (n - 1 - i) & 1 == 1)).collect();
+            match lits.as_slice() {
                 // A term of nothing: in a sum it is true, so its gate is false.
-                Gate::Const(nor)
-            } else {
-                gate(lits)
+                [] => Gate::Const(nor),
+                // One literal: its gate's output is its negation, so a negated
+                // proposition is the proposition, and the rest its NOT.
+                [(i, bit)] => {
+                    if *bit == nor {
+                        Gate::Var(*i)
+                    } else {
+                        gate(vec![Gate::Var(*i), Gate::Var(*i)])
+                    }
+                }
+                _ => gate(lits.iter().map(|(i, bit)| literal(*i, *bit)).collect()),
             }
         })
         .collect();

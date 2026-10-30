@@ -21,6 +21,7 @@ pub mod formatters;
 pub mod git;
 pub mod highlights;
 pub mod key;
+pub mod logic;
 pub mod lsp;
 pub mod mention;
 pub mod mode;

@@ -88,6 +88,8 @@ pub struct Workspace {
     sheets: crate::sheet::Sheets,
     /// The circuit project open in Circuit mode.
     circuits: crate::circuit::Circuits,
+    /// The file open in Logic mode.
+    logics: crate::logic::Logics,
     settings: crate::settings::Settings,
     /// Polled while another project is on screen: what it hears is taken in,
     /// but its notebook, terminal and conversation are not drawn into events
@@ -559,7 +561,7 @@ impl Workspace {
     /// asks before closing it, because a closed workspace takes its buffers
     /// with it and there is no undo for that.
     pub fn is_modified(&self) -> bool {
-        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.sheets.unsaved().is_empty() || !self.circuits.unsaved().is_empty()
+        self.editor.buffers().iter().any(|b| b.is_modified()) || !self.sheets.unsaved().is_empty() || !self.circuits.unsaved().is_empty() || !self.logics.unsaved().is_empty()
     }
 
     /// The files with unsaved changes, as the project names them.
@@ -576,6 +578,7 @@ impl Workspace {
         // So is a workbook.
         files.extend(self.sheets.unsaved());
         files.extend(self.circuits.unsaved());
+        files.extend(self.logics.unsaved());
         files
     }
 
@@ -589,6 +592,7 @@ impl Workspace {
         let mut failed: Vec<String> = failed.into_iter().map(|(name, why)| format!("{name}: {why}")).collect();
         failed.extend(self.sheets.save_unsaved());
         failed.extend(self.circuits.save_unsaved());
+        failed.extend(self.logics.save_unsaved());
         failed
     }
 
@@ -687,6 +691,10 @@ impl Workspace {
                 if self.mode == ModeId::Circuit {
                     let root = self.root().to_path_buf();
                     events.extend(self.circuits.events(&root));
+                }
+                if self.mode == ModeId::Logic {
+                    let root = self.root().to_path_buf();
+                    events.extend(self.logics.events(&root));
                 }
                 events
             }
@@ -1461,11 +1469,29 @@ impl Workspace {
             | Command::CircuitExport { .. }
             | Command::CircuitImport { .. }
             | Command::CircuitSelect { .. }
-            | Command::CircuitPractice { .. }) => {
+            | Command::CircuitPractice { .. }
+            | Command::CircuitFromTable { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
                 if events.iter().any(|e| matches!(e, Event::CircuitHome { .. } | Event::CircuitExported { .. })) {
                     // A project made, saved or written out is files the tree and git see.
+                    events.push(self.tree_event());
+                    events.push(self.repo_event());
+                }
+                events
+            }
+
+            command @ (Command::LogicNew { .. }
+            | Command::LogicOpen { .. }
+            | Command::LogicClose { .. }
+            | Command::LogicSave
+            | Command::LogicEdit { .. }
+            | Command::LogicAsk { .. }
+            | Command::LogicFromTable { .. }) => {
+                let root = self.root().to_path_buf();
+                let mut events = self.logics.apply(&root, command);
+                if events.iter().any(|e| matches!(e, Event::LogicHome { .. })) {
+                    // A file made or saved is a file the tree and git see.
                     events.push(self.tree_event());
                     events.push(self.repo_event());
                 }
@@ -5771,6 +5797,11 @@ impl Workspace {
         if mode == ModeId::Circuit {
             let root = self.root().to_path_buf();
             events.extend(self.circuits.events(&root));
+        }
+        // And Logic its files.
+        if mode == ModeId::Logic {
+            let root = self.root().to_path_buf();
+            events.extend(self.logics.events(&root));
         }
 
         events
