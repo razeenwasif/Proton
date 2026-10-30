@@ -126,8 +126,87 @@ pub struct LogicAnswerView {
     /// Karnaugh maps ring them.
     pub sop_terms: Vec<(u32, u32)>,
     pub pos_terms: Vec<(u32, u32)>,
+    /// For an argument: its semantic tableau, closed or with an open branch.
+    pub tableau: Option<LogicTabView>,
+    /// What the prover says of how it went: the free variables it needed,
+    /// or why it found neither a proof nor a countermodel.
+    pub proof_note: Option<String>,
+    /// For a first-order argument that fails: a model of the premises with
+    /// the conclusion false.
+    pub counter: Option<LogicModelView>,
+    /// For a propositional one: its open branch's literals.
+    pub open: Vec<(String, bool)>,
 }
 
+/// A branch of a tableau: its lines, and how it ends — closed by two lines,
+/// open, or split into two more.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicTabView {
+    pub lines: Vec<LogicTabLine>,
+    pub closed: Option<(u32, u32)>,
+    pub open: bool,
+    pub split: Vec<LogicTabView>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicTabLine {
+    pub n: u32,
+    pub text: String,
+    pub why: String,
+}
+
+/// How long the prover tries as a line is typed, and when asked to try harder.
+const PROVE_TIME: Duration = Duration::from_millis(800);
+const PROVE_LONGER: Duration = Duration::from_secs(10);
+/// A tableau bigger than this is said, not drawn.
+const MOST_TAB_LINES: usize = 1500;
+
+fn tab_view(t: &proton_logic::tableau::TabTree) -> LogicTabView {
+    use proton_logic::tableau::TabEnd;
+    let lines = t.lines.iter().map(|l| LogicTabLine { n: l.n as u32, text: l.text.clone(), why: l.why.clone() }).collect();
+    match &t.end {
+        TabEnd::Closed(a, b) => LogicTabView { lines, closed: Some((*a as u32, *b as u32)), open: false, split: Vec::new() },
+        TabEnd::Open => LogicTabView { lines, closed: None, open: true, split: Vec::new() },
+        TabEnd::Split(l, r) => LogicTabView { lines, closed: None, open: false, split: vec![tab_view(l), tab_view(r)] },
+    }
+}
+
+fn tab_size(t: &proton_logic::tableau::TabTree) -> usize {
+    use proton_logic::tableau::TabEnd;
+    t.lines.len()
+        + match &t.end {
+            TabEnd::Split(l, r) => tab_size(l) + tab_size(r),
+            _ => 0,
+        }
+}
+
+/// An argument proved or refuted by the tableau, its answer filled in.
+fn prove_into(v: &mut LogicAnswerView, c: &Checked, premises: &[proton_logic::Expr], goal: &proton_logic::Expr, time: Duration) {
+    match proton_logic::tableau::prove(c, premises, goal, time) {
+        Ok(t) => {
+            if v.valid.is_none() {
+                v.valid = t.valid;
+            }
+            if let Some(tree) = &t.tree {
+                if tab_size(tree) <= MOST_TAB_LINES {
+                    v.tableau = Some(tab_view(tree));
+                }
+            }
+            v.open = t.open.clone();
+            v.counter = t.counter.as_ref().map(|(theory, m)| model_view(theory, m));
+            v.proof_note = Some(match (t.valid, t.note.is_empty()) {
+                (Some(true), true) => "every branch closed".into(),
+                (_, false) => t.note.clone(),
+                (_, true) => "a branch stays open".into(),
+            });
+        }
+        Err(why) => v.proof_note = Some(why),
+    }
+}
 /// A symbol's values in a model, laid out: `value` for a constant or a
 /// proposition, `row` for one argument, `grid` for two, `list` for more.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -500,6 +579,7 @@ const WORKSHEET: &str = "\
 ? p, p -> q |= q
 ? p -> q == not q -> not p
 ? (p and q) or (not p and r)
+? all x: man(x) -> mortal(x), man(socrates) |= mortal(socrates)
 ";
 
 const THEORY: &str = "\
@@ -538,6 +618,9 @@ pub fn model_view(c: &Checked, m: &Model) -> LogicModelView {
         Some(Item::Symbol(s)) => Some(s.names.clone()),
         _ => None,
     }).flatten().collect();
+    // Symbols with no line of their own: a countermodel's, declared for it.
+    let undeclared: Vec<String> = sig.symbols.keys().filter(|n| !names.contains(n)).cloned().collect();
+    names.extend(undeclared);
     names.extend(sig.propositions.iter().cloned());
     let tables = names
         .into_iter()
@@ -639,10 +722,34 @@ pub fn answer_line(text: &str, l4f: bool, line: usize, more: bool) -> LogicAnswe
         _ => return LogicAnswerView { kind: "nothing".into(), ..Default::default() },
     };
     let least = if more { proton_circuit::analysis::MOST_VARIABLES } else { calc::MOST_LEAST };
+    let time = if more { PROVE_LONGER } else { PROVE_TIME };
     match calc::ask_up_to(&checked, &question, least) {
-        Ok(a) => view(a, at, shown),
+        Ok(a) => {
+            let mut v = view(a, at, shown);
+            // A propositional argument has its tableau beside its table.
+            if let Question::Entails(premises, goal) = &question {
+                prove_into(&mut v, &checked, premises, goal, time);
+            }
+            v
+        }
         Err(why) if matches!(item, Item::Constraint(_)) => say("theory", at, shown, format!("{why} — a constraint of the theory: ⌘⇧↩ finds its models")),
-        Err(why) => say("error", at, shown, why),
+        // More than propositions: the prover's, as an argument; a formula
+        // alone is asked whether it always holds.
+        Err(why) => match &question {
+            Question::Entails(premises, goal) => {
+                let mut v = LogicAnswerView { line: at as u32, kind: "argument".into(), text: shown, ..Default::default() };
+                prove_into(&mut v, &checked, premises, goal, time);
+                v.more = v.valid.is_none();
+                v
+            }
+            Question::Formula(goal) => {
+                let mut v = LogicAnswerView { line: at as u32, kind: "argument".into(), text: shown, ..Default::default() };
+                prove_into(&mut v, &checked, &[], goal, time);
+                v.more = v.valid.is_none();
+                v
+            }
+            Question::Same(..) => say("error", at, shown, why),
+        },
     }
 }
 
@@ -994,14 +1101,43 @@ mod tests {
     }
 
     #[test]
+    fn arguments_are_proved_by_tableau_and_refuted_by_countermodel() {
+        let text = "? p, p -> q |= q\n? all x: P(x) -> Q(x), P(a) |= Q(a)\n? some x: P(x) |= all x: P(x)\n? all x: P(x) -> P(x)\n";
+        // Propositional: the table's verdict, and the tableau beside it.
+        let a = answer_line(text, false, 1, false);
+        assert_eq!((a.kind.as_str(), a.valid), ("argument", Some(true)));
+        let t = a.tableau.expect("the tableau");
+        assert_eq!(t.lines.len(), 3);
+        assert_eq!(t.split.len(), 2);
+        assert!(t.split.iter().all(|b| b.closed.is_some()));
+        // First-order, valid: every branch closed.
+        let a = answer_line(text, false, 2, false);
+        assert_eq!((a.kind.as_str(), a.valid), ("argument", Some(true)), "{:?}", a.proof_note);
+        fn closed(t: &LogicTabView) -> bool {
+            if t.split.is_empty() { t.closed.is_some() } else { t.split.iter().all(closed) }
+        }
+        assert!(closed(&a.tableau.unwrap()));
+        // First-order, invalid: a countermodel of two individuals, laid out.
+        let a = answer_line(text, false, 3, false);
+        assert_eq!(a.valid, Some(false));
+        let cm = a.counter.expect("a countermodel");
+        assert_eq!(cm.sizes, vec![("individual".to_string(), 2)]);
+        assert_eq!(cm.tables[0].name, "P");
+        // A formula with a quantifier is asked whether it always holds.
+        let a = answer_line(text, false, 4, false);
+        assert_eq!((a.kind.as_str(), a.valid), ("argument", Some(true)));
+    }
+
+    #[test]
     fn mistakes_elsewhere_do_not_stop_a_line_being_answered() {
         // Line 3 refers to nothing declared; line 2 is still answered, and line 3 says why it is not.
         let text = "? p -> p\n? p, q |= q\ng(a) = b\n? (p\n";
         assert_eq!(answer_line(text, false, 1, false).status.as_deref(), Some("tautology"));
         assert_eq!(answer_line(text, false, 2, false).valid, Some(true));
+        // Nothing declared: g, a and b are a worksheet's loose function and
+        // things, and the line a first-order constraint.
         let a = answer_line(text, false, 3, false);
-        assert_eq!(a.kind, "error");
-        assert!(a.message.unwrap().contains("g is not declared"));
+        assert_eq!(a.kind, "theory");
         assert_eq!(answer_line(text, false, 4, false).kind, "error");
         let (diags, _) = diagnose(text, false);
         assert_eq!(diags[0].line, 4);

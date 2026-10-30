@@ -850,6 +850,9 @@ pub fn solve(c: &Checked, keep: usize, count: bool, time: Duration) -> Result<Ou
 
 /// The same, stopped where it is when `stop` is set.
 pub fn solve_or_stop(c: &Checked, keep: usize, count: bool, time: Duration, stop: &AtomicBool) -> Result<Outcome, String> {
+    if !c.sig.loose.is_empty() && !c.sig.sorts.contains_key(crate::types::INDIVIDUAL) {
+        return Err(format!("{} {} not declared: say what sorts they are of, and models can be searched for", c.sig.loose.keys().cloned().collect::<Vec<_>>().join(", "), if c.sig.loose.len() == 1 { "is" } else { "are" }));
+    }
     let started = Instant::now();
     let deadline = started + time;
     // Each sort of a range of sizes, smallest first: every combination.
@@ -908,6 +911,9 @@ fn solve_sized(c: &Checked, sizes: BTreeMap<String, u32>, keep: usize, count: bo
     let mut first = 0usize;
     let mut decls: Vec<(String, Vec<Ty>, Ty, Props)> = c.sig.symbols.iter().map(|(n, s)| (n.clone(), s.args.clone(), s.result.clone(), s.props)).collect();
     decls.extend(c.sig.propositions.iter().map(|p| (p.clone(), Vec::new(), Ty::Bool, Props::default())));
+    // Loose functions and predicates, of individuals.
+    let individual = Ty::Sort(crate::types::INDIVIDUAL.into());
+    decls.extend(c.sig.loose.iter().map(|(n, (arity, predicate))| (n.clone(), vec![individual.clone(); *arity], if *predicate { Ty::Bool } else { individual.clone() }, Props::default())));
     for (name, args, result, props) in decls {
         let arg_doms: Vec<Rc<Vec<i64>>> = args.iter().map(|t| comp.dom(t)).collect();
         let mut values = domain(&c.sig, &model, &result);

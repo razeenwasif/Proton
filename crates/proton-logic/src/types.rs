@@ -45,7 +45,17 @@ pub struct Sig {
     pub propositions: Vec<String>,
     /// Sorts in the order declared.
     pub order: Vec<String>,
+    /// In a file that declares nothing — a worksheet's questions — the
+    /// functions and predicates used undeclared: each one's arity, and
+    /// whether it is a predicate. Their arguments, and their values when
+    /// not true or false, are individuals ([`INDIVIDUAL`]).
+    #[serde(default)]
+    pub loose: BTreeMap<String, (usize, bool)>,
 }
+
+/// The sort of the things a worksheet's undeclared functions and
+/// predicates are of, and its unsorted variables range over.
+pub const INDIVIDUAL: &str = "individual";
 
 /// A theory checked: every binder given its sort.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,11 +85,19 @@ impl Sig {
 }
 
 pub fn check(theory: &Theory) -> Result<Checked, Vec<Diag>> {
-    let mut c = Checker { sig: Sig::default(), diags: Vec::new(), line: 0 };
+    // Nothing declared: undeclared functions and predicates are loose.
+    let loose = !theory.lines.iter().any(|l| matches!(l.item, Some(Item::Sort(_)) | Some(Item::Symbol(_))));
+    let mut c = Checker { sig: Sig::default(), diags: Vec::new(), line: 0, loose, things: Vec::new() };
     c.sig.sorts.insert("bool".into(), SortKind::Ordered(vec!["false".into(), "true".into()]));
     let mut out = theory.clone();
     for line in &mut out.lines {
         c.line = line.at;
+        // The names a statement gives as arguments, anywhere in it: in a
+        // worksheet, things, not propositions, even with `=` between two.
+        c.things.clear();
+        if let Some(item) = &line.item {
+            argument_names(item, &mut c.things);
+        }
         match &mut line.item {
             Some(Item::Sort(s)) => c.sort(s),
             Some(Item::Symbol(s)) => c.symbol(s),
@@ -106,10 +124,35 @@ pub fn check(theory: &Theory) -> Result<Checked, Vec<Diag>> {
     }
 }
 
+fn argument_names(item: &Item, out: &mut Vec<String>) {
+    fn args(e: &Expr, inside: bool, out: &mut Vec<String>) {
+        match e {
+            Expr::Name(n) if inside => out.push(n.clone()),
+            Expr::App(_, xs) => xs.iter().for_each(|x| args(x, true, out)),
+            Expr::Not(a) | Expr::Neg(a) => args(a, inside, out),
+            Expr::Bin(_, a, b) => {
+                args(a, inside, out);
+                args(b, inside, out);
+            }
+            Expr::Quant(_, _, body) => args(body, inside, out),
+            _ => {}
+        }
+    }
+    match item {
+        Item::Constraint(e) | Item::Question(Question::Formula(e)) => args(e, false, out),
+        Item::Question(Question::Entails(ps, g)) => ps.iter().chain(std::iter::once(g)).for_each(|e| args(e, false, out)),
+        Item::Question(Question::Same(a, b)) => [a, b].into_iter().for_each(|e| args(e, false, out)),
+        _ => {}
+    }
+}
+
 struct Checker {
     sig: Sig,
     diags: Vec<Diag>,
     line: usize,
+    loose: bool,
+    /// The names the formula being checked gives as arguments.
+    things: Vec<String>,
 }
 
 /// The variables in scope: a name and its sort, if known yet.
@@ -153,6 +196,7 @@ impl Checker {
             "bool" => Some(Ty::Bool),
             "int" => Some(Ty::Int),
             s if self.sig.sorts.contains_key(s) => Some(Ty::Sort(s.to_string())),
+            INDIVIDUAL if self.loose => Some(Ty::Sort(INDIVIDUAL.into())),
             s => {
                 self.err(format!("{s} is not a sort"));
                 None
@@ -240,12 +284,16 @@ impl Checker {
                 if self.sig.propositions.contains(n) {
                     return Some(Ty::Bool);
                 }
+                // A loose constant: an individual, where one is wanted.
+                if self.loose && (want == Some(&Ty::Sort(INDIVIDUAL.into())) || (want.is_none() && last) || self.sig.loose.contains_key(n)) {
+                    return self.loose_symbol(n, 0, false, last);
+                }
                 if want.is_some() || last {
                     say(self, format!("{n} is not declared"));
                 }
                 None
             }
-            Expr::App(f, args) => self.app(f, args, scope, last),
+            Expr::App(f, args) => self.app(f, args, scope, want, last),
             Expr::Not(a) => {
                 self.boolean(a, scope, last, "not");
                 Some(Ty::Bool)
@@ -285,7 +333,7 @@ impl Checker {
                 };
                 // Neither side saying: `p = q` between undeclared names is
                 // between propositions.
-                let loose = |e: &Expr, c: &Checker| matches!(e, Expr::Name(n) if !scope.iter().any(|(v, _)| v == n) && !c.taken(n));
+                let loose = |e: &Expr, c: &Checker| matches!(e, Expr::Name(n) if !scope.iter().any(|(v, _)| v == n) && !c.taken(n) && !c.things.contains(n));
                 let (ta, tb) = match (ta, tb) {
                     (None, None) if matches!(op, Op::Eq | Op::Ne) && loose(a, self) && loose(b, self) => {
                         (self.infer(a, scope, Some(&Ty::Bool), last), self.infer(b, scope, Some(&Ty::Bool), last))
@@ -323,6 +371,7 @@ impl Checker {
                         Some(Ty::Sort(s)) => b.sort = Some(s.clone()),
                         Some(Ty::Int) => b.sort = Some("int".into()),
                         Some(Ty::Bool) => b.sort = Some("bool".into()),
+                        None if self.loose => b.sort = Some(INDIVIDUAL.into()),
                         None => say(self, format!("cannot tell what {} ranges over: write `{} in sort`", b.name, b.name)),
                     }
                 }
@@ -330,6 +379,23 @@ impl Checker {
                 Some(Ty::Bool)
             }
         }
+    }
+
+    /// A loose function, predicate or constant, as first used; used again,
+    /// it must be used alike.
+    fn loose_symbol(&mut self, f: &str, arity: usize, predicate: bool, last: bool) -> Option<Ty> {
+        match self.sig.loose.get(f).copied() {
+            Some((n, p)) if n != arity || p != predicate => {
+                if last {
+                    self.err(format!("{f} is used with {n} and with {arity} arguments, or as both a predicate and a function"));
+                }
+            }
+            Some(_) => {}
+            None => {
+                self.sig.loose.insert(f.to_string(), (arity, predicate));
+            }
+        }
+        Some(if predicate { Ty::Bool } else { Ty::Sort(INDIVIDUAL.into()) })
     }
 
     fn boolean(&mut self, e: &mut Expr, scope: &mut Scope, last: bool, under: &str) {
@@ -340,7 +406,7 @@ impl Checker {
         }
     }
 
-    fn app(&mut self, f: &str, args: &mut [Expr], scope: &mut Scope, last: bool) -> Option<Ty> {
+    fn app(&mut self, f: &str, args: &mut [Expr], scope: &mut Scope, want: Option<&Ty>, last: bool) -> Option<Ty> {
         let say = |c: &mut Checker, m: String| {
             if last {
                 c.err(m);
@@ -399,6 +465,13 @@ impl Checker {
             }
             _ => {
                 let Some(sym) = self.sig.symbols.get(f).cloned() else {
+                    if self.loose {
+                        let predicate = want == Some(&Ty::Bool) || self.sig.loose.get(f).is_some_and(|(_, p)| *p);
+                        for a in args.iter_mut() {
+                            self.infer(a, scope, Some(&Ty::Sort(INDIVIDUAL.into())), last);
+                        }
+                        return self.loose_symbol(f, args.len(), predicate, last);
+                    }
                     say(self, format!("{f} is not declared"));
                     for a in args.iter_mut() {
                         self.infer(a, scope, None, last);

@@ -8,6 +8,7 @@
 //! - [`calc`]: the calculator: truth tables, properties, forms, arguments,
 //!   equivalence, and a formula for a truth table.
 //! - [`solve`]: the model finder: a theory's models, found and counted.
+//! - [`tableau`]: semantic tableaux: arguments proved, or refuted.
 
 pub mod ast;
 pub mod calc;
@@ -17,6 +18,7 @@ pub mod lex;
 pub mod parse;
 pub mod print;
 pub mod solve;
+pub mod tableau;
 pub mod types;
 
 pub use ast::{Expr, Item, Theory};
