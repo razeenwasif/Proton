@@ -23,7 +23,7 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
   };
   const frames = () => new Promise((r) => win.requestAnimationFrame(() => win.requestAnimationFrame(r)));
 
-  await test('Circuit sits after Excel: ⌃7 opens it, in Codex\'s chrome and on an opaque ground, and is the last', async () => {
+  await test('Circuit sits after Excel: ⌃7 opens it, in Codex\'s chrome and on an opaque ground, and Logic follows it on ⌃8', async () => {
     const asked = () => (win.invokes ?? []).filter((/** @type {any} */ c) => c.name === 'set_opaque').map((/** @type {any} */ c) => c.args.color);
     const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
     await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
@@ -40,7 +40,8 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
     assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Circuit is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
     const before8 = win.commands.length;
     key('8', {ctrlKey: true}); await settle();
-    assert(!sent(before8, 'setMode').length, '⌃8 asked for a mode');
+    assert(sent(before8, 'setMode').some((c) => c.mode === 'logic'), '⌃8 did not ask for Logic');
+    await win.dispatch({type: 'setMode', mode: 'circuit'}); await settle();
   });
 
   await test('With no project open, Circuit lists the folder\'s and makes one', async () => {

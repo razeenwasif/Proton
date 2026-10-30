@@ -33,6 +33,7 @@ import { createResearch } from "./research.js";
 import { createStudy } from "./study.js";
 import { createSheet } from "./sheet.js";
 import { createCircuit } from "./circuit.js";
+import { createLogic } from "./logic.js";
 import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
 import { markdown } from "./markdown.js";
@@ -455,7 +456,7 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["chat", "codex", "data", "research", "study", "sheet", "circuit"];
+const MODES = ["chat", "codex", "data", "research", "study", "sheet", "circuit", "logic"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -532,6 +533,7 @@ function renderMode(mode) {
   if (mode === "data" && lastNotebook) renderNotebook(lastNotebook);
   if (mode === "sheet") sheet?.shown();
   if (mode === "circuit") circuit?.shown();
+  if (mode === "logic") logic?.shown();
   requestAnimationFrame(reportEveryViewport);
 }
 
@@ -868,6 +870,8 @@ const sheet = createSheet({ root: document, dispatch,
 /* Circuit: a project's circuits drawn on their grid. */
 const circuit = createCircuit({ root: document, dispatch,
   paste: async () => (await pasteText()) ?? (await navigator.clipboard?.readText?.().catch(() => null)) ?? null });
+/* Logic: a logic file as typed, and what the line at the cursor is. */
+const logic = createLogic({ root: document, dispatch });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -3361,6 +3365,16 @@ function renderEvent(event) {
       lab?.env(event);
       break;
 
+    case "logicHome":
+      logic?.home(event);
+      break;
+    case "logicFile":
+      logic?.file(event);
+      break;
+    case "logicAnswer":
+      logic?.answer(event);
+      break;
+
     case "circuitHome":
       circuit?.home(event);
       break;
@@ -3784,7 +3798,7 @@ document.addEventListener("keydown", (e) => {
   // below (⌃-prefixed commands are exactly what a Vim keymap is made of,
   // and on macOS ⌃K in particular already means "kill to end of line"
   // everywhere else on the system).
-  if (e.ctrlKey && /^[1-7]$/.test(e.key)) {
+  if (e.ctrlKey && /^[1-8]$/.test(e.key)) {
     e.preventDefault();
     coreSetMode(MODES[Number(e.key) - 1]);
     return;
@@ -4164,6 +4178,8 @@ Object.assign(window, {
   dispatch, drawPointerEdges, setHint, enterCell, protonPerformance: performanceReview,
   // Circuit's view and what it drew from, for its checks.
   circuitDebug: () => circuit?.debug(),
+  // Logic's file and answer, for its checks.
+  logicDebug: () => logic?.debug(),
 });
 
 /* ── the council ───────────────────────────────────

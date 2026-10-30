@@ -2091,6 +2091,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"],
 :root[data-mode="research"],
 :root[data-mode="study"],
+:root[data-mode="logic"],
 :root[data-mode="circuit"],
 :root[data-mode="sheet"] {
   --z-ui:  calc(17.5px * var(--ui-scale));  /* tree, breadcrumb, headers */
@@ -2132,12 +2133,16 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="research"] .hint,
 :root[data-mode="study"] .hint,
 :root[data-mode="sheet"] .chrome-rail,
+:root[data-mode="logic"] .chrome-rail,
 :root[data-mode="circuit"] .chrome-rail,
 :root[data-mode="sheet"] .rail,
+:root[data-mode="logic"] .rail,
 :root[data-mode="circuit"] .rail,
 :root[data-mode="sheet"] .statusline,
+:root[data-mode="logic"] .statusline,
 :root[data-mode="circuit"] .statusline,
 :root[data-mode="sheet"] .hint,
+:root[data-mode="logic"] .hint,
 :root[data-mode="circuit"] .hint,
 /* The terminal is Codex's; in Chat, Data, Research, Notebook, Excel and Circuit its toggle
    would open something that is not on screen. */
@@ -2145,6 +2150,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .titlebar [data-term-toggle],
 :root[data-mode="research"] .titlebar [data-term-toggle],
 :root[data-mode="study"] .titlebar [data-term-toggle],
+:root[data-mode="logic"] .titlebar [data-term-toggle],
 :root[data-mode="circuit"] .titlebar [data-term-toggle],
 :root[data-mode="sheet"] .titlebar [data-term-toggle] { display: none; }
 :root[data-mode="codex"] .app,
@@ -2152,6 +2158,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .app,
 :root[data-mode="research"] .app,
 :root[data-mode="study"] .app,
+:root[data-mode="logic"] .app,
 :root[data-mode="circuit"] .app,
 :root[data-mode="sheet"] .app {
   grid-template-rows: minmax(0, 1fr);
@@ -2162,6 +2169,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .body,
 :root[data-mode="research"] .body,
 :root[data-mode="sheet"] .body,
+:root[data-mode="logic"] .body,
 :root[data-mode="circuit"] .body,
 :root[data-mode="study"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
 
@@ -2174,9 +2182,11 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="research"] .titlebar,
 :root[data-mode="study"] .titlebar,
 :root[data-mode="sheet"] .titlebar,
+:root[data-mode="logic"] .titlebar,
 :root[data-mode="circuit"] .titlebar,
 .workspace[data-ws="codex"],
 .workspace[data-ws="sheet"],
+.workspace[data-ws="logic"],
 .workspace[data-ws="circuit"],
 .workspace[data-ws="data"] { background: var(--bg); }
 
@@ -2185,6 +2195,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
 :root[data-mode="study"] .titlebar,
+:root[data-mode="logic"] .titlebar,
 :root[data-mode="circuit"] .titlebar,
 :root[data-mode="sheet"] .titlebar {
   grid-row: 1; grid-column: 2;
@@ -4983,3 +4994,78 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .xl-dock { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--xl-line); }
 .xl-agent { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .xl-agent [hidden] { display: none; }
+
+/* ── Logic (ui/logic.js) ─────────────────────────────────────────────
+   A file typed on the left, as Notebook's coding practice is typed — a
+   textarea over its own colouring — and what the line at the cursor is on
+   the right: a verdict, its truth table, its forms and its Karnaugh map.
+   The side list and the home page are Excel's. */
+.workspace.lg { --lg-true: #4ade80; --lg-false: color-mix(in srgb, var(--text) 45%, var(--bg)); }
+.lg-kind { color: var(--muted); font: var(--z-2xs)/1 var(--zed); }
+.lg-symbols { display: flex; gap: 2px; }
+.lg-symbols button { min-width: 26px; height: 26px; padding: 0 5px; border: 1px solid transparent; border-radius: 5px; background: none; color: var(--text);
+  font: 15px/1 ui-monospace, "SF Mono", Menlo, monospace; cursor: pointer; }
+.lg-symbols button:hover { background: var(--row-hover); border-color: var(--xl-line); }
+.lg-body { display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(300px, 44%); flex: 1 1 auto; min-height: 0; }
+.lg-split { background: var(--xl-line); }
+.lg-edit { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.lg-editor { display: flex; flex: 1 1 auto; min-height: 0; background: var(--bg); overflow: hidden; font: var(--z-xs)/1.6 var(--zed); }
+.lg-gutter { flex: 0 0 auto; min-width: 2.5em; margin: 0; padding: 10px 8px 10px 10px; border-right: 1px solid var(--xl-line); overflow: hidden; color: var(--muted);
+  font: inherit; text-align: right; white-space: pre; user-select: none; opacity: .7; }
+.lg-gutter .bad { color: var(--danger, #e55); opacity: 1; }
+.lg-gutter .on { color: var(--accent); opacity: 1; font-weight: 700; }
+.lg-area { position: relative; flex: 1 1 auto; min-width: 0; }
+.lg-hl, .lg-input { position: absolute; inset: 0; box-sizing: border-box; width: 100%; height: 100%; margin: 0; padding: 10px 12px; border: 0;
+  font: inherit; letter-spacing: 0; font-variant-ligatures: none; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
+.lg-hl { overflow: hidden; color: var(--code, var(--text)); pointer-events: none; }
+.lg-input { overflow: auto; resize: none; outline: none; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--text); }
+.lg-input::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.lg-k { color: var(--syn-keyword); }
+.lg-o { color: var(--syn-operator); }
+.lg-n { color: var(--syn-number); }
+.lg-c { color: var(--syn-comment); font-style: italic; }
+.lg-q { color: var(--accent); font-weight: 700; }
+.lg-diags { flex: none; max-height: 30%; overflow: auto; border-top: 1px solid var(--xl-line); }
+.lg-diags:empty { display: none; }
+.lg-diag { display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 4px 12px; border: 0; background: none; color: var(--text); text-align: left;
+  font: var(--z-2xs)/1.4 var(--zed); cursor: pointer; }
+.lg-diag:hover { background: var(--row-hover); }
+.lg-diag .i { width: 12px; height: 12px; color: var(--danger, #e55); flex: none; align-self: center; }
+.lg-answer { overflow: auto; padding: 14px 16px 24px; color: var(--text); font: var(--z-xs)/1.5 var(--zed); min-width: 0; }
+.lg-answer h3 { margin: 18px 0 6px; color: var(--muted); font: 600 var(--z-2xs)/1.3 var(--zed); text-transform: uppercase; letter-spacing: .04em; }
+.lg-answer code, .lg-form-text { font: var(--z-2xs)/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+.lg-hint, .lg-faint { color: var(--muted); font: var(--z-2xs)/1.5 var(--zed); }
+.lg-said { margin: 0 0 8px; overflow-wrap: anywhere; }
+.lg-message { margin: 6px 0; overflow-wrap: anywhere; }
+.lg-verdict { display: flex; align-items: center; gap: 7px; margin: 6px 0; font: 600 var(--z-xs)/1.3 var(--zed); }
+.lg-verdict .i { width: 14px; height: 14px; }
+.lg-verdict.good { color: var(--ok, #4ade80); }
+.lg-verdict.bad { color: var(--danger, #e55); }
+.lg-rows { margin: 4px 0 10px; color: var(--muted); font: var(--z-2xs)/1.5 var(--zed); }
+.lg-table-wrap { max-height: 320px; overflow: auto; margin: 8px 0; border: 1px solid var(--xl-line); border-radius: 6px; }
+.lg-table { border-collapse: collapse; font: var(--z-2xs)/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
+.lg-table th { position: sticky; top: 0; background: var(--bg); color: var(--text); font-weight: 600; padding: 2px 8px; white-space: nowrap; max-width: 22ch;
+  overflow: hidden; text-overflow: ellipsis; }
+.lg-table td { padding: 0 8px; text-align: center; }
+.lg-table .sep { width: 6px; border-left: 1px solid var(--xl-line); padding: 0; }
+.lg-table .v1 { color: var(--lg-true); }
+.lg-table .last { font-weight: 700; }
+.lg-table tr.marked td { background: color-mix(in srgb, var(--danger, #e55) 16%, transparent); }
+.lg-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 6px; padding: 5px 0; border-bottom: 1px solid color-mix(in srgb, var(--xl-line) 60%, transparent); }
+.lg-form-name { grid-column: 1 / -1; color: var(--muted); font: var(--z-2xs)/1.3 var(--zed); }
+.lg-form-text { color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.lg-copy { align-self: start; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer; }
+.lg-copy:hover { background: var(--row-hover); color: var(--text); }
+.lg-copy .i { width: 12px; height: 12px; }
+.lg-kmap { display: block; margin: 4px 0; }
+.lg-build { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.lg-answer .cc-quiet { height: 26px; padding: 0 10px; border: 1px solid var(--xl-line); border-radius: 5px; background: none; color: var(--text);
+  font: var(--z-2xs)/1 var(--zed); cursor: pointer; }
+.lg-answer .cc-quiet:hover { background: var(--row-hover); }
+.lg-from { margin-top: 22px; border-top: 1px solid var(--xl-line); padding-top: 10px; }
+.lg-from summary { color: var(--muted); font: var(--z-2xs)/1.4 var(--zed); cursor: pointer; }
+.lg-from form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.lg-from input { flex: 1 1 120px; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--bg); color: var(--text);
+  font: var(--z-2xs)/1 ui-monospace, "SF Mono", Menlo, monospace; }
+.lg-from button { height: 26px; padding: 0 12px; border: 1px solid var(--xl-line); border-radius: 5px; background: none; color: var(--text); cursor: pointer; }
+@media (max-width: 900px) { .lg-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 1px minmax(0, 1fr); } }

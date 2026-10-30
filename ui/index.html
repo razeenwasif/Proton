@@ -104,6 +104,7 @@
     <!-- ── status and marks ───────────────────────────────────────── -->
     <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 2.5L5 13.5h6l-.5 8 8.5-11h-6z"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-logic" viewBox="0 0 24 24"><path d="M6 4.5v15M6 9.5h12M6 14.5h12"/></symbol>
     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13.5a4 4 0 006 .5l2.5-2.5a4.2 4.2 0 00-6-6L11 7"/><path d="M14 10.5a4 4 0 00-6-.5L5.5 12.5a4.2 4.2 0 006 6L13 17"/></symbol>
     <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19.5a6 6 0 0112 0M16 5.2a3.2 3.2 0 010 5.6M17.5 19.5a6 6 0 00-2-4.5"/></symbol>
     <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5a4 4 0 01-.4-8A5.5 5.5 0 0117.4 10a3.8 3.8 0 01.4 8.5z"/></symbol>
@@ -200,6 +201,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="study"><svg class="i"><use href="#i-book"/></svg><span>Notebook</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="sheet"><svg class="i"><use href="#i-table"/></svg><span>Excel</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="circuit"><svg class="i"><use href="#i-bolt"/></svg><span>Circuit</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="logic"><svg class="i"><use href="#i-logic"/></svg><span>Logic</span></button>
       </div>
 
       <div class="rail-drag" aria-hidden="true"></div>
@@ -1017,6 +1019,74 @@
         </div>
       </aside>
     </section>
+
+    <!-- Logic (docs/LOGIC.md): the project's .logic, .proof and .l4f files,
+         the one open as typed, and what the statement at the cursor is. -->
+    <section class="workspace xl lg" data-ws="logic"
+             style="--col-l:240px; grid-template-columns: var(--col-l) 1px minmax(0,1fr);">
+      <aside class="pane side xl-side">
+        <div class="cc-side-head">
+          <button class="cc-new" data-logic-new="worksheet" title="A new worksheet: a line beginning ? is asked"><svg class="i"><use href="#i-plus"/></svg>Worksheet</button>
+          <button class="cc-new" data-logic-new="theory" title="A new theory: sorts, names and what is true of them"><svg class="i"><use href="#i-plus"/></svg>Theory</button>
+        </div>
+        <!-- From Event::LogicHome. -->
+        <div class="scroll xl-list" data-logic-list></div>
+      </aside>
+
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
+
+      <main class="pane xl-main">
+        <div class="xl-home" data-logic-home>
+          <h2>Logic</h2>
+          <p>A calculator and a solver for logic. Write a formula or an argument on a line beginning <code>?</code> — <code>? p, p -&gt; q |= q</code> — and the line at the cursor is answered: its truth table, whether it is a tautology, its normal forms, its Karnaugh map. Theories of sorts, names and constraints are written the same way, and Logic for Fun's <code>.l4f</code> text is read as it is.</p>
+          <form class="xl-form" data-logic-form>
+            <input type="text" placeholder="Name" aria-label="File name" required>
+            <select aria-label="What to start with"><option value="worksheet">Worksheet</option><option value="theory">Theory</option></select>
+            <button type="submit">Make</button>
+          </form>
+          <div class="xl-found" data-logic-found></div>
+        </div>
+
+        <div class="xl-book" data-logic-file hidden>
+          <header class="xl-head">
+            <span class="xl-title" data-logic-title></span>
+            <i class="xl-dirty" data-logic-dirty title="Unsaved — ⌘S" hidden></i>
+            <span class="lg-kind" data-logic-kind></span>
+            <span class="grow"></span>
+            <!-- What the symbols are typed as, for a keyboard without them. -->
+            <span class="lg-symbols" data-logic-symbols>
+              <button data-logic-sym="¬" title="not  (! ~ not)">¬</button>
+              <button data-logic-sym="∧" title="and  (&amp; &amp;&amp; and)">∧</button>
+              <button data-logic-sym="∨" title="or  (| || or)">∨</button>
+              <button data-logic-sym="→" title="implies  (-&gt; =&gt;)">→</button>
+              <button data-logic-sym="↔" title="if and only if  (&lt;-&gt; &lt;=&gt;)">↔</button>
+              <button data-logic-sym="⊕" title="xor">⊕</button>
+              <button data-logic-sym="⊨" title="entails  (|=)">⊨</button>
+              <button data-logic-sym="∀" title="for all  (all x:)">∀</button>
+              <button data-logic-sym="∃" title="there is  (some x:)">∃</button>
+            </span>
+            <button class="tb-btn" data-logic-ask title="Answer the line at the cursor  ⌘↩" aria-label="Answer the line"><svg class="i"><use href="#i-play"/></svg></button>
+            <button class="tb-btn" data-logic-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>
+            <button class="tb-btn" data-logic-close title="Close the file" aria-label="Close the file"><svg class="i"><use href="#i-close"/></svg></button>
+          </header>
+          <div class="lg-body">
+            <div class="lg-edit">
+              <div class="lg-editor" data-logic-editor>
+                <pre class="lg-gutter" data-logic-gutter aria-hidden="true"></pre>
+                <div class="lg-area">
+                  <pre class="lg-hl" data-logic-hl aria-hidden="true"></pre>
+                  <textarea class="lg-input" data-logic-text spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" wrap="off" aria-label="The file"></textarea>
+                </div>
+              </div>
+              <div class="lg-diags" data-logic-diags aria-live="polite"></div>
+            </div>
+            <div class="gutter lg-split" aria-hidden="true"></div>
+            <section class="lg-answer" data-logic-answer aria-live="polite"></section>
+          </div>
+        </div>
+      </main>
+    </section>
+
   </div>
 
   <!-- ══ title bar — Codex only ═══════════════════════════════════
@@ -1045,6 +1115,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="study" title="Notebook  ⌃5"><span>Notebook</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="sheet" title="Excel  ⌃6"><span>Excel</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="circuit" title="Circuit  ⌃7"><span>Circuit</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="logic" title="Logic  ⌃8"><span>Logic</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">

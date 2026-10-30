@@ -256,6 +256,24 @@ from them; and a column of `0`, `1` and `x` read back as formulas. A form
 too long to read is left out rather than made: negation normal form's size
 is reckoned first, since `<->` and `xor` double what they hold. Each form
 is checked equivalent to its formula by truth table.
+L2 — the mode: `ModeId::Logic` on ⌃8, after Circuit, its layout the
+project's files and a Worksheet stage; its home page of `.logic`, `.proof`
+and `.l4f` files, three folders deep, and New worksheet or theory, each
+starting with an example; the file typed in a text area over its own
+colouring, held in the core until ⌘S and named in the quit prompt, its
+mistakes marked by line; the statement at the caret asked a moment after the
+caret settles or the typing stops — answered with the file's declarations
+and not its other constraints, so a mistake elsewhere does not stop it, and
+a statement over several lines answered from any of them — and drawn: the
+verdict, the truth table with a column a part, the counterexample or
+differing rows marked, the forms with a copy button each, the least forms
+found past 10 propositions when asked, the Karnaugh map (drawn by
+`ui/kmap.js`, which Circuit's analysis now shares), and Build in Circuit,
+which makes the formula's table a circuit — AND/OR, NAND or NOR — in a
+`logic.circuit` project, its table the test "truth" (`CircuitFromTable`); a
+column of 0, 1 and x read back as formulas; and symbol buttons for ¬ ∧ ∨ →
+↔ ⊕ ⊨ ∀ ∃. NAND and NOR forms no longer write a double negation for a
+term of one literal. Checked in the browser suite and in WebKit.
 
 | | What | Proved by |
 |---|---|---|

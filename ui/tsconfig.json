@@ -53,6 +53,9 @@
     "sheet.js",
     "circuit.js",
     "preview-circuit.js",
+    "logic.js",
+    "preview-logic.js",
+    "kmap.js",
     "sheet-chart.js",
     "pdf-view.js",
     "document.js"
