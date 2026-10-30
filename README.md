@@ -293,10 +293,13 @@ and traces.
 investigations and conversations included. That is what lets the agent edit them by writing a patch
 instead of driving a GUI, and what makes any of it reviewable.
 
-**The agent proposes, you apply.** An edit it asks for is staged in memory and
-surfaced as a diff, hunk by hunk — nothing is written to disk until you accept
-it, so "I changed that file" is never something it can say truthfully before
-you have looked. It shows its tool calls with results and timings, and what it
+**The agent writes, and you can take it back.** A file it changes or creates
+is written in the project at once, and its row in the pane has an Undo that
+puts it back as it was — if nothing has changed it since. With "Let the agent
+write files" off, its edits are staged as a diff, hunk by hunk, for you to
+accept; a file with unsaved changes of yours, or outside the project, is always
+staged. A command it wants to run — a build, a test, an install — waits on its
+row for you to Run or Skip, and what it printed goes back to it. It shows its tool calls with results and timings, and what it
 says about your notes carries a citation you can open. Its answers are
 markdown: code comes in blocks coloured the way the editor colours that
 language, with a button to copy it, and TeX (`$…$`, `\(…\)`, `$$…$$`, `\[…\]`)

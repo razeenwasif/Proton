@@ -1970,11 +1970,34 @@ and splitting the answers across several user messages trains it out of doing
 that. A failed tool still answers, with `is_error` — dropping the block leaves a
 `tool_use` with no result, which is a conversation the API rejects.
 
-**`edit_file`, and the review it stages.** The agent proposes changes rather
-than making them: the tool returns a *staged* change, and nothing reaches the
-buffer — let alone the disk — until somebody accepts it. The tool result says
-so in as many words, because a model told only "edit a file" reports the job
-as done and the user reads that as a file that has changed.
+**`edit_file`: written, or staged.** Since 2026-10-31 the agent writes what it
+asks for, with `agent.writeFiles` on — the default: the file is written whole
+in the project (a neighbour renamed over it), an open buffer reads it again,
+and the call is kept (`Written`: the path, what it was — nothing, if the call
+made it — and what was written) so its row offers Undo. Undo puts back what
+was there, or removes what was made, only if the file is still exactly what
+the call wrote and has no unsaved work in its buffer. Off, or for a file with
+unsaved changes, one already staged, or outside the project (judged by its
+nearest folder that exists, `..` and `.git` refused), the change is staged as
+below. The result says which — "wrote…", "created…" or "staged…" — because a
+model that assumes either reports what did not happen. Antigravity follows the
+same switch (`accept-edits`); its refusals now name what was refused, a
+command, a write outside the project, or a tool of the person's own MCP
+servers, rather than calling every refusal an edit.
+
+**`run_command`, asked first.** The agent may propose a command line. The call
+is deferred, as `run_cell` is; its row shows the whole command with Run and
+Skip (`Command::AgentCommand`). Run starts it in the project, in the person's
+shell as a login shell (so their PATH), with no input and a process group of
+its own, its output read on threads and its end kept (16 kB); the heartbeat
+answers the call with its exit and that end, and stops one that runs past
+`PATIENCE`. Skip answers that the user declined and not to try it another
+way. A cancelled or cleared conversation stops what it started. Antigravity
+cannot stop mid-turn to ask, so its own commands stay refused and it is told to
+give them to the person instead.
+
+**The review it stages.** A staged change reaches neither the buffer nor the
+disk until somebody accepts it.
 
 The tool is **search and replace with a uniqueness rule**, not a line range and
 not a whole new file. A line range is brittle — the numbers move as the model

@@ -421,6 +421,40 @@ fn asks_for_an_edit(path: &str) -> String {
     .concat()
 }
 
+/// A turn that calls one tool, its input arriving as one fragment.
+fn asks_for(tool: &str, id: &str, input: serde_json::Value) -> String {
+    let escaped = serde_json::Value::String(input.to_string()).to_string();
+    [
+        event("message_start", r#"{"type":"message_start","message":{"usage":{"input_tokens":900}}}"#),
+        event(
+            "content_block_start",
+            &format!(r#"{{"type":"content_block_start","index":0,"content_block":{{"type":"tool_use","id":"{id}","name":"{tool}","input":{{}}}}}}"#),
+        ),
+        event(
+            "content_block_delta",
+            &format!(r#"{{"type":"content_block_delta","index":0,"delta":{{"type":"input_json_delta","partial_json":{escaped}}}}}"#),
+        ),
+        event("content_block_stop", r#"{"type":"content_block_stop","index":0}"#),
+        event("message_delta", r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":30}}"#),
+        event("message_stop", r#"{"type":"message_stop"}"#),
+    ]
+    .concat()
+}
+
+/// Poll until the row of a call is asking, or panic.
+fn until_asked(ws: &mut Workspace, started: Vec<Event>, id: &str) -> proton_core::agent::ToolCall {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut all = started;
+    loop {
+        all.extend(ws.apply(Command::Poll));
+        if let Some(call) = transcript(&all).iter().flat_map(|e| e.calls.clone()).find(|c| c.id == id && c.asks) {
+            return call;
+        }
+        assert!(Instant::now() < deadline, "the command was never put to the user");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn says_it_staged() -> String {
     [
         event("message_start", r#"{"type":"message_start","message":{"usage":{"input_tokens":1400}}}"#),
@@ -434,11 +468,10 @@ fn says_it_staged() -> String {
 }
 
 #[test]
-fn an_edit_the_model_asks_for_is_staged_and_never_written() {
+fn an_edit_the_model_asks_for_is_written_and_can_be_undone_from_its_row() {
     let _guard = exclusive();
-    // The whole loop, and the promise the loop has to keep: the model asks,
-    // the tool stages, the answer tells the model it is not done, and the
-    // file on disk is exactly as it was.
+    // The whole loop: the model asks, the tool writes the file, the answer
+    // tells the model so, and the row in the pane can take it back.
     let root = std::env::temp_dir().join(format!("proton-agent-edit-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
@@ -460,12 +493,10 @@ fn an_edit_the_model_asks_for_is_staged_and_never_written() {
         .calls
         .iter()
         .find(|c| c.name == "edit_file")
-        .expect("the edit_file call should be in the transcript");
-    assert!(
-        call.result.contains("staged"),
-        "the model has to be told it staged rather than applied: {:?}",
-        call.result
-    );
+        .expect("the edit_file call should be in the transcript")
+        .clone();
+    assert!(call.result.starts_with("wrote a.rs"), "the model has to be told it wrote: {:?}", call.result);
+    assert!(call.undo, "the row does not offer to take it back");
     // The transcript row is a line, not a block of source. `edit_file`
     // carries whole snippets and unrolling one pushes the answer off screen.
     assert!(
@@ -473,26 +504,69 @@ fn an_edit_the_model_asks_for_is_staged_and_never_written() {
         "the row should be one short line: {:?}",
         call.detail
     );
+    assert_ne!(std::fs::read_to_string(root.join("a.rs")).unwrap(), source, "nothing was written");
+    assert!(ws.staged().is_empty(), "a written change is not staged too");
 
-    // Staged, drawn, and on disk exactly as it was.
-    let staged = ws.staged();
-    assert_eq!(staged.len(), 1, "{staged:?}");
-    assert_eq!(staged[0].path, "a.rs");
-    assert_eq!(staged[0].hunks.len(), 1);
+    // Undone from its row: the file as it was, and the row says so.
+    let events = ws.apply(Command::UndoAgentEdit { call: call.id.clone() });
     assert_eq!(std::fs::read_to_string(root.join("a.rs")).unwrap(), source);
-    assert!(
-        !ws.is_modified(),
-        "and the buffer was not typed into either"
-    );
+    let row = transcript(&events)
+        .iter()
+        .flat_map(|e| e.calls.clone())
+        .find(|c| c.id == call.id)
+        .expect("the row is drawn again");
+    assert!(!row.undo && row.result.starts_with("undone"), "{row:?}");
 
-    // And the review reached the front end without being asked for.
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::Review { files } if !files.is_empty())),
-        "a staged change has to reach the panel that draws it"
-    );
+    let _ = std::fs::remove_dir_all(&root);
+}
 
+#[cfg(unix)]
+#[test]
+fn a_command_the_model_proposes_runs_only_when_run_and_its_output_goes_back() {
+    let _guard = exclusive();
+    let root = std::env::temp_dir().join(format!("proton-agent-command-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let command = "echo proton-ran > ran.txt && echo printed-this && exit 3";
+    let (url, seen) = api(vec![asks_for("run_command", "toolu_C", serde_json::json!({ "command": command, "why": "to see" })), says_it_staged()]);
+    std::env::set_var("ANTHROPIC_BASE_URL", &url);
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
+    let mut ws = Workspace::rooted(&root);
+    let started = ws.apply(Command::Ask { text: "try it".into() });
+    let row = until_asked(&mut ws, started, "toolu_C");
+    // Shown whole, and nothing has run yet.
+    assert_eq!(row.detail, command);
+    assert!(!root.join("ran.txt").exists(), "it ran before it was asked");
+
+    let events = [ws.apply(Command::AgentCommand { call: "toolu_C".into(), run: true }), settle(&mut ws)].concat();
+    assert_eq!(std::fs::read_to_string(root.join("ran.txt")).unwrap(), "proton-ran\n", "it ran in the project");
+    let row = transcript(&events).iter().flat_map(|e| e.calls.clone()).find(|c| c.id == "toolu_C").unwrap();
+    assert!(!row.asks && row.result == "exit 3", "{row:?}");
+    // The model was told how it ended and what it printed.
+    let second = seen.iter().nth(1).expect("the turn went on");
+    assert!(second.contains("exit 3") && second.contains("printed-this"), "{second}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_declined_never_runs_and_the_model_is_told() {
+    let _guard = exclusive();
+    let root = std::env::temp_dir().join(format!("proton-agent-declined-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let (url, seen) = api(vec![asks_for("run_command", "toolu_D", serde_json::json!({ "command": "touch made-it" })), says_it_staged()]);
+    std::env::set_var("ANTHROPIC_BASE_URL", &url);
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
+    let mut ws = Workspace::rooted(&root);
+    let started = ws.apply(Command::Ask { text: "try it".into() });
+    until_asked(&mut ws, started, "toolu_D");
+    let events = [ws.apply(Command::AgentCommand { call: "toolu_D".into(), run: false }), settle(&mut ws)].concat();
+    assert!(!root.join("made-it").exists(), "a declined command ran");
+    let row = transcript(&events).iter().flat_map(|e| e.calls.clone()).find(|c| c.id == "toolu_D").unwrap();
+    assert!(!row.asks && row.result.contains("declined"), "{row:?}");
+    let second = seen.iter().nth(1).expect("the turn went on");
+    assert!(second.contains("chose not to run"), "{second}");
     let _ = std::fs::remove_dir_all(&root);
 }
 

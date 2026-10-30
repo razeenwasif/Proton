@@ -226,6 +226,17 @@ pub enum Command {
     /// Stop the turn in flight. What has arrived stays on screen; nothing is
     /// committed to the conversation.
     CancelTurn,
+    /// Take back what one of the agent's calls wrote: the file as it was
+    /// before, or gone if the call made it — only if nothing has changed it
+    /// since.
+    UndoAgentEdit {
+        call: String,
+    },
+    /// Run a command the agent proposed, or decline it: its answer either way.
+    AgentCommand {
+        call: String,
+        run: bool,
+    },
     /// Start a new conversation. The one open is already on disk.
     NewChat,
     /// Open a saved conversation, by path relative to the project.

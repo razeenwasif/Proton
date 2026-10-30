@@ -1,9 +1,11 @@
-//! `edit_file`, and the review it stages.
+//! `edit_file`: written straight to the project with an undo, or — with
+//! `agent.writeFiles` off, unsaved work in the file, or a path outside the
+//! project — staged for review.
 //!
-//! The rule every test here is really checking: **nothing the agent proposes
-//! reaches the disk on its own.** Staging opens a buffer and stops. Accepting
-//! a hunk types it into that buffer and stops. `:w` is still the only thing
-//! that writes, which is the same deal as for anything else you typed.
+//! The rule the review tests check: **nothing staged reaches the disk on its
+//! own.** Staging opens a buffer and stops. Accepting a hunk types it into
+//! that buffer and stops. `:w` is still the only thing that writes, which is
+//! the same deal as for anything else you typed. They run with review first.
 
 use std::path::{Path, PathBuf};
 
@@ -82,6 +84,13 @@ fn make_link(target: &Path, link: &Path) -> std::io::Result<()> {
     }
 }
 
+/// A workspace whose agent stages its changes for review rather than
+/// writing them: the setting, in the project's own settings.
+fn reviewing(mut ws: Workspace) -> Workspace {
+    ws.apply(Command::SetSetting { key: "agent.writeFiles".into(), value: serde_json::json!(false) });
+    ws
+}
+
 /// Call `edit_file` the way the agent's tool runner does.
 fn edit(ws: &mut Workspace, path: &str, old: &str, new: &str) -> Result<String, String> {
     ws.run_tool(
@@ -102,7 +111,7 @@ const SOURCE: &str = "fn one() {\n    1\n}\n\nfn two() {\n    2\n}\n";
 fn an_edit_is_staged_and_nothing_is_written() {
     let scratch = Scratch::new("stage");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
 
     let said = edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
     assert!(said.contains("staged 1 hunk"), "{said}");
@@ -124,7 +133,7 @@ fn staging_opens_the_file_it_is_proposing_to_change() {
     // A diff beside a file you cannot see is not a review.
     let scratch = Scratch::new("open");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     assert_eq!(ws.editor().buffer().name(), "[No Name]");
 
     edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
@@ -139,7 +148,7 @@ fn a_snippet_that_is_not_unique_is_refused_with_the_count() {
     // wrong function.
     let scratch = Scratch::new("ambiguous");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
 
     let why = edit(&mut ws, "a.rs", "}\n", "}\n\n").unwrap_err();
     assert!(why.contains("times"), "{why}");
@@ -150,7 +159,7 @@ fn a_snippet_that_is_not_unique_is_refused_with_the_count() {
 fn a_snippet_that_is_not_there_says_to_read_the_file_again() {
     let scratch = Scratch::new("missing");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
 
     let why = edit(&mut ws, "a.rs", "fn three()", "fn four()").unwrap_err();
     assert!(why.contains("not in the file"), "{why}");
@@ -160,7 +169,7 @@ fn a_snippet_that_is_not_there_says_to_read_the_file_again() {
 #[test]
 fn an_empty_old_text_creates_a_file() {
     let scratch = Scratch::new("create");
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
 
     let said = edit(&mut ws, "new.rs", "", "fn fresh() {}\n").unwrap();
     assert!(said.contains("staged"), "{said}");
@@ -176,7 +185,7 @@ fn an_empty_old_text_creates_a_file() {
 fn proposing_what_the_file_already_says_is_not_a_change() {
     let scratch = Scratch::new("noop");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
 
     let said = edit(&mut ws, "a.rs", "    1\n", "    1\n").unwrap();
     assert!(said.contains("already what the file says"), "{said}");
@@ -190,7 +199,7 @@ fn an_edit_is_diffed_against_the_buffer_not_the_disk() {
     // is looking at.
     let scratch = Scratch::new("unsaved");
     scratch.file("a.rs", "keep\nold\n");
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     ws.apply(Command::OpenBuffer {
         path: "a.rs".into(),
     });
@@ -216,7 +225,7 @@ fn an_edit_is_diffed_against_the_buffer_not_the_disk() {
 fn a_hunk_is_drawn_with_what_goes_and_what_arrives() {
     let scratch = Scratch::new("draw");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
 
     let files = review(&ws);
@@ -233,7 +242,7 @@ fn a_hunk_is_drawn_with_what_goes_and_what_arrives() {
 fn accepting_a_hunk_types_it_into_the_buffer_and_writes_nothing() {
     let scratch = Scratch::new("accept");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
 
     ws.apply(Command::ApplyHunk {
@@ -255,7 +264,7 @@ fn an_accepted_hunk_is_one_press_of_u() {
     // in the first place.
     let scratch = Scratch::new("undo");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
     ws.apply(Command::ApplyHunk {
         path: "a.rs".into(),
@@ -275,7 +284,7 @@ fn two_edits_to_one_file_stack_into_one_review() {
     // places would arrive as one third of a rename.
     let scratch = Scratch::new("stack");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
     edit(&mut ws, "a.rs", "    2\n", "    22\n").unwrap();
 
@@ -293,7 +302,7 @@ fn two_edits_to_one_file_stack_into_one_review() {
 fn refusing_one_hunk_leaves_the_other_offered() {
     let scratch = Scratch::new("refuse");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
     edit(&mut ws, "a.rs", "    2\n", "    22\n").unwrap();
 
@@ -318,7 +327,7 @@ fn refusing_one_hunk_leaves_the_other_offered() {
 fn taking_everything_applies_every_hunk() {
     let scratch = Scratch::new("all");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
     edit(&mut ws, "a.rs", "    2\n", "    22\n").unwrap();
     assert_eq!(review(&ws)[0].hunks.len(), 2);
@@ -340,7 +349,7 @@ fn taking_everything_applies_every_hunk() {
 fn discarding_leaves_the_buffer_alone() {
     let scratch = Scratch::new("discard");
     scratch.file("a.rs", SOURCE);
-    let mut ws = Workspace::rooted(&scratch.root);
+    let mut ws = reviewing(Workspace::rooted(&scratch.root));
     edit(&mut ws, "a.rs", "    1\n", "    11\n").unwrap();
 
     ws.apply(Command::RejectStaged { path: None });
@@ -376,7 +385,7 @@ fn a_project_opened_through_a_symlink_stages_against_the_buffer() {
     // temp folder is a link.
     let scratch = Scratch::new("linked");
     scratch.file("a.rs", "keep\nold\n");
-    let mut ws = Workspace::rooted(scratch.link());
+    let mut ws = reviewing(Workspace::rooted(scratch.link()));
     ws.apply(Command::OpenBuffer {
         path: "a.rs".into(),
     });
@@ -414,7 +423,7 @@ fn a_file_is_one_change_and_one_buffer_under_either_name() {
     // says, unsaved line and all.
     let scratch = Scratch::new("bothnames");
     scratch.file("a.rs", "keep\nold\n");
-    let mut ws = Workspace::rooted(scratch.link());
+    let mut ws = reviewing(Workspace::rooted(scratch.link()));
     ws.apply(Command::OpenBuffer {
         path: "a.rs".into(),
     });
@@ -444,3 +453,70 @@ fn a_file_is_one_change_and_one_buffer_under_either_name() {
     assert_eq!(ws.editor().buffer().contents(), "TYPED\nkeep\nold\n");
     assert_eq!(scratch.read("b.rs"), "keep\nold\n", "still nothing on disk");
 }
+
+/* ── written straight away ────────────────────────────────────────── */
+
+#[test]
+fn by_default_an_edit_is_written_and_a_new_file_made_and_both_can_be_undone() {
+    let scratch = Scratch::new("write");
+    scratch.file("a.rs", SOURCE);
+    let mut ws = Workspace::rooted(&scratch.root);
+
+    let said = match ws.call_tool("E1", "edit_file", &serde_json::json!({ "path": "a.rs", "old_text": "    1\n", "new_text": "    11\n" })) {
+        proton_core::workspace::ToolOutcome::Answered(said) => said.unwrap(),
+        _ => panic!("edit_file is answered at once"),
+    };
+    assert!(said.starts_with("wrote a.rs (-1 +1 lines) — written to disk"), "{said}");
+    assert_eq!(scratch.read("a.rs"), SOURCE.replace("    1\n", "    11\n"));
+    assert!(review(&ws).is_empty(), "a written change is not also staged");
+    assert_eq!(ws.editor().buffer().contents(), scratch.read("a.rs"), "the file is opened as it now is");
+
+    let made = match ws.call_tool("E2", "edit_file", &serde_json::json!({ "path": "notes/cheatsheet.md", "old_text": "", "new_text": "# Cheatsheet\n" })) {
+        proton_core::workspace::ToolOutcome::Answered(said) => said.unwrap(),
+        _ => panic!(),
+    };
+    assert!(made.starts_with("created notes/cheatsheet.md (1 lines)"), "{made}");
+    assert_eq!(scratch.read("notes/cheatsheet.md"), "# Cheatsheet\n");
+
+    // Undone: the file as it was, and the one it made gone.
+    ws.apply(Command::UndoAgentEdit { call: "E1".into() });
+    assert_eq!(scratch.read("a.rs"), SOURCE);
+    ws.apply(Command::UndoAgentEdit { call: "E2".into() });
+    assert!(!scratch.root.join("notes/cheatsheet.md").exists());
+    // Twice is once.
+    let events = ws.apply(Command::UndoAgentEdit { call: "E1".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("can no longer be undone"))), "{events:?}");
+}
+
+#[test]
+fn a_change_made_since_is_not_undone_and_unsaved_work_or_a_path_outside_is_staged_instead() {
+    let scratch = Scratch::new("guarded");
+    scratch.file("a.rs", SOURCE);
+    let mut ws = Workspace::rooted(&scratch.root);
+    ws.call_tool("E1", "edit_file", &serde_json::json!({ "path": "a.rs", "old_text": "    1\n", "new_text": "    11\n" }));
+    // Changed by somebody since: left as it is.
+    std::fs::write(scratch.root.join("a.rs"), "fn changed() {}\n").unwrap();
+    let events = ws.apply(Command::UndoAgentEdit { call: "E1".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("has changed since"))), "{events:?}");
+    assert_eq!(scratch.read("a.rs"), "fn changed() {}\n");
+
+    // Unsaved work in the buffer: staged, and the disk untouched.
+    scratch.file("b.rs", SOURCE);
+    ws.apply(Command::OpenBuffer { path: "b.rs".into() });
+    ws.apply(Command::Key { key: Key::char('O') });
+    ws.apply(Command::Key { key: Key::char('x') });
+    ws.apply(Command::Key { key: Key::named("Escape") });
+    let said = edit(&mut ws, "b.rs", "    2\n", "    22\n").unwrap();
+    assert!(said.contains("staged"), "{said}");
+    assert_eq!(scratch.read("b.rs"), SOURCE);
+
+    // Outside the project: staged, never written.
+    let outside = scratch.base.join("elsewhere.txt");
+    std::fs::write(&outside, "old\n").unwrap();
+    let said = edit(&mut ws, &outside.display().to_string(), "old\n", "new\n").unwrap();
+    assert!(said.contains("staged"), "{said}");
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "old\n");
+    let said = edit(&mut ws, "../escape.txt", "", "x\n").unwrap();
+    assert!(said.contains("staged") && !scratch.base.join("escape.txt").exists(), "{said}");
+}
+

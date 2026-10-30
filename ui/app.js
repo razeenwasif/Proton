@@ -325,6 +325,17 @@ document.addEventListener("click", (e) => {
 // (Chat's answers have the same two, handled in claude.js.)
 document.addEventListener("click", (e) => {
   if (!e.target.closest?.("[data-agent-thread], [data-cells]")) return;
+  const undo = e.target.closest("[data-agent-undo]");
+  if (undo) {
+    dispatch({ type: "undoAgentEdit", call: undo.dataset.agentUndo });
+    return;
+  }
+  const run = e.target.closest("[data-agent-run], [data-agent-skip]");
+  if (run) {
+    run.disabled = true;
+    dispatch({ type: "agentCommand", call: run.dataset.agentRun ?? run.dataset.agentSkip, run: Boolean(run.dataset.agentRun) });
+    return;
+  }
   const link = e.target.closest("a[data-link]");
   if (link) {
     e.preventDefault();
@@ -4310,7 +4321,7 @@ const TOOL_LABEL = {
   replace_file_content: "Edit",
   multi_replace_file_content: "Edit",
   sed_file: "Edit",
-  run_command: "Run",
+  run_command: "Run command",
   command_status: "Command status",
   search_web: "Search the web",
   read_url_content: "Read page",
@@ -4328,9 +4339,17 @@ function toolHtml(call) {
   const detail = call.detail ? ` <span class="d" title="${escapeHtml(call.detail)}">${escapeHtml(call.detail)}</span>` : "";
   return (
     `<div class="tool" title="${escapeHtml(call.name)}"><svg class="i${spin}"><use href="#i-${mark}"/></svg> ` +
-    `<b>${escapeHtml(TOOL_LABEL[call.name] ?? call.name)}</b>${detail}${right}</div>`
+    `<b>${escapeHtml(TOOL_LABEL[call.name] ?? call.name)}</b>${detail}${right}` +
+    // A file it wrote can be put back as it was, from here.
+    (call.undo ? `<button class="tool-undo" data-agent-undo="${escapeHtml(call.id)}" title="Put the file back as it was before this change">Undo</button>` : "") +
+    `</div>` +
+    // A command it proposes runs only when you say so.
+    (call.asks ? `<div class="tool-ask"><code>${escapeHtml(call.detail)}</code>` +
+      `<button class="cc-primary" data-agent-run="${escapeHtml(call.id)}">Run</button>` +
+      `<button class="cc-quiet" data-agent-skip="${escapeHtml(call.id)}">Skip</button></div>` : "")
   );
 }
+
 
 /** Minimal inline markup: backticks, citations and paragraphs — for what you
  *  wrote, and for the council's brief. An answer is markdown (`answerHtml`).

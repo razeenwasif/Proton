@@ -156,11 +156,62 @@ fn rules(allow_edits: bool) -> &'static str {
         false => "You are answering in the agent pane of the Proton editor, in this project. \
                   You may read and search its files with your file tools. You may not run \
                   commands, and you may not create or change files: either ends your turn \
-                  with no answer. If the request needs a change, say what to change instead.",
+                  with no answer. If the request needs a change, say what to change instead; \
+                  if it needs a command, give it in a ```sh block for the user to run.",
         true => "You are answering in the agent pane of the Proton editor, in this project. \
-                 You may read, search and edit its files with your file tools. You may not \
-                 run commands: that ends your turn with no answer.",
+                 You may read and search its files, and create and change files in it, with \
+                 your file tools; keep what you write inside the project. You may not run \
+                 commands: that ends your turn with no answer. If the request needs one — to \
+                 install, build or test — give it in a ```sh block for the user to run.",
     }
+}
+
+/// What `agy` refused, said as what it tried: a command, a change to a
+/// file, or a tool of the person's own MCP servers — each named, so a
+/// refusal is never put down to the wrong thing.
+pub fn refusals(denied: &[Value], allow_edits: bool) -> Vec<String> {
+    let mut commands = Vec::new();
+    let mut writes = Vec::new();
+    let mut others = Vec::new();
+    for action in denied {
+        let kind = action["action"].as_str().unwrap_or_default().to_ascii_lowercase();
+        let name = action["display_name"].as_str().or(action["action"].as_str()).unwrap_or("a tool").to_string();
+        let target = action["target"].as_str().or(action["command"].as_str()).or(action["path"].as_str()).map(str::to_string);
+        if kind.contains("command") || kind.contains("unsandboxed") {
+            commands.push(target.unwrap_or(name));
+        } else if ["write", "edit", "create", "replace", "delete", "file"].iter().any(|w| kind.contains(w)) {
+            writes.push(target.unwrap_or(name));
+        } else {
+            others.push(name);
+        }
+    }
+    let quoted = |list: &[String]| {
+        let mut list = list.to_vec();
+        list.dedup();
+        list.iter().map(|x| format!("\u{201c}{x}\u{201d}")).collect::<Vec<_>>().join(", ")
+    };
+    let mut notes = Vec::new();
+    if !commands.is_empty() {
+        notes.push(format!(
+            "It tried to run a command ({}), which it cannot stop to ask about from here: run it yourself, or ask Claude, Codex or Gemini, which ask before running one.",
+            quoted(&commands)
+        ));
+    }
+    if !writes.is_empty() && !allow_edits {
+        notes.push(format!(
+            "It tried to change files ({}). To let the agent write, turn on \u{201c}Let the agent write files\u{201d} in Settings \u{2192} AI & models.",
+            quoted(&writes)
+        ));
+    } else if !writes.is_empty() {
+        notes.push(format!("It tried to write somewhere it may not, outside the project ({}).", quoted(&writes)));
+    }
+    if !others.is_empty() {
+        notes.push(format!(
+            "It tried to use {}, which your own Antigravity settings do not allow; allow it in Antigravity if you want it used.",
+            quoted(&others)
+        ));
+    }
+    notes
 }
 
 /// The prompt for this run: the rules, the conversation so far, and the
@@ -330,30 +381,7 @@ impl Fold {
         if text.trim().is_empty() {
             text = result["response"].as_str().unwrap_or("").to_string();
         }
-        let denied: Vec<String> = result["denied_actions"]
-            .as_array()
-            .map(|all| {
-                all.iter()
-                    .filter_map(|a| a["action"].as_str().or(a["display_name"].as_str()))
-                    .map(str::to_ascii_lowercase)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let command = denied.iter().any(|a| a.contains("command"));
-        let write = denied.iter().any(|a| !a.contains("command"));
-        let mut notes = Vec::new();
-        if command {
-            notes.push("It tried to run a command, which Proton does not let it do.".to_string());
-        }
-        if write && !self.allow_edits {
-            notes.push(
-                "It tried to change a file. To allow that, turn on \u{201c}Let Antigravity edit \
-                 files\u{201d} in Settings \u{2192} AI & models."
-                    .to_string(),
-            );
-        } else if write {
-            notes.push("It tried something its edit permission does not cover.".to_string());
-        }
+        let notes = refusals(result["denied_actions"].as_array().map(Vec::as_slice).unwrap_or_default(), self.allow_edits);
         if !notes.is_empty() {
             if !text.trim().is_empty() {
                 text.push_str("\n\n");
@@ -586,8 +614,8 @@ mod tests {
         assert_eq!(usage.input_tokens, 31851);
         let Block::Text { text } = &message.content[0] else { panic!() };
         assert!(text.starts_with("pong"), "{text}");
-        assert!(text.contains("tried to change a file"), "{text}");
-        assert!(text.contains("Let Antigravity edit files"), "{text}");
+        assert!(text.contains("tried to change files (\u{201c}WriteToFile\u{201d})"), "{text}");
+        assert!(text.contains("Let the agent write files"), "{text}");
     }
 
     #[test]
@@ -660,5 +688,24 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let why = end.unwrap_err();
         assert!(why.contains("please sign in"), "{why}");
+    }
+
+    #[test]
+    fn a_refusal_names_what_was_refused_rather_than_calling_everything_an_edit() {
+        let denied: Vec<Value> = serde_json::from_str(
+            r#"[{"action":"mcp","display_name":"neutron/neutron_find_files"},
+                {"action":"run_command","display_name":"RunCommand","command":"brew install libomp"},
+                {"action":"write_file","display_name":"WriteToFile","path":"/Users/x/.gemini/brain/task.md"}]"#,
+        )
+        .unwrap();
+        let notes = refusals(&denied, true);
+        assert_eq!(notes.len(), 3, "{notes:?}");
+        assert!(notes[0].contains("\u{201c}brew install libomp\u{201d}") && notes[0].contains("ask before running one"), "{}", notes[0]);
+        assert!(notes[1].contains("outside the project") && notes[1].contains("task.md"), "{}", notes[1]);
+        assert!(notes[2].contains("\u{201c}neutron/neutron_find_files\u{201d}") && notes[2].contains("your own Antigravity settings"), "{}", notes[2]);
+        assert!(!notes.iter().any(|n| n.contains("edit permission")));
+        // Writing not allowed: the setting that allows it is named.
+        assert!(refusals(&denied[2..], false)[0].contains("Let the agent write files"));
+        assert!(refusals(&[], true).is_empty());
     }
 }

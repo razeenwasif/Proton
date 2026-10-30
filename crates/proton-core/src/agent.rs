@@ -50,6 +50,12 @@ pub struct ToolCall {
     /// return a thousand lines and the transcript is not where you read them.
     pub result: String,
     pub state: CallState,
+    /// A change it wrote that the pane can take back.
+    #[serde(default)]
+    pub undo: bool,
+    /// A command it proposes, waiting for the person to run it or not.
+    #[serde(default)]
+    pub asks: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Hash)]
@@ -234,6 +240,24 @@ impl Agent {
                 }),
             },
             Tool {
+                name: "run_command".into(),
+                description: "Run a shell command in the project folder — to build, test, install a \
+                              dependency, or look at what a tool says. The user is ASKED first: \
+                              it runs only if they click Run, and you get its exit code and \
+                              output (its end, if long) back, or are told they declined. Give \
+                              one command line; keep it to what the task needs, and say in \
+                              `why` what it is for. It runs non-interactively, with no input."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string", "description": "The command line, as typed in a terminal." },
+                        "why": { "type": "string", "description": "What it is for, in a few words, shown to the user." }
+                    },
+                    "required": ["command"]
+                }),
+            },
+            Tool {
                 name: "open_buffer".into(),
                 description: "Open a file in the editor so the user can see it. Use when \
                               pointing at something worth looking at, not to read it."
@@ -246,14 +270,16 @@ impl Agent {
             },
             Tool {
                 name: "edit_file".into(),
-                description: "Propose a change to a file. The edit is STAGED for the user to \
-                              review, hunk by hunk — it is not applied and nothing is written \
-                              to disk, so say what you changed rather than claiming it is \
-                              done. `old_text` must appear exactly once in the file: include \
-                              enough surrounding lines to make it unique, and read the file \
-                              first so it matches byte for byte. To create a new file, give \
-                              an empty `old_text`. Call this once per edit; several calls in \
-                              one turn are fine and stack up into one review."
+                description: "Change a file in the project, or create one. The change is \
+                              normally written to disk at once, and the user can undo it from \
+                              the pane; if they review changes first, or the file has unsaved \
+                              work of theirs, or it is outside the project, it is STAGED for \
+                              them to review instead and nothing is written. The result says \
+                              which — report it as it says. `old_text` must appear exactly \
+                              once in the file: include enough surrounding lines to make it \
+                              unique, and read the file first so it matches byte for byte. To \
+                              create a new file, give an empty `old_text`. Call this once per \
+                              edit; several calls in one turn are fine."
                     .into(),
                 input_schema: json!({
                     "type": "object",
@@ -757,6 +783,8 @@ impl Agent {
                         detail: String::new(),
                         result: String::new(),
                         state: CallState::Starting,
+                        undo: false,
+                        asks: false,
                     };
                     self.say(move |e| e.calls.push(call));
                 }
@@ -803,6 +831,8 @@ impl Agent {
                             detail: detail.clone(),
                             result: result.clone(),
                             state,
+                            undo: false,
+                        asks: false,
                         }),
                     });
                 }
@@ -1045,6 +1075,8 @@ impl Agent {
                                         (false, true) => CallState::Failed,
                                         (false, false) => CallState::Done,
                                     },
+                                    undo: false,
+                        asks: false,
                                 });
                             }
                             _ => {}
@@ -1074,6 +1106,40 @@ impl Agent {
     /// half by another is not a conversation either of them could continue.
     pub fn use_provider(&mut self, provider: proton_agent::Provider, model: &str) {
         self.profile = Profile::for_provider(provider, model, false);
+    }
+
+    /// Say of a call whether what it wrote can still be taken back, and
+    /// what it came to, wherever in the conversation it is.
+    pub fn mark(&mut self, id: &str, undo: bool, result: Option<&str>) {
+        for entry in &mut self.transcript {
+            if let Some(call) = entry.calls.iter_mut().find(|c| c.id == id) {
+                call.undo = undo;
+                if let Some(result) = result {
+                    call.result = result.to_string();
+                }
+            }
+        }
+    }
+
+    /// Say of a call whether it is waiting for the person to say yes, and
+    /// what is happening to it meanwhile.
+    pub fn asking(&mut self, id: &str, asks: bool, result: &str) {
+        for entry in &mut self.transcript {
+            if let Some(call) = entry.calls.iter_mut().find(|c| c.id == id) {
+                call.asks = asks;
+                call.result = result.to_string();
+            }
+        }
+    }
+
+    /// Show a call's argument whole: a command is read before it is run,
+    /// and the row's one-line summary would cut a long one short.
+    pub fn show_whole(&mut self, id: &str, detail: &str) {
+        for entry in &mut self.transcript {
+            if let Some(call) = entry.calls.iter_mut().find(|c| c.id == id) {
+                call.detail = detail.to_string();
+            }
+        }
     }
 
     /// Whether a provider that works in the project itself — Antigravity — may
@@ -1237,7 +1303,11 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 28);
+        assert_eq!(tools.len(), 29);
+        // A command is asked about first, and the tool says so: a model that
+        // thought it ran unasked would report work nobody approved.
+        let command = tools.iter().find(|t| t.name == "run_command").unwrap();
+        assert!(command.description.contains("ASKED first"), "{}", command.description);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the
@@ -1248,11 +1318,11 @@ mod tests {
             "it must show the citation format: {}",
             library.description
         );
-        // `edit_file` has to say that it stages rather than applies. A model
-        // told only "edit a file" reports the job as done, and the user reads
-        // that as a file that has changed.
-        // Both of them: a model told only "edit a cell" reports the job as
-        // done, and the user reads that as a notebook that has changed.
+        // `edit_file` has to say when it stages rather than writes, and that
+        // its result says which: a model that assumes either reports what
+        // did not happen. `edit_cell` stages always: a model told only "edit
+        // a cell" reports the job as done, and the user reads that as a
+        // notebook that has changed.
         for name in ["edit_file", "edit_cell"] {
             let editing = tools.iter().find(|t| t.name == name).unwrap();
             assert!(

@@ -10,4 +10,12 @@ detail: string,
  * What the tool answered, in a line. Not the full result: a grep can
  * return a thousand lines and the transcript is not where you read them.
  */
-result: string, state: CallState, };
+result: string, state: CallState, 
+/**
+ * A change it wrote that the pane can take back.
+ */
+undo: boolean, 
+/**
+ * A command it proposes, waiting for the person to run it or not.
+ */
+asks: boolean, };

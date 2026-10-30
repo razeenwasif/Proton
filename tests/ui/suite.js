@@ -1444,7 +1444,9 @@ await test('Antigravity is a provider, with its own models and its own tools nam
   $('[data-set-choice="agent.provider"] [data-value="antigravity"]').click(); await settle();
   const writes = win.commands.slice(before).filter(c => c.type === 'setSetting');
   assert(writes.some(c => c.key === 'agent.provider' && c.value === 'antigravity'), 'Antigravity was not selected');
-  assert($('[data-set-bool="agent.antigravityEdits"]') && !$('[data-set-bool="agent.antigravityEdits"]').checked, 'edits are not off by default');
+  // One switch for every provider, on unless turned off.
+  assert($('[data-set-bool="agent.writeFiles"]')?.checked, 'writing is not on by default');
+  assert(!$('[data-set-bool="agent.antigravityEdits"]'), 'the old Antigravity-only switch is still there');
   key('Escape'); await settle();
   await showAgentDock();
   await win.pushEvents([{type: 'agent', provider: 'antigravity', model: 'gemini-4-argon-high',
@@ -1456,6 +1458,34 @@ await test('Antigravity is a provider, with its own models and its own tools nam
   const models = [...$('[data-model-pick]').options].map(o => o.value);
   assert(models[0] === 'gemini-4-argon-high' && models.includes('gemini-3.8-flash-high') && $('[data-model-pick]').value === 'gemini-4-argon-high', `wrong models: ${models}`);
   assert([...doc.querySelectorAll('#codex-dock .tool b')].some(b => b.textContent === 'Read file'), 'its tool row is unnamed');
+});
+await test('A file the agent wrote has an Undo, and a command it proposes runs only from Run', async () => {
+  await showAgentDock();
+  await win.pushEvents([{type: 'agent', provider: 'claude', model: 'claude-opus-5-5', credential: '', activity: 'working', inputTokens: 0, outputTokens: 0, cachedTokens: 0,
+    transcript: [{speaker: 'you', text: 'make a cheatsheet and build it', thinking: '', streaming: false, calls: []},
+      {speaker: 'proton', text: '', thinking: '', streaming: true, calls: [
+        {id: 'E1', name: 'edit_file', detail: 'path=notes/cheatsheet.md', result: 'created notes/cheatsheet.md (12 lines)', state: 'done', undo: true, asks: false},
+        {id: 'C1', name: 'run_command', detail: 'make -C build all && ./build/test --verbose', result: 'waiting for you to run it or not', state: 'running', undo: false, asks: true}]}]}]);
+  const dock = $('#codex-dock');
+  const ask = dock.querySelector('.tool-ask');
+  // The whole command, before it is run.
+  assert(ask?.querySelector('code')?.textContent === 'make -C build all && ./build/test --verbose', ask?.textContent);
+  assert([...dock.querySelectorAll('.tool b')].some((b) => b.textContent === 'Run command'), 'the row is unnamed');
+  let before = win.commands.length;
+  dock.querySelector('[data-agent-undo="E1"]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'undoAgentEdit' && c.call === 'E1'), 'Undo sent nothing');
+  before = win.commands.length;
+  dock.querySelector('[data-agent-run="C1"]').click(); await settle();
+  const ran = win.commands.slice(before).find((c) => c.type === 'agentCommand');
+  assert(ran?.call === 'C1' && ran.run === true, JSON.stringify(ran));
+  // Skip says no.
+  await win.pushEvents([{type: 'agent', provider: 'claude', model: 'claude-opus-5-5', credential: '', activity: 'working', inputTokens: 0, outputTokens: 0, cachedTokens: 0, from: 1,
+    transcript: [{speaker: 'proton', text: '', thinking: '', streaming: true, calls: [
+      {id: 'C2', name: 'run_command', detail: 'rm -rf build', result: 'waiting for you to run it or not', state: 'running', undo: false, asks: true}]}]}]);
+  before = win.commands.length;
+  dock.querySelector('[data-agent-skip="C2"]').click(); await settle();
+  const skipped = win.commands.slice(before).find((c) => c.type === 'agentCommand');
+  assert(skipped?.call === 'C2' && skipped.run === false, JSON.stringify(skipped));
 });
 await test('An answer in the agent panel colours its code, draws its TeX, keeps its citations, and never becomes HTML', async () => {
   const agent = async (transcript) => {

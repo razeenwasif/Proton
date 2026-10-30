@@ -161,6 +161,12 @@ pub struct Workspace {
     /// hash: so a streaming answer sends the entries from the first that
     /// changed rather than the whole conversation on every token.
     agent_sent: std::cell::RefCell<Vec<u64>>,
+    /// What the agent's calls wrote, by call, to take back from the pane.
+    written: std::collections::HashMap<String, Written>,
+    /// What the last `edit_file` wrote, for `call_tool` to file under its call.
+    last_written: Option<Written>,
+    /// Commands the agent proposed: waiting to be run, or running.
+    proposed: Vec<Proposed>,
     /// The file the open conversation lives in. `None` until it has a
     /// question in it — a conversation with nothing said is not worth a file.
     chat_path: Option<PathBuf>,
@@ -233,6 +239,100 @@ pub enum ToolOutcome {
     /// paused meanwhile, because `Agent::resume` waits for every outstanding
     /// call — so deferring one is simply not answering it yet.
     Deferred,
+}
+
+/// A file the agent wrote: what it was before — nothing, if it made it —
+/// and what it wrote, so undoing it can tell whether anyone changed it since.
+#[derive(Debug, Clone)]
+struct Written {
+    path: PathBuf,
+    before: Option<String>,
+    after: String,
+}
+
+/// A command the agent proposed: asked about, then — if the person said
+/// yes — running on threads of its own until it ends.
+#[derive(Debug)]
+struct Proposed {
+    id: String,
+    command: String,
+    running: Option<Running>,
+    /// Heartbeats spent running, against `PATIENCE`.
+    beats: u32,
+}
+
+/// A command running in the project: its process group, and what it said
+/// and how it ended, once it has.
+#[derive(Debug)]
+struct Running {
+    pid: u32,
+    out: Arc<Mutex<Vec<u8>>>,
+    ended: Arc<Mutex<Option<Option<i32>>>>,
+}
+
+/// The most of a command's output kept, from its end.
+const COMMAND_OUTPUT: usize = 16_000;
+
+/// Start a command in the project, in the person's own shell as a login
+/// shell would set it up — so what is on their PATH is on its — with no
+/// input, in a process group of its own so stopping it stops what it began.
+fn start_command(root: &Path, command: &str) -> Result<Running, String> {
+    use std::io::Read;
+    use std::process::{Command as Process, Stdio};
+    let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
+    let mut process = Process::new(&shell);
+    if cfg!(target_os = "macos") && ["zsh", "bash", "fish"].iter().any(|s| shell.ends_with(s)) {
+        process.arg("-l");
+    }
+    process.arg("-c").arg(command).current_dir(root).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        process.process_group(0);
+    }
+    let mut child = process.spawn().map_err(|e| format!("{shell}: {e}"))?;
+    let out = Arc::new(Mutex::new(Vec::new()));
+    let ended = Arc::new(Mutex::new(None));
+    let readers: Vec<_> = [child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>), child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>)]
+        .into_iter()
+        .flatten()
+        .map(|mut pipe| {
+            let out = Arc::clone(&out);
+            std::thread::spawn(move || {
+                let mut chunk = [0u8; 8192];
+                while let Ok(n) = pipe.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    let mut all = out.lock().unwrap_or_else(|p| p.into_inner());
+                    all.extend_from_slice(&chunk[..n]);
+                    // Only its end is kept: a build can print megabytes.
+                    if all.len() > COMMAND_OUTPUT * 4 {
+                        let cut = all.len() - COMMAND_OUTPUT * 2;
+                        all.drain(..cut);
+                    }
+                }
+            })
+        })
+        .collect();
+    let pid = child.id();
+    let done = Arc::clone(&ended);
+    std::thread::spawn(move || {
+        let code = child.wait().ok().and_then(|s| s.code());
+        for reader in readers {
+            let _ = reader.join();
+        }
+        *done.lock().unwrap_or_else(|p| p.into_inner()) = Some(code);
+    });
+    Ok(Running { pid, out, ended })
+}
+
+/// Stop a command and everything it started.
+fn stop_command(pid: u32) {
+    #[cfg(unix)]
+    let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
+    #[cfg(not(unix))]
+    let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).status();
 }
 
 /// A `run_cell` that has been started and not yet answered.
@@ -1155,6 +1255,7 @@ impl Workspace {
                 // of it. Nothing is written for an empty conversation.
                 self.agent.clear();
                 self.waiting.clear();
+                self.drop_commands();
                 self.chat_path = None;
                 vec![self.agent_event(), self.chats_event()]
             }
@@ -1384,12 +1485,16 @@ impl Workspace {
                 Err(why) => vec![notice(why, NoticeLevel::Warn)],
             },
 
+            Command::UndoAgentEdit { call } => self.undo_agent_edit(&call),
+            Command::AgentCommand { call, run } => self.decide_command(&call, run),
             Command::CancelTurn => {
                 self.agent.cancel();
                 // The cell keeps running — it is the user's kernel and their
                 // code — but nothing is waiting on it any more. Leaving these
                 // would answer into a turn that no longer exists.
                 self.waiting.clear();
+                // A command is stopped, though: it was started for the turn.
+                self.drop_commands();
                 vec![self.agent_event()]
             }
 
@@ -2730,6 +2835,7 @@ impl Workspace {
         // while a turn is in flight, which is one condition too many for
         // something whose whole job is to end a wait.
         events.extend(self.answer_finished_cells());
+        events.extend(self.answer_finished_commands());
         self.answer_embedded_searches();
         // A quick run on its own thread: how far it has gone, and its end.
         let ran = self.circuits.poll();
@@ -3569,6 +3675,94 @@ impl Workspace {
         events
     }
 
+    /// Whether a path is in the project: what the agent may write without
+    /// asking. A file not yet there is judged by the nearest folder that is.
+    fn in_project(&self, path: &Path) -> bool {
+        use std::path::Component;
+        if path.components().any(|c| matches!(c, Component::ParentDir)) {
+            return false;
+        }
+        let Ok(root) = self.root().canonicalize() else { return false };
+        let mut probe = path.to_path_buf();
+        let mut rest = Vec::new();
+        while !probe.exists() {
+            let Some(name) = probe.file_name().map(|n| n.to_os_string()) else { return false };
+            rest.push(name);
+            if !probe.pop() {
+                return false;
+            }
+        }
+        let Ok(mut real) = probe.canonicalize() else { return false };
+        for name in rest.iter().rev() {
+            real.push(name);
+        }
+        real.starts_with(&root) && !real.components().any(|c| c.as_os_str() == ".git")
+    }
+
+    /// Write what the agent asked for, whole, and open it: kept so the pane
+    /// can take it back.
+    fn write_for_agent(&mut self, path: &Path, before: Option<String>, after: String) -> Result<String, String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        let partial = path.with_file_name(format!(".{name}.proton-partial"));
+        std::fs::write(&partial, &after).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::fs::rename(&partial, path).map_err(|e| format!("{}: {e}", path.display()))?;
+        // An open buffer reads it again; one not open is opened, to be seen.
+        self.editor.reread_changed_on_disk();
+        let _ = self.editor.open(path);
+        self.resync();
+        let shown = path.strip_prefix(self.root()).unwrap_or(path).display().to_string();
+        let said = match &before {
+            None => format!("created {shown} ({} lines) — written to disk; the user can undo it from the agent pane", after.lines().count()),
+            Some(was) => {
+                let (gone, added) = changed_lines(was, &after);
+                format!("wrote {shown} (-{gone} +{added} lines) — written to disk; the user can undo it from the agent pane")
+            }
+        };
+        self.last_written = Some(Written { path: path.to_path_buf(), before, after });
+        Ok(said)
+    }
+
+    /// Take back what one of the agent's calls wrote, if nothing changed it
+    /// since: a buffer with unsaved work in it, or a file on disk that is
+    /// not what the call left, is not overwritten.
+    fn undo_agent_edit(&mut self, call: &str) -> Vec<Event> {
+        let Some(written) = self.written.get(call).cloned() else {
+            return vec![notice("That change can no longer be undone here.".into(), NoticeLevel::Warn)];
+        };
+        let shown = written.path.strip_prefix(self.root()).unwrap_or(&written.path).display().to_string();
+        let unsaved = self.editor.find(&written.path).is_some_and(|i| self.editor.buffers()[i].is_modified());
+        let now = std::fs::read_to_string(&written.path).ok();
+        if unsaved || now.as_deref() != Some(written.after.as_str()) {
+            return vec![notice(format!("{shown} has changed since the agent wrote it, so it was left as it is."), NoticeLevel::Warn)];
+        }
+        let done = match &written.before {
+            Some(text) => std::fs::write(&written.path, text).map(|()| format!("put {shown} back as it was")),
+            None => std::fs::remove_file(&written.path).map(|()| {
+                if let Some(index) = self.editor.find(&written.path) {
+                    self.editor.close(index);
+                }
+                format!("removed {shown}, which the agent made")
+            }),
+        };
+        let mut events = match done {
+            Ok(said) => {
+                self.written.remove(call);
+                self.agent.mark(call, false, Some(&format!("undone — {said}")));
+                self.editor.reread_changed_on_disk();
+                self.resync();
+                vec![notice(said, NoticeLevel::Info)]
+            }
+            Err(why) => vec![notice(format!("{shown}: {why}"), NoticeLevel::Error)],
+        };
+        events.push(self.agent_event());
+        events.push(self.buffers_event());
+        events.extend(self.every_view());
+        events
+    }
+
     /// Refuse one hunk. The buffer is untouched; what changes is what is
     /// still being proposed.
     fn reject_hunk(&mut self, path: &str, index: usize) -> Vec<Event> {
@@ -4248,8 +4442,24 @@ impl Workspace {
                 return deferred;
             }
         }
+        if name == "run_command" {
+            let Some(command) = input.get("command").and_then(|v| v.as_str()).map(str::trim).filter(|c| !c.is_empty()) else {
+                return ToolOutcome::Answered(Err("run_command: `command` is required".into()));
+            };
+            // Asked first: nothing runs until the person says so.
+            self.proposed.push(Proposed { id: id.to_string(), command: command.to_string(), running: None, beats: 0 });
+            self.agent.show_whole(id, command);
+            self.agent.asking(id, true, "waiting for you to run it or not");
+            return ToolOutcome::Deferred;
+        }
         if name != "run_cell" {
-            return ToolOutcome::Answered(self.run_tool(name, input));
+            let answer = self.run_tool(name, input);
+            // What it wrote can be taken back from the pane, by this call.
+            if let Some(written) = self.last_written.take() {
+                self.written.insert(id.to_string(), written);
+                self.agent.mark(id, true, None);
+            }
+            return ToolOutcome::Answered(answer);
         }
         match self.start_cell(input) {
             Ok((cell, key)) => {
@@ -4466,6 +4676,89 @@ impl Workspace {
             .save_if_modified()
             .map_err(|why| format!("the notebook open has changes that could not be saved: {why}"))?;
         self.data.open(path)
+    }
+
+    /// Run a command the agent proposed, or say it was declined.
+    fn decide_command(&mut self, call: &str, run: bool) -> Vec<Event> {
+        let Some(at) = self.proposed.iter().position(|p| p.id == call && p.running.is_none()) else {
+            return vec![notice("That command is no longer waiting to be run.".into(), NoticeLevel::Warn)];
+        };
+        if !run {
+            let proposed = self.proposed.remove(at);
+            self.agent.answer(&proposed.id, Ok(format!("The user chose not to run `{}`. Do not run it another way; say what it was for, or carry on without it.", proposed.command)));
+            self.agent.asking(&proposed.id, false, "not run: you declined");
+            return vec![self.agent_event()];
+        }
+        let root = self.root().to_path_buf();
+        match start_command(&root, &self.proposed[at].command) {
+            Ok(running) => {
+                self.proposed[at].running = Some(running);
+                self.agent.asking(call, false, "running…");
+            }
+            Err(why) => {
+                let proposed = self.proposed.remove(at);
+                self.agent.answer(&proposed.id, Err(format!("it could not be started: {why}")));
+            }
+        }
+        vec![self.agent_event()]
+    }
+
+    /// Let go of every command: one running is stopped, one waiting is
+    /// forgotten with the turn it was for.
+    fn drop_commands(&mut self) {
+        for proposed in self.proposed.drain(..) {
+            if let Some(running) = proposed.running {
+                stop_command(running.pid);
+            }
+        }
+    }
+
+    /// Answer every command that has ended — or has run too long, and is
+    /// stopped — with its exit and the end of what it printed.
+    fn answer_finished_commands(&mut self) -> Vec<Event> {
+        if self.proposed.iter().all(|p| p.running.is_none()) {
+            return Vec::new();
+        }
+        let mut done = Vec::new();
+        self.proposed.retain_mut(|proposed| {
+            let Some(running) = &proposed.running else { return true };
+            let ended = *running.ended.lock().unwrap_or_else(|p| p.into_inner());
+            proposed.beats += 1;
+            let over = proposed.beats >= PATIENCE;
+            if ended.is_none() && !over {
+                return true;
+            }
+            if over && ended.is_none() {
+                stop_command(running.pid);
+            }
+            let out = String::from_utf8_lossy(&running.out.lock().unwrap_or_else(|p| p.into_inner())).to_string();
+            let tail = match out.len() > COMMAND_OUTPUT {
+                true => {
+                    let mut cut = out.len() - COMMAND_OUTPUT;
+                    while !out.is_char_boundary(cut) {
+                        cut += 1;
+                    }
+                    format!("…{}", &out[cut..])
+                }
+                false => out,
+            };
+            let how = match ended {
+                Some(Some(code)) => format!("exit {code}"),
+                Some(None) => "ended by a signal".to_string(),
+                None => "stopped: it ran too long".to_string(),
+            };
+            let printed = if tail.trim().is_empty() { "It printed nothing.".to_string() } else { format!("Output (its end if long):\n{tail}") };
+            done.push((proposed.id.clone(), how.clone(), format!("`{}` — {how}.\n{printed}", proposed.command)));
+            false
+        });
+        if done.is_empty() {
+            return Vec::new();
+        }
+        for (id, how, answer) in done {
+            self.agent.answer(&id, Ok(answer));
+            self.agent.asking(&id, false, &how);
+        }
+        vec![self.agent_event()]
     }
 
     /// Answer every `run_cell` whose cell has stopped running.
@@ -4728,6 +5021,15 @@ impl Workspace {
                 };
                 if target == current {
                     return Ok("that is already what the file says".into());
+                }
+
+                // Written straight to the project, unless the settings ask for
+                // review first — or the file has unsaved work of yours in it,
+                // is already being reviewed, or is outside the project: then
+                // it is staged, as it always was.
+                let unsaved = self.editor.find(&path).is_some_and(|i| self.editor.buffers()[i].is_modified());
+                if self.settings.bool("agent.writeFiles", true) && !unsaved && self.review.get(&path).is_none() && self.in_project(&path) {
+                    return self.write_for_agent(&path, if creates { None } else { Some(current) }, target);
                 }
 
                 // Opened so the change can be looked at. Staging something
@@ -5290,8 +5592,9 @@ impl Workspace {
         let provider = proton_agent::Provider::parse(&self.settings.string("agent.provider", ""));
         let model = self.settings.string("agent.model", "");
         self.agent.use_provider(provider, &model);
-        self.agent
-            .allow_edits(self.settings.bool("agent.antigravityEdits", false));
+        // One switch for every provider: Proton's own `edit_file` writes, and
+        // Antigravity, which edits with its own tools, is let.
+        self.agent.allow_edits(self.settings.bool("agent.writeFiles", true));
     }
 
     /// Write the open conversation, naming its file if it has none yet.
@@ -6805,6 +7108,16 @@ fn is_latex(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| LATEX.contains(&e))
 }
 
+/// Lines taken out and put in between two texts, by their longest common
+/// run of lines from each end: a count for the agent's answer, not a diff.
+fn changed_lines(before: &str, after: &str) -> (usize, usize) {
+    let a: Vec<&str> = before.lines().collect();
+    let b: Vec<&str> = after.lines().collect();
+    let head = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let tail = a[head..].iter().rev().zip(b[head..].iter().rev()).take_while(|(x, y)| x == y).count();
+    (a.len() - head - tail, b.len() - head - tail)
+}
+
 #[cfg(test)]
 mod tests {
     //! The agent's staged changes, in a workspace whose root is not spelled
@@ -7116,6 +7429,8 @@ mod tests {
         let project = Project::new("twice");
         std::fs::write(project.folder().join("a.rs"), SOURCE).unwrap();
         let mut ws = Workspace::rooted(project.around());
+        // Reviewed rather than written, as the person may have it.
+        ws.apply(Command::SetSetting { key: "agent.writeFiles".into(), value: serde_json::json!(false) });
         let canonical = crate::folder::normalise(&project.folder().join("a.rs"));
         let canonical = canonical.display().to_string();
 
@@ -7386,4 +7701,3 @@ mod tests {
         }
     }
 }
-

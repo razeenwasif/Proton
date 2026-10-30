@@ -855,6 +855,11 @@ kbd {
 }
 .tool b { color: var(--info); font-weight: 500; }
 .tool .t { margin-left: auto; font-size: 10px; color: var(--ink-4); }
+.tool-undo { flex: none; padding: 1px 8px; border: 1px solid var(--line, rgba(255,255,255,0.12)); border-radius: 6px; background: none; color: var(--ink-2, inherit); font: 10.5px var(--mono); cursor: pointer; }
+.tool-undo:hover { color: var(--info); border-color: var(--info); }
+.tool-ask { display: flex; align-items: center; gap: 8px; margin: -2px 0 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--warn, #e0af68); }
+.tool-ask code { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; font: 11.5px var(--mono); }
+.tool-ask button { flex: none; }
 
 .diff {
   margin: 9px 0; border-radius: 10px; overflow: hidden;

@@ -1365,9 +1365,10 @@
           <p>Antigravity uses your Google sign-in through its <code>agy</code> command, so a Gemini subscription works without an API key. Run <code>agy</code> once in a terminal to sign in. Gemini 4 Argon (High) is the default; <code>agy models</code> lists the rest.</p>
         </div>
         <div class="setting">
-          <h4>Antigravity in the project</h4>
-          <p>Antigravity works in the open project with its own tools, and its steps appear in the agent pane. It can always read files. Writing them is off until you allow it, and it never runs commands from here. Files it changes are re-read when it finishes, unless you have unsaved changes in them.</p>
-          <label class="st-toggle"><input type="checkbox" data-set-bool="agent.antigravityEdits"> Let Antigravity edit files</label>
+          <h4>Writing files</h4>
+          <p>On, the agent creates and changes files in the project as it works, and each change can be undone from its row in the agent pane. Off, Claude, Gemini and Codex stage their changes for you to review in the editor, and Antigravity only reads. Either way nothing is written outside the project, and a file with unsaved changes of yours is staged rather than written.</p>
+          <label class="st-toggle"><input type="checkbox" data-set-bool="agent.writeFiles" checked> Let the agent write files</label>
+          <p>Antigravity works with its own tools, and files it changes are re-read when it finishes. It cannot stop to ask before running a command, so it gives you the command to run instead.</p>
         </div>
       </div>
 
