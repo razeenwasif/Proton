@@ -29,8 +29,9 @@ import { citationHtml, literatureHtml, ownPaper, paperHtml, referenceHtml } from
 /** @typedef {import("./bindings/RoundStatus").RoundStatus} RoundStatus */
 /** @typedef {import("./bindings/ClaudeItem").ClaudeItem} Item */
 /** @typedef {{investigations: Summary[], open: string | null, folder?: string}} ListEvent */
+/** @typedef {import("./bindings/ResearchForked").ResearchForked} Forked */
 /** @typedef {{slug: string, title: string, discipline: Discipline, brief: string, plan: string,
- *   overview: string, verdicts: string, sandbox: string, feedback: string, hypotheses: Row[]}} BoardEvent */
+ *   overview: string, verdicts: string, sandbox: string, feedback: string, hypotheses: Row[], forked?: Forked | null, roundEnds?: number[]}} BoardEvent */
 /** @typedef {{slug: string, detail: Detail | null}} HypothesisEvent */
 /** @typedef {import("./bindings/LiteratureRow").LiteratureRow} LiteratureStep */
 /** @typedef {{slug: string, round: number, status: RoundStatus, used: number, cap: number,
@@ -161,6 +162,7 @@ export function createResearch(host) {
     go: /** @type {HTMLButtonElement} */ (q("[data-research-go]")),
     pause: /** @type {HTMLButtonElement} */ (q("[data-research-pause]")),
     stop: /** @type {HTMLButtonElement} */ (q("[data-research-stop]")),
+    fork: /** @type {HTMLButtonElement} */ (q("[data-research-fork]")),
     tabs: q("[data-research-tabs]"),
     count: q("[data-research-count]"),
     papers: q("[data-research-papers]"),
@@ -175,7 +177,8 @@ export function createResearch(host) {
   /** @type {{list: Summary[], open: string | null, folder: string, moving: string | null, moved: boolean, board: BoardEvent | null, detail: Detail | null,
    *   round: RoundEvent | null, task: string | null, transcript: TranscriptEvent | null,
    *   literature: LiteratureEvent | null, paper: PaperDetail | null, results: ResultsEvent | null, query: string, adding: string[],
-   *   tab: Tab, creating: boolean, made: number, draft: {title: string, goal: string, discipline: Discipline, literature: boolean}}} */
+   *   tab: Tab, creating: boolean, made: number, draft: {title: string, goal: string, discipline: Discipline, literature: boolean},
+   *   forking: {from: string, title: string, round: string, direction: string, made: number} | null}} */
   const state = {
     // Where the investigations are kept, as the core says it; and the folder
     // being typed to keep them in instead, once asked for, until it is.
@@ -189,6 +192,9 @@ export function createResearch(host) {
     // the list grows, and stays with what was typed when the core refuses.
     creating: false, made: -1,
     draft: { title: "", goal: "", discipline: "physics", literature: true },
+    // The fork being asked for: of which investigation, what is typed, and
+    // how many there were when it was sent, as for a new one.
+    forking: null,
   };
 
   /** The open investigation's literature, if it has been said. */
@@ -213,7 +219,8 @@ export function createResearch(host) {
         `${on ? ' aria-current="true"' : ""}>` +
         (i.slug === running ? `<span class="rs-live" title="A round is running"></span>` : "") +
         `<span class="cc-session-name">${esc(i.title)}</span>` +
-        `<span class="cc-session-where">${esc(DISCIPLINE[i.discipline] ?? "")}</span></button>`;
+        `<span class="cc-session-where">${esc(DISCIPLINE[i.discipline] ?? "")}` +
+        `${i.forkedFrom ? `<span class="rs-fork-tag" title="Forked from ${esc(i.forkedFrom)}">fork</span>` : ""}</span></button>`;
     }).join("");
   }
 
@@ -289,6 +296,8 @@ export function createResearch(host) {
     els.pause.hidden = s.status !== "running";
     els.stop.hidden = !live;
     els.go.hidden = s.status === "running";
+    els.fork.hidden = Boolean(r.held);
+    els.fork.setAttribute("aria-pressed", String(Boolean(state.forking)));
     els.go.textContent = s.status === "paused" ? "Resume" : "Run round";
     els.go.title = s.status === "paused" ? "Carry on with the round" : `A round: about fourteen agent calls, at most ${r.cap}`;
     for (const b of [els.go, els.pause, els.stop]) b.disabled = Boolean(r.held);
@@ -301,6 +310,10 @@ export function createResearch(host) {
     renderSeats();
     // The form is drawn once: drawn again, under whatever the core sends
     // while it is up, it would take the caret from the field being typed in.
+    if (state.forking && !state.creating) {
+      if (!els.board.querySelector("[data-research-fork-form]")) renderForkForm();
+      return;
+    }
     if (state.creating) {
       if (!els.board.querySelector("[data-research-form]")) renderForm();
       return;
@@ -361,7 +374,12 @@ export function createResearch(host) {
   /** @param {BoardEvent} board */
   function overviewHtml(board) {
     const path = `${state.folder}${board.slug}/`;
-    return `<div class="rs-col">` +
+    const f = board.forked;
+    const forked = f
+      ? `<p class="rs-forked">${icon("git")}<span>Forked from <button class="rs-link" data-research-open="${esc(f.from)}">${esc(f.title)}</button>` +
+        `${f.round != null ? ` after round ${f.round}` : ""}, ${esc(new Date(f.at * 1000).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }))}</span></p>`
+      : "";
+    return `<div class="rs-col">` + forked +
       doc("Brief", `${path}README.md`, withoutTitle(board.brief, board.title)) +
       doc("Overview", `${path}overview.md`, withoutTitle(board.overview, "Overview")) +
       doc("Plan", `${path}RESEARCH_PLAN.md`, withoutTitle(board.plan, "Research plan")) +
@@ -614,6 +632,70 @@ export function createResearch(host) {
     /** @type {HTMLInputElement | null} */ (els.board.querySelector('[name="title"]'))?.focus({ preventScroll: true });
   }
 
+  /** The fork's form: a title, the round to take it from, and the
+   *  direction it is to take, said to its team as the scientist's first word. */
+  function renderForkForm() {
+    const f = /** @type {NonNullable<typeof state.forking>} */ (state.forking);
+    const board = state.board;
+    const ends = [...(board?.roundEnds ?? [])].sort((a, b) => b - a);
+    const running = round()?.status.status !== "idle" && round() != null;
+    const options = [
+      `<option value="now"${f.round === "now" ? " selected" : ""}${running ? " disabled" : ""}>Where it stands now${running ? " (once this round ends)" : ""}</option>`,
+      ...ends.map((n) => `<option value="${n}"${f.round === String(n) ? " selected" : ""}>After round ${n}</option>`),
+    ].join("");
+    const older = (round()?.round ?? 0) > ends.length
+      ? `<p class="rs-faint">Rounds that ended before forking was possible kept nothing to fork from; those since did.</p>` : "";
+    els.board.innerHTML = `<form class="rs-col rs-new" data-research-fork-form novalidate>
+      <p class="rs-faint">A copy of <b>${esc(board?.title ?? "")}</b> to take another direction: its hypotheses, reviews, tournament,
+        experiments and runs, papers and proofs as they were then, in a folder of its own. The original is left as it is.</p>
+      <label class="rs-field"><span>Title</span>
+        <input name="title" maxlength="120" autocomplete="off" spellcheck="true" required value="${esc(f.title)}"></label>
+      <label class="rs-field"><span>From</span><select name="round">${options}</select></label>
+      ${older}
+      <label class="rs-field"><span>The direction to take</span>
+        <textarea name="direction" rows="5" spellcheck="true"
+          placeholder="What the fork should try that the original did not. It is the first thing its team is told.">${esc(f.direction)}</textarea></label>
+      <div class="rs-actions">
+        <button type="button" class="cc-quiet" data-research-fork-cancel>Cancel</button>
+        <button type="submit" class="cc-primary">Fork</button>
+      </div>
+    </form>`;
+    /** @type {HTMLInputElement | null} */ (els.board.querySelector('[name="title"]'))?.focus({ preventScroll: true });
+  }
+
+  function startFork() {
+    const board = state.board;
+    if (!board) return;
+    const running = round()?.status.status !== "idle" && round() != null;
+    const ends = board.roundEnds ?? [];
+    state.forking = {
+      from: board.slug, title: `${board.title} (fork)`, direction: "", made: -1,
+      round: running && ends.length ? String(Math.max(...ends)) : "now",
+    };
+    renderBoard();
+  }
+
+  /** @param {HTMLFormElement} form */
+  function submitFork(form) {
+    const f = state.forking;
+    if (!f) return;
+    const data = new FormData(form);
+    f.title = String(data.get("title") ?? "").trim();
+    f.round = String(data.get("round") ?? "now");
+    f.direction = String(data.get("direction") ?? "").trim();
+    if (!f.title) {
+      /** @type {HTMLInputElement | null} */ (form.querySelector('[name="title"]'))?.focus();
+      return;
+    }
+    f.made = state.list.length;
+    host.dispatch({ type: "researchFork", slug: f.from, round: f.round === "now" ? null : Number(f.round), title: f.title, direction: f.direction });
+  }
+
+  function stopForking() {
+    state.forking = null;
+    renderBoard();
+  }
+
   /** Where the investigations are kept, and a way to keep them elsewhere. */
   function renderWhere() {
     if (state.moving !== null) {
@@ -737,13 +819,16 @@ export function createResearch(host) {
       host.dispatch({ type: round()?.status.status === "paused" ? "researchResume" : "researchStart" });
       return;
     }
+    if (target.closest("[data-research-fork]")) return state.forking ? stopForking() : startFork();
+    if (target.closest("[data-research-fork-cancel]")) return stopForking();
     if (target.closest("[data-research-pause]")) return void host.dispatch({ type: "researchPause" });
     if (target.closest("[data-research-stop]")) return void host.dispatch({ type: "researchStop" });
     const open = /** @type {HTMLElement | null} */ (target.closest("[data-research-open]"));
     if (open) {
       const slug = open.dataset.researchOpen ?? "";
-      const leaving = state.creating;
+      const leaving = state.creating || Boolean(state.forking);
       state.creating = false;
+      state.forking = null;
       if (slug === state.open) {
         if (leaving) { renderList(); renderBoard(); }
         return;
@@ -872,6 +957,11 @@ export function createResearch(host) {
       if (query) host.dispatch({ type: "researchSearch", query });
       return;
     }
+    const fork = /** @type {HTMLElement} */ (e.target).closest("[data-research-fork-form]");
+    if (fork) {
+      e.preventDefault();
+      return submitFork(/** @type {HTMLFormElement} */ (fork));
+    }
     const form = /** @type {HTMLElement} */ (e.target).closest("[data-research-form]");
     if (!form) return;
     e.preventDefault();
@@ -890,6 +980,10 @@ export function createResearch(host) {
       state.query = field.value;
       return;
     }
+    if (field.closest?.("[data-research-fork-form]") && state.forking) {
+      if (field.name === "title" || field.name === "direction" || field.name === "round") state.forking[field.name] = field.value;
+      return;
+    }
     if (!field.closest?.("[data-research-form]")) return;
     if (field.name === "title" || field.name === "goal") state.draft[field.name] = field.value;
     if (field.name === "discipline") state.draft.discipline = /** @type {Discipline} */ (field.value);
@@ -903,6 +997,18 @@ export function createResearch(host) {
       e.stopPropagation();
       state.moving = null;
       return renderWhere();
+    }
+    const fork = /** @type {HTMLElement} */ (e.target).closest?.("[data-research-fork-form]");
+    if (fork) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        submitFork(/** @type {HTMLFormElement} */ (fork));
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        stopForking();
+      }
+      return;
     }
     const form = /** @type {HTMLElement} */ (e.target).closest?.("[data-research-form]");
     if (!form) return;
@@ -929,6 +1035,8 @@ export function createResearch(host) {
       state.moved = false;
     }
     renderWhere();
+    // A fork asked for is made when there is one more, and it is open.
+    if (state.forking && state.forking.made >= 0 && state.list.length > state.forking.made) state.forking = null;
     if (state.creating && state.made >= 0 && state.list.length > state.made) {
       state.creating = false;
       state.made = -1;

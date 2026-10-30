@@ -826,6 +826,27 @@ still reaches the reviews; one still out when the round ends is let go.
 `used` counts agent calls only, and a round's report ends with what was
 searched for and added.
 
+**Forking.** `Store::fork` copies an investigation under a new title, from
+the end of a round or as it stands. A round's report is written with
+`rounds/round-002.json` beside it (`RoundEnd`): what each round rewrites —
+the plan, the overview, every hypothesis's status — as it then was, and how
+long `VERDICT.md`, `SANDBOX_LOG.md`, `feedback.md` and `tournament.jsonl` had
+grown, since they are only added to. A fork after round N has the hypotheses,
+reviews, matches, experiments, proofs, rounds and task records of rounds up
+to N, those files cut back to their lengths then, the runs started before the
+round ended, and the papers found by its rounds or added before it ended,
+PDFs and all. An experiment whose run came later is proposed again, as it was.
+A fork as it stands has everything, and waits for a round under way. Neither
+takes `.investigation/` — the lock, the round's state, transcripts, caches —
+so the fork's next round is N + 1, made afresh, and its numbers carry on from
+the copy's. Files are copied with `std::fs::copy`, which on APFS clones them;
+links are not followed. `investigation.json` keeps `forked: {from, title,
+round, at}`, the brief gains a `## Forked` section saying so, and the
+direction given is the scientist's first feedback. Rounds that ended before
+this kept nothing to fork from, so only forking as it stands is offered for
+them. `Command::ResearchFork` makes and opens it; the board sends `forked`
+and `roundEnds`, and the list each one's `forkedFrom`.
+
 `tests/live_round.rs` plays one round on the real engines, signed in as
 whoever runs it; it is ignored unless asked for, since it spends their
 limits, and it is run from a clean environment, as Proton is started, because

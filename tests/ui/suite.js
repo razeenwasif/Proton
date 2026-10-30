@@ -2042,6 +2042,50 @@ const openSky = async (round) => {
     researchBoard(), {type: 'researchHypothesis', slug: 'sky', detail: null}, round]);
   return $('.workspace[data-ws="research"]');
 };
+await test('An investigation forks from a round that ended, or as it stands, and the fork says where it came from', async () => {
+  const ws = await openSky(researchRound({status: 'running'}, {round: 3}));
+  await win.pushEvents([{...researchBoard(), roundEnds: [1, 2], forked: null}]);
+  const fork = ws.querySelector('[data-research-fork]');
+  assert(shown(fork), 'no way to fork');
+  fork.click(); await settle();
+  const form = ws.querySelector('[data-research-fork-form]');
+  assert(form && doc.activeElement === form.querySelector('[name="title"]'), 'the fork\'s form did not open with its title focused');
+  assert(form.querySelector('[name="title"]').value === 'Why is the sky blue? (fork)', form.querySelector('[name="title"]').value);
+  const options = [...form.querySelectorAll('option')].map((o) => `${o.value}${o.disabled ? '!' : ''}`);
+  // Mid-round, as it stands waits for the round; the latest ended round is offered first.
+  assert(options.join() === 'now!,2,1' && form.querySelector('[name="round"]').value === '2', options.join());
+  assert(form.textContent.includes('Rounds that ended before forking was possible kept nothing'), 'round 3 of 3 with two ends kept, and nothing said');
+  // What is typed outlasts the board drawn again under it.
+  const title = form.querySelector('[name="title"]');
+  title.value = 'Sky, polarisation first'; title.dispatchEvent(new win.Event('input', {bubbles: true}));
+  const direction = form.querySelector('[name="direction"]');
+  direction.value = 'Polarisation before the spectrum.'; direction.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await win.pushEvents([{...researchBoard(), roundEnds: [1, 2], forked: null}]);
+  assert(ws.querySelector('[data-research-fork-form] [name="title"]').value === 'Sky, polarisation first', 'a redraw lost what was typed');
+  let before = win.commands.length;
+  title.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Enter', metaKey: true, bubbles: true})); await settle();
+  const sent = win.commands.slice(before).find((c) => c.type === 'researchFork');
+  assert(sent && sent.slug === 'sky' && sent.round === 2 && sent.title === 'Sky, polarisation first' && sent.direction === 'Polarisation before the spectrum.',
+    `wrong command: ${JSON.stringify(sent)}`);
+  assert(ws.querySelector('[data-research-fork-form]'), 'the form went before the fork was made');
+  // Made: one more in the list, open, and it says where it came from.
+  const forked = {from: 'sky', title: 'Why is the sky blue?', round: 2, at: 1793318400};
+  await win.pushEvents([{type: 'researchList', investigations: [{...researchSummary('sky-polarisation', 'Sky, polarisation first'), forkedFrom: 'Why is the sky blue?'},
+    researchSummary('sky', 'Why is the sky blue?')], open: 'sky-polarisation'},
+    {...researchBoard('sky-polarisation', 'Sky, polarisation first'), roundEnds: [1, 2], forked}]);
+  assert(!ws.querySelector('[data-research-fork-form]'), 'the form stayed up after the fork was made');
+  const line = ws.querySelector('.rs-forked');
+  assert(line?.textContent.startsWith('Forked from Why is the sky blue? after round 2'), line?.textContent);
+  assert(ws.querySelector('.rs-item[data-research-open="sky-polarisation"] .rs-fork-tag'), 'the list does not say which is a fork');
+  before = win.commands.length;
+  line.querySelector('[data-research-open]').click(); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'researchOpen' && c.slug === 'sky'), 'the original does not open from the fork');
+  // Escape puts the form away.
+  ws.querySelector('[data-research-fork]').click(); await settle();
+  ws.querySelector('[data-research-fork-form] [name="title"]').dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true})); await settle();
+  assert(!ws.querySelector('[data-research-fork-form]'), 'Escape did not put the form away');
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('Research runs a round from the board and follows it call by call', async () => {
   const ws = await openSky(researchRound({status: 'idle'}, {round: 0}));
   const go = ws.querySelector('[data-research-go]');

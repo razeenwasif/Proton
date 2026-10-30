@@ -76,9 +76,6 @@ Research's milestones after Lean (P0–P7, `6c103a9`).
 - **Manuscripts.** The paper drafted inside the investigation, every figure
   and number traced to the run, code and environment that produced it, with
   inline annotation to refine it. Open: LaTeX or Typst, and where it compiles.
-- **Forking an investigation.** A copy to take another direction from a
-  point in it. Open: what is copied — hypotheses, tournament, runs, the
-  literature and its PDFs — and how the copy says where it came from.
 - **Remote compute.** The Lab's code run elsewhere. Open: SSH, Slurm, or
   both, and what provenance and sandboxing mean off the machine.
 - **Lean's statements compared.** Lean's `comparator` (sandboxed on Linux)

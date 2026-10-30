@@ -420,7 +420,8 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
     return { packages, download: packages.reduce((n, p) => n + Number(p.size ?? 0), 0), cached: packages.filter((p) => p.size == null).length, prefix: PREFIX };
   };
 
-  const summary = (i) => ({ slug: i.slug, title: i.title, discipline: i.discipline, created: i.created, hypotheses: i.hypotheses.length, rounds: i.rounds });
+  const summary = (i) => ({ slug: i.slug, title: i.title, discipline: i.discipline, created: i.created, hypotheses: i.hypotheses.length, rounds: i.rounds,
+    forkedFrom: i.forked?.title ?? null });
   const find = (slug) => investigations.find((i) => i.slug === slug);
 
   function rows(i) {
@@ -457,7 +458,9 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
     if (!i) return [];
     return [
       { type: "researchBoard", slug: i.slug, title: i.title, discipline: i.discipline, brief: i.brief, plan: i.plan,
-        overview: i.overview, verdicts: i.verdicts, sandbox: i.sandbox, feedback: i.feedback ?? "", hypotheses: rows(i) },
+        overview: i.overview, verdicts: i.verdicts, sandbox: i.sandbox, feedback: i.feedback ?? "", hypotheses: rows(i),
+        // Every round here ended since forking was possible, so each can be forked from.
+        forked: i.forked ?? null, roundEnds: Array.from({ length: i.rounds }, (_, k) => k + 1) },
       { type: "researchHypothesis", slug: i.slug, detail: showing ? detail(i, showing) : null },
     ];
   }
@@ -715,6 +718,37 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         showingPaper = null;
         litOf(slug).enabled = Boolean(command.literature);
         return sync();
+      }
+      case "researchFork": {
+        const from = find(command.slug);
+        const title = String(command.title ?? "").trim();
+        if (!from) return [{ type: "notice", level: "error", text: `No investigation ${command.slug}.` }];
+        if (!title) return [{ type: "notice", level: "error", text: "A fork needs a title." }];
+        const r = command.round ?? null;
+        if (r == null && roundOf(from.slug).status !== "idle") {
+          return [{ type: "notice", level: "warn", text: "A round is under way: fork from a round that has ended, or once this one has." }];
+        }
+        let slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "investigation";
+        for (let n = 2; find(slug); n++) slug = `${slug.replace(/-\d+$/, "")}-${n}`;
+        const within = (/** @type {number} */ n) => r == null || n <= r;
+        const after = r == null ? "as it stood" : `after round ${r}`;
+        const said = String(command.direction ?? "").trim();
+        const fork = {
+          ...structuredClone({ ...from, forked: undefined }), slug, title, created: Math.floor(Date.now() / 1000), rounds: r ?? from.rounds,
+          brief: `${from.brief.replace(`# ${from.title}`, `# ${title}`).trimEnd()}\n\n## Forked\n\nForked from *${from.title}* (\`${from.slug}\`) ${after}, to take another direction.\n`,
+          hypotheses: structuredClone(from.hypotheses.filter((h) => within(h.round))),
+          reviews: structuredClone(from.reviews.filter((v) => within(v.round ?? 1))),
+          matches: structuredClone(from.matches.filter((m) => within(m.round))),
+          feedback: `${from.feedback ?? "# Feedback\n"}${said ? `\n## On forking${r == null ? "" : `, after round ${r}`}\n\n${said}\n` : ""}`,
+          forked: { from: from.slug, title: from.title, round: r, at: Math.floor(Date.now() / 1000) },
+        };
+        investigations.unshift(fork);
+        open = slug;
+        showing = null;
+        watching = null;
+        showingRun = null;
+        showingPaper = null;
+        return [...sync(), { type: "notice", level: "info", text: `Forked “${from.title}”${r == null ? "" : ` after round ${r}`} as “${title}”.` }];
       }
       case "researchOpen":
         if (!find(command.slug)) return [{ type: "notice", level: "error", text: `No investigation ${command.slug}.` }];

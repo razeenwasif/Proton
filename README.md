@@ -132,7 +132,10 @@ it beside whatever else is there.
 Run round starts one — about fourteen agent calls, never more than twenty — and
 the Activity tab follows it call by call, each one opening into what it said;
 what you type goes to the team, `/h Title: statement` adds a hypothesis of
-your own, and `/p` with a DOI or an arXiv id adds a paper. The Literature tab
+your own, and `/p` with a DOI or an arXiv id adds a paper. Fork copies an
+investigation to take another direction — from the end of any round, or as it
+stands — with the direction you give as its team's first word; the copy says
+where it came from, and the original is left as it is. The Literature tab
 searches arXiv, Semantic Scholar and OpenAlex — told only your queries, never
 your files — and keeps each paper as `literature/P001.md`, with its open PDF
 beside it and out of Git. Each round searches it first, with the plan's or the
