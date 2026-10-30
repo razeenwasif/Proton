@@ -172,6 +172,11 @@ impl Tutor {
         if replay {
             message = format!("{}\n\n{message}", plan::earlier(&self.chat.turns, EARLIER));
         }
+        // The notes the last answer kept, by their ids, to write again.
+        let saved = plan::saved(self.chat.turns.last().map(|t| t.notes.as_slice()).unwrap_or_default());
+        if !saved.is_empty() {
+            message = format!("{saved}\n\n{message}");
+        }
         let conversation = self.conversation.as_mut().expect("just started");
         self.from = conversation.fold().items().len();
         // A lesson keeps its own title.
@@ -225,6 +230,8 @@ impl Tutor {
                     true => conversation.fold().outcome().map(|o| o.text.clone()).unwrap_or_default(),
                     false => answer,
                 };
+                // The notes it wrote are kept in the notebook, not in the answer.
+                let (answer, notes) = plan::notes_in(&answer);
                 let status = conversation.fold().status();
                 let turn = StudyTurn {
                     asked,
@@ -234,14 +241,18 @@ impl Tutor {
                     engine: conversation.engine().key().to_string(),
                     model: status.model.clone(),
                     error: error.clone().filter(|e| !e.is_empty()),
+                    notes: Vec::new(),
                 };
                 self.asking = None;
                 self.chat.turns.push(turn);
                 self.chat.updated = proton_study::now();
                 self.kept = true;
-                Some(Polled::Ended(book.write_chat(&self.chat).err()))
+                Some(Polled::Ended(book.write_chat(&self.chat).err(), notes))
             }
-            None => Some(Polled::Live(StudyLive { asked, steps, citations: cite::resolve(book, &answer), answer, thinking: thinking && items.iter().all(|i| !matches!(i, Item::Text { .. })) })),
+            None => {
+                let answer = plan::writing(&answer);
+                Some(Polled::Live(StudyLive { asked, steps, citations: cite::resolve(book, &answer), answer, thinking: thinking && items.iter().all(|i| !matches!(i, Item::Text { .. })) }))
+            }
         }
     }
 }
@@ -249,8 +260,9 @@ impl Tutor {
 /// What a look at the conversation found.
 pub enum Polled {
     Live(StudyLive),
-    /// The turn ended, and was kept — or could not be, and why.
-    Ended(Option<String>),
+    /// The turn ended, and was kept — or could not be, and why — with the
+    /// notes it wrote, to be kept in the notebook.
+    Ended(Option<String>, Vec<plan::NoteDraft>),
 }
 
 /// A tool call, as a step a student can follow.

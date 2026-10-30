@@ -1222,6 +1222,19 @@ there, or struck through when it names nothing in the notebook. A chat is kept
 as `chats/C001.json`, its citations as resolved when given; picked up again, or
 when its engine changes, a new conversation is told what was said.
 
+**Notes the tutor writes.** Asked for something to keep — a cheatsheet, a
+summary, a formula sheet — the tutor writes it in its answer between
+four-backtick fences opened ````` ````note Its title ````` (`proton-study::tutor::notes_in`).
+Every engine can, Antigravity included, since nothing is written by the
+engine: when the turn ends Proton takes each block out of the answer and
+keeps it with the code that keeps a note written by hand (`put_note`), as
+`notes/N004.md` with `from` naming the chat, a note that is a source read
+again. The turn records them (`StudyTurn.notes`) and draws each as a button
+that opens it; while the answer streams, a block is shown as “Writing the
+note…”. The next question tells the tutor the ids it was given, and a block
+opened ````` ````note N004 ````` writes that note again; an id that names no
+note makes a new one. A fence never closed keeps nothing.
+
 **The studio** makes things of the sources ticked, each by one unattended call
 to the engine the tutor is set to (`proton-core::study::jobs`): study guides,
 briefings, FAQs, glossaries, timelines and reports of one's own asking, as

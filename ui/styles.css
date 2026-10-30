@@ -4123,6 +4123,10 @@ button.st-source-name:hover { color: var(--cc-accent); }
   font: var(--z-sm)/1.55 var(--cc-font); color: var(--cc-text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .st-answer { font: var(--z-sm)/1.65 var(--cc-font); color: var(--cc-text); overflow-wrap: anywhere; }
 .st-turn-foot { display: flex; align-items: center; gap: 12px; font: var(--z-2xs)/1.3 var(--cc-font); }
+.st-made-note { display: flex; align-items: center; gap: 8px; width: 100%; margin: 6px 0 0; padding: 8px 10px; border: 1px solid var(--cc-line-2); border-radius: 8px; background: var(--cc-raise); color: var(--cc-text); font: var(--z-xs)/1.3 var(--cc-font); text-align: left; cursor: pointer; }
+.st-made-note:hover { border-color: var(--cc-accent); }
+.st-made-note .i { width: 15px; height: 15px; flex: none; color: var(--cc-accent); }
+.st-made-note-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .st-turn-error { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px;
   background: color-mix(in srgb, var(--err, #e5534b) 10%, transparent); color: var(--cc-text); font: var(--z-xs)/1.5 var(--cc-font); }
 .st-turn-error .i { width: 14px; height: 14px; color: var(--err, #e5534b); }

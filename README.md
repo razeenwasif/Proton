@@ -192,7 +192,8 @@ from their pictures; notes;
 and the tutor, which searches the sources you tick through Proton's own MCP
 server and cites them — each citation a number whose passage shows over it and
 opens at its place — as a plain tutor, a learning guide, or a role you write,
-in any language; a studio that makes study guides, briefings, FAQs, glossaries,
+in any language, and which writes notes when asked — a cheatsheet, a summary —
+kept in the notebook's notes for you to read and edit; a studio that makes study guides, briefings, FAQs, glossaries,
 timelines, mind maps, tables and learning objectives of the sources ticked,
 each citing them; flashcards, scheduled by FSRS so they are remembered by the
 exam, reviewed with the keys 1–4, and exported for Anki; and quizzes and

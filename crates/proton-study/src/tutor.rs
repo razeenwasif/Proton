@@ -82,6 +82,142 @@ pub struct StudyTurn {
     /// Why there is no answer, when the turn failed.
     #[serde(default)]
     pub error: Option<String>,
+    /// The notes it wrote, kept in the notebook.
+    #[serde(default)]
+    pub notes: Vec<StudyTurnNote>,
+}
+
+/// A note a tutor wrote in an answer, as the answer shows it once kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyTurnNote {
+    pub id: String,
+    pub title: String,
+    /// A note it had made before, written again.
+    pub updated: bool,
+}
+
+/// A note as a tutor wrote it: a new one, or one it made before, by its id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteDraft {
+    pub id: Option<String>,
+    pub title: String,
+    pub body: String,
+}
+
+/// A fence that opens a note: four backticks or more (three will do), or
+/// tildes, then `note`, then the note's id if it is one made before, then its
+/// title. What follows the fence's own characters is its info.
+fn opens_note(line: &str) -> Option<(String, Option<String>, String)> {
+    let t = line.trim_start();
+    let c = t.chars().next().filter(|c| *c == '`' || *c == '~')?;
+    let n = t.chars().take_while(|x| *x == c).count();
+    if n < 3 {
+        return None;
+    }
+    let info = t[n..].trim();
+    let rest = info.strip_prefix("note").or_else(|| info.strip_prefix("Note"))?;
+    if !(rest.is_empty() || rest.starts_with([' ', ':'])) {
+        return None;
+    }
+    let rest = rest.trim_start_matches(':').trim();
+    let (id, title) = match rest.split_once(char::is_whitespace) {
+        Some((first, more)) if is_note_id(first.trim_end_matches(':')) => (Some(first.trim_end_matches(':').to_string()), more.trim().trim_start_matches([':', '—', '-']).trim()),
+        _ if is_note_id(rest.trim_end_matches(':')) => (Some(rest.trim_end_matches(':').to_string()), ""),
+        _ => (None, rest),
+    };
+    Some((c.to_string().repeat(n), id, title.trim_matches('"').to_string()))
+}
+
+fn is_note_id(s: &str) -> bool {
+    s.strip_prefix('N').is_some_and(|d| d.len() >= 3 && d.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether a line closes a fence: its character, at least as many, alone.
+fn closes(line: &str, fence: &str) -> bool {
+    let t = line.trim();
+    let c = fence.chars().next().unwrap_or('`');
+    t.len() >= fence.len() && t.chars().all(|x| x == c)
+}
+
+/// The notes an answer wrote, and the answer without them. A note's title is
+/// its fence's, or its first heading's. A fence never closed is left as it
+/// was: a note half written is not kept.
+pub fn notes_in(answer: &str) -> (String, Vec<NoteDraft>) {
+    let lines: Vec<&str> = answer.lines().collect();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut notes = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some((fence, id, title)) = opens_note(lines[i]) {
+            if let Some(end) = (i + 1..lines.len()).find(|&j| closes(lines[j], &fence)) {
+                let body = lines[i + 1..end].join("\n").trim().to_string();
+                let title = match title.trim() {
+                    "" => body.lines().map(|l| l.trim_start_matches('#').trim()).find(|l| !l.is_empty()).unwrap_or("A note").chars().take(80).collect(),
+                    t => t.to_string(),
+                };
+                if !body.is_empty() || id.is_some() {
+                    notes.push(NoteDraft { id, title, body });
+                }
+                i = end + 1;
+                continue;
+            }
+        }
+        kept.push(lines[i]);
+        i += 1;
+    }
+    let text = kept.join("\n");
+    // Where a note stood, no gap of blank lines is left behind.
+    let mut out = String::new();
+    let mut blank = 0;
+    for line in text.lines() {
+        blank = if line.trim().is_empty() { blank + 1 } else { 0 };
+        if blank < 2 {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    (out.trim().to_string(), notes)
+}
+
+/// An answer as it comes in: a note it has written shown by its title, and
+/// one it is writing said to be on its way, rather than its Markdown.
+pub fn writing(answer: &str) -> String {
+    let lines: Vec<&str> = answer.lines().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some((fence, _, title)) = opens_note(lines[i]) {
+            let named = if title.is_empty() { "a note".to_string() } else { format!("the note “{title}”") };
+            match (i + 1..lines.len()).find(|&j| closes(lines[j], &fence)) {
+                Some(end) => {
+                    out.push(format!("_Wrote {named}._"));
+                    i = end + 1;
+                }
+                None => {
+                    out.push(format!("_Writing {named}…_"));
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push(lines[i].to_string());
+        i += 1;
+    }
+    out.join("\n")
+}
+
+/// What a tutor is told of the notes the last answer kept, so it can write
+/// one of them again by its id.
+pub fn saved(notes: &[StudyTurnNote]) -> String {
+    match notes {
+        [] => String::new(),
+        notes => format!(
+            "(Proton kept the notes from your last answer: {}. To change one, write it again with its id.)",
+            notes.iter().map(|n| format!("{} “{}”", n.id, n.title)).collect::<Vec<_>>().join(", ")
+        ),
+    }
 }
 
 /// A chat: `chats/C001.json`.
@@ -213,7 +349,11 @@ pub fn instructions(notebook: &Notebook, settings: &TutorSettings, grounding: Gr
          this\" — and only then, if it helps, add what is generally known, marked as not from the sources.\n- Write mathematics in TeX: $…$ inline, \
          $$…$$ on lines of its own.\n- Write for a student preparing for an exam: clear and exact, no longer than the question needs, in Markdown.\n- \
          Worked solutions in the notebook are for checking an answer, not for giving one away: when the student is practising, hint before you \
-         reveal.{length}{language}"
+         reveal.\n- When the student asks you to make something to keep — a cheatsheet, a summary, a formula sheet, revision notes — write it as a \
+         note: in your answer, between a line ````note Its title and a line ````, four backticks each so code inside it keeps its own fences. \
+         Proton saves it in the notebook's notes, where the student can read and edit it, so do not paste it again outside the block; say in a \
+         sentence what you made. Write the note in Markdown, citing as in any answer. To change a note you made, open the block with its id: \
+         ````note N004 Its title.{length}{language}"
     )
 }
 
@@ -287,7 +427,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let book = Folder::new(root).create("Search", 1).unwrap();
         assert_eq!(book.new_chat_id(), "C001");
-        let turn = StudyTurn { asked: "Why is UCS optimal?".into(), answer: "Because [[S01 p. 1]].".into(), citations: Vec::new(), at: 5, engine: "claude".into(), model: "m".into(), error: None };
+        let turn = StudyTurn { asked: "Why is UCS optimal?".into(), answer: "Because [[S01 p. 1]].".into(), citations: Vec::new(), at: 5, engine: "claude".into(), model: "m".into(), error: None, notes: Vec::new() };
         for (id, updated) in [("C001", 10), ("C002", 20)] {
             book.write_chat(&Chat { id: id.into(), title: title(&turn.asked), created: 1, updated, settings: TutorSettings::default(), turns: vec![turn.clone()], lesson: None }).unwrap();
         }
@@ -299,10 +439,41 @@ mod tests {
 
     #[test]
     fn the_chat_so_far_is_told_newest_kept() {
-        let turn = |n: usize| StudyTurn { asked: format!("question {n}"), answer: "x".repeat(400), citations: Vec::new(), at: 0, engine: String::new(), model: String::new(), error: None };
+        let turn = |n: usize| StudyTurn { asked: format!("question {n}"), answer: "x".repeat(400), citations: Vec::new(), at: 0, engine: String::new(), model: String::new(), error: None, notes: Vec::new() };
         let told = earlier(&[turn(1), turn(2), turn(3)], 900);
         assert!(told.contains("question 3") && told.contains("question 2") && !told.contains("question 1"), "{told}");
         assert_eq!(earlier(&[], 900), "");
         assert_eq!(title("  \nWhy is uniform-cost search optimal when step costs are positive?"), "Why is uniform-cost search optimal when step costs are positive?");
+    }
+
+    #[test]
+    fn a_note_in_an_answer_is_taken_out_whole_with_its_code_and_its_title() {
+        let answer = "Here is your cheatsheet.\n\n````note Graph search cheatsheet\n## Uniform cost\n\nExpands the cheapest node [[S01 p. 3]].\n\n```python\nheapq.heappush(q, (g, n))\n```\n````\n\nAsk if you want more.";
+        let (text, notes) = notes_in(answer);
+        assert_eq!(text, "Here is your cheatsheet.\n\nAsk if you want more.");
+        assert_eq!(notes.len(), 1);
+        assert_eq!((notes[0].id.as_deref(), notes[0].title.as_str()), (None, "Graph search cheatsheet"));
+        assert!(notes[0].body.starts_with("## Uniform cost") && notes[0].body.ends_with("heapq.heappush(q, (g, n))\n```"), "{}", notes[0].body);
+        // One made before, by its id; a title from its heading; tildes.
+        let (_, notes) = notes_in("~~~note N004\n# Formulas\n$a^2$\n~~~\n````Note: N012 — Revised\nx\n````");
+        assert_eq!(notes.iter().map(|n| (n.id.as_deref(), n.title.as_str())).collect::<Vec<_>>(), [(Some("N004"), "Formulas"), (Some("N012"), "Revised")]);
+        // A code block that is not a note stays, and so does a note never closed.
+        let plain = "```python\nprint(1)\n```\n````note Half\nunfinished";
+        let (text, notes) = notes_in(plain);
+        assert!(notes.is_empty());
+        assert_eq!(text, plain);
+        assert!(notes_in("```notebook\nx\n```").1.is_empty(), "a word starting with note is not a note");
+    }
+
+    #[test]
+    fn a_note_on_its_way_is_said_to_be_rather_than_shown() {
+        assert_eq!(writing("Making it.\n\n````note Sheet\n## A\nsome"), "Making it.\n\n_Writing the note “Sheet”…_");
+        assert_eq!(writing("````note Sheet\nx\n````\nDone."), "_Wrote the note “Sheet”._\nDone.");
+        assert_eq!(writing("No note here."), "No note here.");
+        let said = saved(&[StudyTurnNote { id: "N004".into(), title: "Sheet".into(), updated: false }]);
+        assert!(said.contains("N004 “Sheet”"), "{said}");
+        assert_eq!(saved(&[]), "");
+        let told = instructions(&Notebook { title: "AI".into(), course: String::new(), exam: None, created: 0, opened: 0, archived: false, tutor: TutorSettings::default() }, &TutorSettings::default(), Grounding::Tools);
+        assert!(told.contains("````note Its title") && told.contains("````note N004"), "{told}");
     }
 }

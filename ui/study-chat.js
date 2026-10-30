@@ -134,7 +134,11 @@ export function createChat(host) {
       : `<div class="st-answer md" data-turn="${i}">${answerHtml(turn.answer, turn.citations)}</div>`;
     const keep = host.readOnly() || !turn.answer ? "" : `<button class="st-link" data-study-keep="${i}" title="Keep this answer as a note">Keep as a note</button>`;
     const by = [engineName(turn.engine), turn.model].filter(Boolean).join(" · ");
-    return `<div class="st-turn"><div class="st-asked">${esc(turn.asked)}</div>${body}` +
+    // The notes it wrote, kept in the notebook: each opens where notes do.
+    const notes = (turn.notes ?? []).map((n) => `<button class="st-made-note" data-study-show-note="${esc(n.id)}" title="Open the note">` +
+      `${icon("file-doc")}<span class="st-made-note-title">${esc(n.title)}</span>` +
+      `<span class="st-faint">${n.updated ? "written again" : "kept as a note"} · ${esc(n.id)}</span></button>`).join("");
+    return `<div class="st-turn"><div class="st-asked">${esc(turn.asked)}</div>${turn.answer || !notes ? body : ""}${notes}` +
       `<div class="st-turn-foot"><span class="st-faint">${esc(by)}</span>${keep}</div></div>`;
   }
 
@@ -308,6 +312,12 @@ export function createChat(host) {
       return true;
     }
     if (!root?.contains(t)) return false;
+    // A note an answer kept, opened where notes are.
+    const note = at("[data-study-show-note]");
+    if (note) {
+      host.dispatch({ type: "studyShowNote", id: note.dataset.studyShowNote });
+      return true;
+    }
     const menu = at("[data-study-menu]");
     if (menu) {
       const which = menu.dataset.studyMenu ?? null;

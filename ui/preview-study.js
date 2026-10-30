@@ -423,8 +423,22 @@ export function createStudyPreview(deliver) {
     setTimeout(() => live({ steps: steps.slice(0, 1), thinking: true }), 300);
     setTimeout(() => live({ steps }), 800);
     setTimeout(() => live({ steps, answer: text.slice(0, 60), citations: [] }), 1300);
+    // Asked for a cheatsheet, it writes one, kept as a note as the app keeps it.
+    const sheet = /cheat ?sheet|summary|notes? on/i.test(asked);
+    if (sheet) setTimeout(() => live({ steps, answer: "Here is a cheatsheet on search.\n\n_Writing the note “Search cheatsheet”…_" }), 1500);
     setTimeout(() => {
-      state.chat.turns.push({ asked, answer: text, citations: cites, at: Math.floor(Date.now() / 1000), engine: state.chat.settings.engine || "claude", model: "claude-sonnet-5-5", error: null });
+      /** @type {any[]} */
+      let made = [];
+      if (sheet) {
+        const notes = (state.notes[state.open ?? ""] ??= []);
+        const id = `N${String(notes.length + 1).padStart(3, "0")}`;
+        notes.push({ id, title: "Search cheatsheet", updated: Math.floor(Date.now() / 1000), source: null,
+          body: "## Uniform cost\n\nExpands the cheapest node first [[S02 § Search › Uniform cost L40-58]].\n\n## A*\n\n$f(n) = g(n) + h(n)$, optimal when $h$ is admissible." });
+        made = [{ id, title: "Search cheatsheet", updated: false }];
+        deliver(notebookEvent());
+      }
+      state.chat.turns.push({ asked, answer: sheet ? "Here is a cheatsheet on search, kept in your notes." : text, citations: sheet ? [] : cites,
+        at: Math.floor(Date.now() / 1000), engine: state.chat.settings.engine || "claude", model: "claude-sonnet-5-5", error: null, notes: made });
       state.chat.busy = false;
       deliver(chatEvent());
     }, 1900);

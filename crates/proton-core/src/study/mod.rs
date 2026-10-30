@@ -1737,8 +1737,9 @@ impl Study {
         match tutor.poll(&open.book) {
             None => Vec::new(),
             Some(Polled::Live(live)) => vec![Event::StudyChatLive { id: tutor.chat.id.clone(), live }],
-            Some(Polled::Ended(failed)) => {
-                let mut events: Vec<Event> = self.chat_event().into_iter().collect();
+            Some(Polled::Ended(failed, notes)) => {
+                let mut events = self.keep_tutor_notes(notes);
+                events.extend(self.chat_event());
                 events.extend(failed.map(|why| notice(format!("The chat could not be kept: {why}"), NoticeLevel::Error)));
                 events
             }
@@ -2225,10 +2226,19 @@ impl Study {
     /// Write a note, new or not. A note that is a source is read again, so
     /// what the tutor reads is what was written.
     fn write_note(&mut self, id: Option<String>, title: &str, body: &str) -> Vec<Event> {
-        let book = match self.writable() {
-            Ok(book) => book,
+        let note = match self.put_note(id, title, body, None) {
+            Ok(note) => note,
             Err(events) => return events,
         };
+        let mut events = self.saved();
+        events.extend(self.note_event(&note.id));
+        events
+    }
+
+    /// A note written: new — given no id, or one no note has — or written
+    /// again, its source's words kept again if it is one. Not yet saved.
+    fn put_note(&mut self, id: Option<String>, title: &str, body: &str, from: Option<String>) -> Result<Note, Vec<Event>> {
+        let book = self.writable()?;
         let now = proton_study::now();
         let title = match title.trim() {
             "" => body.lines().map(|l| l.trim_start_matches('#').trim()).find(|l| !l.is_empty()).unwrap_or("Untitled note").chars().take(80).collect(),
@@ -2241,10 +2251,10 @@ impl Study {
                 note.updated = now;
                 note
             }
-            None => Note { id: book.new_note_id(), title, created: now, updated: now, from: None, body: body.trim_end().to_string() },
+            None => Note { id: book.new_note_id(), title, created: now, updated: now, from, body: body.trim_end().to_string() },
         };
         if let Err(why) = book.write_note(&note) {
-            return vec![notice(why, NoticeLevel::Error)];
+            return Err(vec![notice(why, NoticeLevel::Error)]);
         }
         // A note that is a source: its words, kept again.
         let snapshots = book.snapshots();
@@ -2257,9 +2267,39 @@ impl Study {
                 source.mtime = now;
             }
         }
-        let id = note.id.clone();
-        let mut events = self.saved();
-        events.extend(self.note_event(&id));
+        Ok(note)
+    }
+
+    /// Keep the notes a tutor's answer wrote, and say on its turn which they
+    /// are: one it names that is not there is made new.
+    fn keep_tutor_notes(&mut self, drafts: Vec<proton_study::tutor::NoteDraft>) -> Vec<Event> {
+        let Some(chat) = self.tutor.as_ref().map(|t| t.chat.id.clone()) else { return Vec::new() };
+        let mut kept = Vec::new();
+        let mut events = Vec::new();
+        for draft in drafts {
+            let before = draft.id.as_deref().and_then(|id| self.open.as_ref()?.book.note(id)).is_some();
+            match self.put_note(draft.id, &draft.title, &draft.body, Some(chat.clone())) {
+                Ok(note) => kept.push(proton_study::tutor::StudyTurnNote { id: note.id, title: note.title, updated: before }),
+                Err(why) => events.extend(why),
+            }
+        }
+        if kept.is_empty() {
+            return events;
+        }
+        events.extend(self.saved());
+        let said = match kept.as_slice() {
+            [one] => format!("{} the note “{}” ({}).", if one.updated { "Wrote again" } else { "Kept" }, one.title, one.id),
+            many => format!("Kept {} notes: {}.", many.len(), many.iter().map(|n| format!("“{}”", n.title)).collect::<Vec<_>>().join(", ")),
+        };
+        events.push(notice(said, NoticeLevel::Info));
+        if let (Some(open), Some(tutor)) = (&self.open, &mut self.tutor) {
+            if let Some(turn) = tutor.chat.turns.last_mut() {
+                turn.notes = kept;
+            }
+            if let Err(why) = open.book.write_chat(&tutor.chat) {
+                events.push(notice(format!("The chat could not be kept: {why}"), NoticeLevel::Error));
+            }
+        }
         events
     }
 

@@ -875,6 +875,66 @@ fn the_tutor_answers_from_the_sources_cites_them_and_keeps_the_chat() {
 }
 
 #[test]
+fn a_cheatsheet_the_tutor_writes_is_kept_as_a_note_and_written_again_by_its_id() {
+    let scratch = Scratch::new("tutor-notes");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, Some(scratch.root.join("bin/proton-mcp")), &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(()),
+        _ => None,
+    });
+    {
+        let mut log = log.lock().unwrap();
+        log.answers.push_back("Here is your cheatsheet — it covers uniform cost.\n\n````note Search cheatsheet\n## Uniform cost\n\nCheapest first [[S01 § Search L1-2]].\n\n```python\nheapq.heappush(q, (g, n))\n```\n````".into());
+        log.answers.push_back("Added A* — see the note.\n\n````note N001 Search cheatsheet\n## Uniform cost\n\nCheapest first.\n\n## A*\n\nf = g + h.\n````".into());
+    }
+    session.apply(Command::StudyAsk { text: "Make me a cheatsheet on search".into() });
+    // On its way, the note is said to be coming rather than shown.
+    let live = until(&mut session, |e| match e {
+        Event::StudyChatLive { live, .. } if !live.answer.is_empty() => Some(live.answer.clone()),
+        _ => None,
+    });
+    assert!(!live.contains("````"), "{live}");
+    let mut notebook = None;
+    let turns = until(&mut session, |e| {
+        if let Event::StudyNotebook { notes, .. } = e {
+            notebook = Some(notes.clone());
+        }
+        match e {
+            Event::StudyChat { turns, busy: false, .. } if turns.len() == 1 && !turns[0].notes.is_empty() => Some(turns.clone()),
+            _ => None,
+        }
+    });
+    assert_eq!(turns[0].answer, "Here is your cheatsheet — it covers uniform cost.");
+    assert_eq!((turns[0].notes[0].id.as_str(), turns[0].notes[0].title.as_str(), turns[0].notes[0].updated), ("N001", "Search cheatsheet", false));
+    assert!(notebook.is_some_and(|notes| notes.iter().any(|n| n.id == "N001")), "the notes list was not drawn again");
+    let note = std::fs::read_to_string(scratch.root.join("Notebooks/search/notes/N001.md")).unwrap();
+    assert!(note.contains("title = \"Search cheatsheet\"") && note.contains("from = \"C001\"") && note.contains("```python\nheapq.heappush"), "{note}");
+    assert!(note.contains("[[S01 § Search L1-2]]"));
+
+    // Asked again: told the note's id, and the note written again by it.
+    session.apply(Command::StudyAsk { text: "Add A*".into() });
+    assert!(log.lock().unwrap().sent[1].starts_with("(Proton kept the notes from your last answer: N001 “Search cheatsheet”."), "{}", log.lock().unwrap().sent[1]);
+    let turns = until(&mut session, |e| match e {
+        Event::StudyChat { turns, busy: false, .. } if turns.len() == 2 && !turns[1].notes.is_empty() => Some(turns.clone()),
+        _ => None,
+    });
+    assert_eq!((turns[1].notes[0].id.as_str(), turns[1].notes[0].updated), ("N001", true));
+    let note = std::fs::read_to_string(scratch.root.join("Notebooks/search/notes/N001.md")).unwrap();
+    assert!(note.contains("## A*") && !scratch.root.join("Notebooks/search/notes/N002.md").exists(), "{note}");
+    // Kept with the chat, as the window will draw it next time.
+    let kept = std::fs::read_to_string(scratch.root.join("Notebooks/search/chats/C001.json")).unwrap();
+    assert!(kept.contains("\"notes\"") && kept.contains("N001"), "{kept}");
+    session.shutdown();
+}
+
+#[test]
 fn with_no_server_every_engine_is_given_passages() {
     let scratch = Scratch::new("tutor-passages");
     let settings = scratch.knowledge_base();

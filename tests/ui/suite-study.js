@@ -421,6 +421,24 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     turns: [turn('Why is UCS optimal?', 'It orders by cost [[S01 p. 3]], unlike [[S01 p. 99]].', [cite(1, 'S01 p. 3'), cite(2, 'S01 p. 99', false)])],
     live: null, busy: false, error: null, grounding: 'tools', chats: [{id: 'C001', title: 'Why is UCS optimal?', updated: 1, turns: 1}], ...more});
 
+  await test('A note the tutor wrote shows on its answer, and opens where notes do', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    const made = {...turn('Make me a cheatsheet on search', 'Here is your cheatsheet.', []), notes: [{id: 'N004', title: 'Search cheatsheet', updated: false}]};
+    const again = {...turn('Add A*', '', []), notes: [{id: 'N004', title: 'Search cheatsheet', updated: true}]};
+    await win.pushEvents([notebook([row('S01')]), chatEvent({turns: [made, again]})]); await settle();
+    ws().querySelector('[data-study-view="chat"]')?.click(); await settle();
+    const notes = [...ws().querySelectorAll('.st-made-note')];
+    assert(notes.length === 2, `wrong notes: ${notes.length}`);
+    assert(notes[0].textContent.includes('Search cheatsheet') && notes[0].textContent.includes('kept as a note · N004'), notes[0].textContent);
+    assert(notes[1].textContent.includes('written again'), notes[1].textContent);
+    // An answer that was only its note draws no empty answer above it.
+    const second = notes[1].closest('.st-turn');
+    assert(!second.querySelector('.st-answer'), 'an empty answer was drawn');
+    const before = win.commands.length;
+    notes[0].click(); await settle();
+    assert(sent(before, 'studyShowNote')[0]?.id === 'N004', 'the note did not open');
+  });
+
   await test('The tutor\'s answers draw their citations as chips: over one, its passage; clicked, the source at that place', async () => {
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), chatEvent()]); await settle();
