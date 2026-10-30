@@ -159,6 +159,35 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     assert(answer().textContent.includes('f is not declared'), 'another file\'s answer was shown');
   });
 
+  await test('An argument shows its tableau, branch by branch, and a countermodel when it fails', async () => {
+    const base = {...IMPLIES, generation: 4, line: 3, kind: 'argument', forms: [], column: null, sopTerms: [], posTerms: [], status: null, models: null, atoms: [], columns: [],
+      open: [], counter: null, proofNote: 'closed with 1 free variable on a branch at most'};
+    const tableau = {lines: [{n: 1, text: 'all x: man(x) -> mortal(x)', why: 'premise'}, {n: 2, text: 'man(socrates)', why: 'premise'},
+      {n: 3, text: 'not mortal(socrates)', why: 'conclusion denied'}, {n: 4, text: 'man(socrates) -> mortal(socrates)', why: '1, γ'}], closed: null, open: false,
+      split: [{lines: [{n: 5, text: 'not man(socrates)', why: '4, →'}], closed: [2, 5], open: false, split: []}, {lines: [{n: 6, text: 'mortal(socrates)', why: '4, →'}], closed: [3, 6], open: false, split: []}]};
+    await win.pushEvents([{type: 'logicAnswer', answer: {...base, valid: true, tableau}}]); await settle();
+    assert(answer().querySelector('.lg-verdict.good')?.textContent.includes('Valid'), 'a proved argument is not said valid');
+    const ends = [...answer().querySelectorAll('.lg-tab-end')].map((e) => e.textContent.trim());
+    assert(ends.join('|') === '× 2, 5|× 3, 6', `the branches' ends are not drawn: ${ends.join('|')}`);
+    assert(answer().querySelectorAll('.lg-tab-split > .lg-tab').length === 2 && answer().textContent.includes('1, γ'), 'the split, or where a line came from, is not drawn');
+    assert(answer().textContent.includes('closed with 1 free variable'), 'the prover\'s note is not said');
+    // Refuted: a countermodel of two individuals.
+    const counter = {sizes: [['individual', 2]], tables: [{name: 'P', shape: 'row', rows: [], cols: ['individual1', 'individual2'], cells: [['true', 'false']]}]};
+    await win.pushEvents([{type: 'logicAnswer', answer: {...base, valid: false, tableau: null, counter, proofNote: 'no proof with up to 12 free variables on a branch'}}]); await settle();
+    assert(answer().querySelector('.lg-verdict.bad')?.textContent.includes('Not valid') && answer().textContent.includes('A countermodel'), 'a refuted argument is not said so');
+    assert(answer().textContent.includes('2 individuals') && answer().querySelector('.lg-model-table td.v1'), 'the countermodel is not shown');
+    // Neither: said, and it can try longer.
+    await win.pushEvents([{type: 'logicAnswer', answer: {...base, valid: null, tableau: null, more: true, proofNote: 'no proof found in the time'}}]); await settle();
+    assert(answer().textContent.includes('Not decided'), 'an undecided argument is not said so');
+    const before = win.commands.length;
+    answer().querySelector('[data-logic-more]').click(); await settle();
+    assert(sent(before, 'logicAsk')[0]?.more === true, 'Try harder did not ask again');
+    // A propositional argument's open branch.
+    const open = {lines: [{n: 1, text: 'q', why: 'premise'}], closed: null, open: true, split: []};
+    await win.pushEvents([{type: 'logicAnswer', answer: {...base, valid: false, tableau: open, open: [['p', false], ['q', true]], counter: null}}]); await settle();
+    assert(answer().querySelector('.lg-tab-end.open') && answer().textContent.includes('An open branch'), 'an open branch is not drawn and read');
+  });
+
   await test('A truth table typed in is read back as formulas', async () => {
     const before = win.commands.length;
     const details = answer().querySelector('.lg-from');

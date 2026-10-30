@@ -18,6 +18,7 @@ import { drawKmap } from "./kmap.js";
 /** @typedef {import("./bindings/LogicAnswerView").LogicAnswerView} Answer */
 /** @typedef {import("./bindings/LogicModelsView").LogicModelsView} Models */
 /** @typedef {import("./bindings/LogicTableView").LogicTableView} Table */
+/** @typedef {import("./bindings/LogicTabView").LogicTabView} Tab */
 
 /** No more rows of a truth table than this are drawn. */
 const MOST_ROWS = 256;
@@ -256,6 +257,17 @@ export function createLogic(host) {
       t.cells.map((line) => `<tr>${line.slice(0, -1).map((v) => `<td>${esc(v)}</td>`).join("")}<td class="sep"></td>${cell(line[line.length - 1])}</tr>`).join("") + `</tbody></table></div></div>`;
   }
 
+  /** A tableau's branch: its lines, then closed, open, or split in two.
+   *  @param {Tab} t @returns {string} */
+  function tabHtml(t) {
+    const lines = t.lines.map((l) => `<li><span class="lg-tab-n">${l.n}</span><code>${esc(l.text)}</code><span class="lg-tab-why">${esc(l.why)}</span></li>`).join("");
+    /** @type {string} */
+    const end = t.closed ? `<div class="lg-tab-end closed" title="Lines ${t.closed[0]} and ${t.closed[1]} contradict each other">× ${t.closed[0] === t.closed[1] ? t.closed[0] : `${t.closed[0]}, ${t.closed[1]}`}</div>`
+      : t.open ? `<div class="lg-tab-end open" title="Nothing on this branch contradicts: a countermodel">○ open</div>`
+      : `<div class="lg-tab-split">${t.split.map((b) => `<div class="lg-tab">${tabHtml(b)}</div>`).join("")}</div>`;
+    return `<ol class="lg-tab-lines">${lines}</ol>${end}`;
+  }
+
   function modelsHtml() {
     const m = state.models;
     if (!m) return `<p class="lg-hint">A theory — sorts, what is named, and what is true of them — has its models found here: <kbd>⌘⇧↩</kbd>, or the search button above.</p>`;
@@ -351,10 +363,19 @@ export function createLogic(host) {
       const n = a.atoms.length, cols = a.columns;
       // A counterexample row: every premise true and the conclusion false.
       const counter = (/** @type {number} */ r) => cols.length > 0 && cols.slice(0, -1).every((c) => c.values[r] === "1") && cols[cols.length - 1].values[r] === "0";
-      body = `<p class="lg-said"><code>${esc(a.text)}</code></p>` +
-        (a.valid ? head("good", `${icon("check")}Valid: the conclusion is true wherever the premises are`)
-          : head("bad", `Not valid`) + (a.countermodel ? `<p class="lg-rows">A counterexample: ${rowWords(a.atoms, a.countermodel)} — the premises true, the conclusion false.</p>` : "")) +
-        tableHtml(a, counter) + (n > 16 ? "" : "");
+      const verdict = a.valid === true ? head("good", `${icon("check")}Valid: the conclusion is true wherever the premises are`)
+        : a.valid === false ? head("bad", "Not valid")
+        : head("", "Not decided: neither a proof nor a countermodel was found");
+      // What makes it fail: a row of the table, an open branch, or a model.
+      const why = a.valid !== false ? ""
+        : a.countermodel ? `<p class="lg-rows">A counterexample: ${rowWords(a.atoms, a.countermodel)} — the premises true, the conclusion false.</p>`
+        : a.open.length ? `<p class="lg-rows">An open branch: ${a.open.map(([p, v]) => `<code>${esc(p)}</code> ${v ? "true" : "false"}`).join(", ")}.</p>`
+        : a.counter ? `<p class="lg-rows">A countermodel: the premises true and the conclusion false in this one.</p>${a.counter.sizes.length ? `<p class="lg-faint">${a.counter.sizes.map(([s, k]) => `${k} ${esc(s)}${k === 1 ? "" : "s"}`).join(", ")}</p>` : ""}${a.counter.tables.map(tableOfValues).join("")}`
+        : "";
+      const note = a.proofNote ? `<p class="lg-faint">${esc(a.proofNote)}.</p>` : "";
+      const harder = a.more ? `<button class="cc-quiet" data-logic-more title="Up to ten seconds">Try harder</button>` : "";
+      body = `<p class="lg-said"><code>${esc(a.text)}</code></p>` + verdict + why + (n > 0 ? tableHtml(a, counter) : "") +
+        (a.tableau ? `<h3>Tableau</h3><div class="lg-tab-wrap">${tabHtml(a.tableau)}</div>` : "") + note + harder;
     } else if (a.kind === "same") {
       const differ = (/** @type {number} */ r) => a.columns.length === 2 && a.columns[0].values[r] !== a.columns[1].values[r];
       body = `<p class="lg-said"><code>${esc(a.text)}</code></p>` +

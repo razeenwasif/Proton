@@ -313,6 +313,32 @@ Logic4Fun's text as in Proton's, and a file using the language at large —
 sizes from other sorts, cardinality ranges, aliases, EST, MIN and MAX, SUCC,
 NOT, XOR, IMP and IFF both ways, clause form with `;`, a predicate between
 its arguments, constants — has the models worked out by hand.
+L5 — semantic tableaux (`tableau`). An argument's premises and its
+conclusion denied are expanded by Smullyan's rules, the cheapest first —
+literals, then the α rules and existentials, then the β splits, then
+universals — and a branch closes on two literals that contradict. First-
+order: a universal is instantiated with a new free variable and put back to
+be used again; an existential with a Skolem function of the branch's free
+variables; literals close by unification, and one substitution must close
+every branch, so the search goes back over its choices with a bound on free
+variables raised from 1 to 12 — leanTAP's plan, written from the method.
+A propositional argument that fails is expanded whole and its open branch
+read as a countermodel; a first-order one has a countermodel of up to four
+individuals found by the model finder, which knows equality: so `=` and `<`,
+which the prover takes as plain predicates, never make it wrong — a proof
+that needs equality's rules is "not decided", not refuted. A worksheet's
+undeclared functions and predicates are loose — of one sort, individuals —
+so `? all x: man(x) -> mortal(x), man(socrates) |= mortal(socrates)` needs
+no declarations; in a file that declares anything, an undeclared name is
+still a mistake, and `=` between two undeclared names is "if and only if"
+only when neither is anything's argument. In the window, an argument shows
+its verdict (valid, not valid, or not decided, with Try harder for ten
+seconds), its table when it is propositional, its countermodel — a row, an
+open branch, or a model's tables — and its tableau drawn as a tree, each
+line numbered with where it came from and each branch closed (× and the two
+lines) or open (○). Checked on modus ponens line by line, the textbook's
+propositional arguments, Barbara, both quantifier swaps, the drinker,
+Pelletier's 20 and 26, and countermodels checked by the evaluator.
 
 | | What | Proved by |
 |---|---|---|
