@@ -3,13 +3,14 @@
 # Proton
 
 A code editor that is also a chat client, a data notebook, a research
-workbench, a study notebook, a spreadsheet and a logic simulator — one window, seven modes, a shared Vim-style
+workbench, a study notebook, a spreadsheet, a logic simulator and a logic
+workbench — one window, eight modes, a shared Vim-style
 modal engine underneath all of them, and an agent that can act in any of them.
 
 Every mode in the window reads and writes a real document: the editor,
 Telescope and language servers, the agent, the Code Visualizer, the plugin
 host, Data's notebooks, Research's investigations, Notebook's sources,
-Excel's workbooks and Circuit's projects all ship. The creative modes that were here — Design, Model, Game, Canvas, Diffuse
+Excel's workbooks, Circuit's projects and Logic's files all ship. The creative modes that were here — Design, Model, Game, Canvas, Diffuse
 and Video — moved to an app of their own in October 2026, and LaTeX and the
 Reader to Quark.
 
@@ -60,14 +61,14 @@ collision is why the mode chord is `⌃`.
 | `crates/proton-trace/` | The Code Visualizer client |
 | `crates/proton-shell/` | The Tauri v2 desktop shell and the IPC bridge |
 | `brand/` | App icon — SVG master, PNGs 16→1024, `proton.ico`, and the monochrome mark. [Details](brand/README.md) |
-| `ui/` | The front end — the app's real chrome, and the interactive prototype — all seven modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
+| `ui/` | The front end — the app's real chrome, and the interactive prototype — all eight modes, six live-switchable themes, the AI dock, Telescope, which-key, settings, and the Code Visualizer pane |
 | `design/DESIGN.md` | The design system, the mode-by-mode spec, and which reference each idea came from |
 | `docs/ARCHITECTURE.md` | The build document — crate layout, the core/UI seam, the mode contract, milestones |
 | `docs/STACK.md` | Language, renderer, parser, plugin runtime — what is settled and what is still a real decision |
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The seven modes
+## The eight modes
 
 Every mode keeps projects of its own: the folder open in Codex is not
 carried into Data, Research or any other, and going back to a mode brings
@@ -254,6 +255,24 @@ analyses circuits with its circuit tools, `@circuit` sends the circuit on
 screen, and Notebook makes circuit practice from your sources, each problem
 built and checked by the simulator before you see it. Edits are held until
 ⌘S.
+
+**Logic** · on ⌃8, a calculator after
+[logic-calculator.com](https://logic-calculator.com/) and a model finder
+after John Slaney's [Logic for Fun](https://logic4fun.comp.anu.edu.au/), with
+proofs. A `.logic` file is a worksheet or a theory in Proton's language, a
+`.l4f` file Logic4Fun's, and a `.proof` file a proof; all are text. The line at
+the cursor is answered as you type: a formula's truth table, whether it is a
+tautology, its normal forms, least sum of products and Karnaugh map; an
+argument's validity, with a countermodel or its semantic tableau drawn; two
+formulas' equivalence. A theory's models are found and counted
+(`crates/proton-logic`, eight queens' 92 in 16 ms), and when there is none,
+the fewest lines that cannot all hold are marked. Proofs in natural
+deduction (Fitch), the sequent calculus and resolution are checked line by
+line, each mistake named, and found by Proton — always for propositional
+logic. A formula's table can be built in Circuit. The agent asks, solves,
+proves and writes with its logic tools, `@logic` sends the file and the line
+at the cursor, and Notebook makes logic practice, each problem checked by
+the engine before you see it. Edits are held until ⌘S.
 
 ## The three things that hold it together
 

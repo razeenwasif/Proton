@@ -1074,6 +1074,145 @@ impl Finder {
         None
     }
 
+    /// The goal by cases on each proposition in turn — `p ∨ ¬p` proved,
+    /// then a subproof assuming each side — and, every one decided, by the
+    /// search as before. What the search alone misses (nested
+    /// biconditionals) is found this way, so a propositional argument that
+    /// holds always has a proof found. Its cases' ends are made by
+    /// [`decide`](Finder::decide), not searched for.
+    fn by_cases(&mut self, had: &Had, goal: &Expr, atoms: &[String], depth: usize) -> Option<usize> {
+        let Some((p, rest)) = atoms.split_first() else {
+            // Every proposition decided: the goal is true here, or a
+            // premise is false and anything follows.
+            let mark = self.lines.len();
+            match self.decide(had, goal, depth) {
+                Some((n, true)) => return Some(n),
+                Some((_, false)) => self.lines.truncate(mark),
+                None => return None,
+            }
+            for (f, n) in had.clone() {
+                let m = self.lines.len();
+                if let Some((z, false)) = self.decide(had, &f, depth) {
+                    let x = self.push(depth, Expr::Bool(false), Rule::NotE, vec![Cite::Line(n), Cite::Line(z)]);
+                    return Some(self.push(depth, goal.clone(), Rule::X, vec![Cite::Line(x)]));
+                }
+                self.lines.truncate(m);
+            }
+            return None;
+        };
+        let atom = Expr::name(p);
+        let denied = Expr::negation(atom.clone());
+        if Finder::find(had, &atom).is_some() || Finder::find(had, &denied).is_some() {
+            return self.by_cases(had, goal, rest, depth);
+        }
+        let mark = self.lines.len();
+        self.limit = depth + 6;
+        let lem = self.prove(had, &Expr::Bin(Op::Or, Box::new(atom.clone()), Box::new(denied.clone())), depth)?;
+        let mut sides = Vec::new();
+        for side in [atom, denied] {
+            let i = self.push(depth + 1, side.clone(), Rule::Assume, Vec::new());
+            let mut inner = had.clone();
+            inner.push((side, i));
+            let Some(j) = self.by_cases(&inner, goal, rest, depth + 1) else {
+                self.lines.truncate(mark);
+                return None;
+            };
+            let j = if j < i { self.push(depth + 1, goal.clone(), Rule::R, vec![Cite::Line(j)]) } else { j };
+            sides.push(Cite::Range(i, j));
+        }
+        Some(self.push(depth, goal.clone(), Rule::OrE, [vec![Cite::Line(lem)], sides].concat()))
+    }
+
+    /// A line with `e` on it, or `¬e`, made from the propositions decided
+    /// in `had` — Kalmár's construction, a connective at a time — and
+    /// whether `e` is true. `None` for what is more than ¬ ∧ ∨ → ↔ and ⊥
+    /// over decided propositions.
+    fn decide(&mut self, had: &Had, e: &Expr, depth: usize) -> Option<(usize, bool)> {
+        if let Some(n) = Finder::find(had, e) {
+            return Some((n, true));
+        }
+        let denied = Expr::negation(e.clone());
+        if let Some(n) = Finder::find(had, &denied) {
+            return Some((n, false));
+        }
+        let (d, deeper) = (depth + 1, depth + 2);
+        let bottom = Expr::Bool(false);
+        // ¬e, from a subproof assuming e that ends in ⊥ by `close`.
+        let refute = |me: &mut Finder, close: &dyn Fn(&mut Finder, usize) -> usize| {
+            let i = me.push(d, e.clone(), Rule::Assume, Vec::new());
+            let f = close(me, i);
+            (me.push(depth, denied.clone(), Rule::NotI, vec![Cite::Range(i, f)]), false)
+        };
+        Some(match e {
+            Expr::Bool(false) => refute(self, &|_, i| i),
+            Expr::Not(a) => match self.decide(had, a, depth)? {
+                (x, false) => (x, true),
+                (x, true) => refute(self, &|me, i| me.push(d, bottom.clone(), Rule::NotE, vec![Cite::Line(x), Cite::Line(i)])),
+            },
+            Expr::Bin(op @ (Op::And | Op::Or | Op::Imp | Op::Iff), a, b) => {
+                let ((x, va), (y, vb)) = (self.decide(had, a, depth)?, self.decide(had, b, depth)?);
+                let (a, b) = (&**a, &**b);
+                match (op, va, vb) {
+                    (Op::And, true, true) => (self.push(depth, e.clone(), Rule::AndI, vec![Cite::Line(x), Cite::Line(y)]), true),
+                    (Op::And, ..) => {
+                        let (part, no) = if va { (b, y) } else { (a, x) };
+                        refute(self, &|me, i| {
+                            let j = me.push(d, part.clone(), Rule::AndE, vec![Cite::Line(i)]);
+                            me.push(d, bottom.clone(), Rule::NotE, vec![Cite::Line(j), Cite::Line(no)])
+                        })
+                    }
+                    (Op::Or, true, _) => (self.push(depth, e.clone(), Rule::OrI, vec![Cite::Line(x)]), true),
+                    (Op::Or, _, true) => (self.push(depth, e.clone(), Rule::OrI, vec![Cite::Line(y)]), true),
+                    (Op::Or, ..) => refute(self, &|me, i| {
+                        let s1 = me.push(deeper, a.clone(), Rule::Assume, Vec::new());
+                        let f1 = me.push(deeper, bottom.clone(), Rule::NotE, vec![Cite::Line(s1), Cite::Line(x)]);
+                        let s2 = me.push(deeper, b.clone(), Rule::Assume, Vec::new());
+                        let f2 = me.push(deeper, bottom.clone(), Rule::NotE, vec![Cite::Line(s2), Cite::Line(y)]);
+                        me.push(d, bottom.clone(), Rule::OrE, vec![Cite::Line(i), Cite::Range(s1, f1), Cite::Range(s2, f2)])
+                    }),
+                    (Op::Imp, true, false) => refute(self, &|me, i| {
+                        let m = me.push(d, b.clone(), Rule::ImpE, vec![Cite::Line(i), Cite::Line(x)]);
+                        me.push(d, bottom.clone(), Rule::NotE, vec![Cite::Line(m), Cite::Line(y)])
+                    }),
+                    (Op::Imp, ..) => {
+                        let i = self.push(d, a.clone(), Rule::Assume, Vec::new());
+                        let j = if vb {
+                            self.push(d, b.clone(), Rule::R, vec![Cite::Line(y)])
+                        } else {
+                            let f = self.push(d, bottom.clone(), Rule::NotE, vec![Cite::Line(i), Cite::Line(x)]);
+                            self.push(d, b.clone(), Rule::X, vec![Cite::Line(f)])
+                        };
+                        (self.push(depth, e.clone(), Rule::ImpI, vec![Cite::Range(i, j)]), true)
+                    }
+                    (_, va, vb) if va == vb => {
+                        // Each side to the other: repeated if true, from ⊥ if false.
+                        let side = |me: &mut Finder, from: &Expr, to: &Expr, from_line: usize, to_line: usize| {
+                            let i = me.push(d, from.clone(), Rule::Assume, Vec::new());
+                            let j = if va {
+                                me.push(d, to.clone(), Rule::R, vec![Cite::Line(to_line)])
+                            } else {
+                                let f = me.push(d, bottom.clone(), Rule::NotE, vec![Cite::Line(i), Cite::Line(from_line)]);
+                                me.push(d, to.clone(), Rule::X, vec![Cite::Line(f)])
+                            };
+                            Cite::Range(i, j)
+                        };
+                        let one = side(self, a, b, x, y);
+                        let two = side(self, b, a, y, x);
+                        (self.push(depth, e.clone(), Rule::IffI, vec![one, two]), true)
+                    }
+                    _ => {
+                        let (had_side, other, no) = if va { (x, b, y) } else { (y, a, x) };
+                        refute(self, &|me, i| {
+                            let m = me.push(d, other.clone(), Rule::IffE, vec![Cite::Line(i), Cite::Line(had_side)]);
+                            me.push(d, bottom.clone(), Rule::NotE, vec![Cite::Line(m), Cite::Line(no)])
+                        })
+                    }
+                }
+            }
+            _ => return None,
+        })
+    }
+
     /// A subproof assuming `assume` and ending with `end`: its first and
     /// last lines.
     fn subproof(&mut self, had: &Had, assume: &Expr, end: &Expr, depth: usize) -> Option<(usize, usize)> {
@@ -1099,6 +1238,32 @@ impl Finder {
     }
 }
 
+/// The propositions of formulas with no more than ¬ ∧ ∨ → ↔ and ⊥ over
+/// them, first met first; `None` for anything more.
+fn propositions<'a>(fs: impl Iterator<Item = &'a Expr>) -> Option<Vec<String>> {
+    fn go(e: &Expr, out: &mut Vec<String>) -> bool {
+        match e {
+            Expr::Name(n) => {
+                if !out.contains(n) {
+                    out.push(n.clone());
+                }
+                true
+            }
+            Expr::Bool(false) => true,
+            Expr::Not(a) => go(a, out),
+            Expr::Bin(Op::And | Op::Or | Op::Imp | Op::Iff, a, b) => go(a, out) && go(b, out),
+            _ => false,
+        }
+    }
+    let mut out = Vec::new();
+    for f in fs {
+        if !go(f, &mut out) {
+            return None;
+        }
+    }
+    Some(out)
+}
+
 /// A proof of `goal` from `premises`, found, as a `.proof` file's text
 /// (with its header); or why none was.
 pub fn find(premises: &[Expr], goal: &Expr, time: Duration) -> Result<String, String> {
@@ -1106,7 +1271,11 @@ pub fn find(premises: &[Expr], goal: &Expr, time: Duration) -> Result<String, St
     for f in premises.iter().chain(std::iter::once(goal)) {
         names.extend(f.free());
     }
-    let mut f = Finder { lines: Vec::new(), deadline: Instant::now() + time, steps: 0, gave_up: false, path: Vec::new(), fresh: 0, names, split_on: Vec::new(), limit: 0 };
+    let atoms = propositions(premises.iter().chain(std::iter::once(goal)));
+    // A propositional argument keeps half its time for going by cases.
+    let begun = Instant::now();
+    let first = if atoms.is_some() { (time / 2).min(Duration::from_secs(1)) } else { time };
+    let mut f = Finder { lines: Vec::new(), deadline: begun + first, steps: 0, gave_up: false, path: Vec::new(), fresh: 0, names, split_on: Vec::new(), limit: 0 };
     let mut had: Had = Vec::new();
     for p in premises {
         let n = f.push(0, p.clone(), Rule::Premise, Vec::new());
@@ -1121,6 +1290,13 @@ pub fn find(premises: &[Expr], goal: &Expr, time: Duration) -> Result<String, St
         if found.is_some() || f.gave_up {
             break;
         }
+    }
+    // Propositional, and not found: by cases on its propositions.
+    if let (None, Some(atoms)) = (found, &atoms) {
+        f.lines.truncate(start);
+        f.path.clear();
+        (f.gave_up, f.deadline) = (false, begun + time);
+        found = f.by_cases(&had, goal, atoms, 0);
     }
     let Some(last) = found else {
         return Err(if f.gave_up { "no proof found in the time".into() } else { "no proof found within the search's bounds".into() });

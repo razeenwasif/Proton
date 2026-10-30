@@ -453,22 +453,54 @@ fn prefixed(prefix: &[(Quant, String)], m: Expr) -> Expr {
 
 fn cnf(e: &Expr) -> Result<Vec<Vec<Expr>>, String> {
     Ok(match e {
-        Expr::Bin(Op::And, a, b) => {
-            let mut c = cnf(a)?;
-            c.extend(cnf(b)?);
-            c
-        }
+        Expr::Bin(Op::And, a, b) => tidy([cnf(a)?, cnf(b)?].concat()),
         Expr::Bin(Op::Or, a, b) => {
             let (ca, cb) = (cnf(a)?, cnf(b)?);
-            if ca.len() * cb.len() > MOST_CLAUSES {
+            // Distributed, then tidied: what is too many is what is left.
+            if ca.len() * cb.len() > MOST_CLAUSES * MOST_CLAUSES {
                 return Err(format!("more than {MOST_CLAUSES} clauses: too many to write out"));
             }
-            ca.iter().flat_map(|x| cb.iter().map(move |y| [x.clone(), y.clone()].concat())).collect()
+            let c = tidy(ca.iter().flat_map(|x| cb.iter().map(move |y| [x.clone(), y.clone()].concat())));
+            if c.len() > MOST_CLAUSES {
+                return Err(format!("more than {MOST_CLAUSES} clauses: too many to write out"));
+            }
+            c
         }
         Expr::Bool(true) => Vec::new(),
         Expr::Bool(false) => vec![Vec::new()],
         lit => vec![vec![lit.clone()]],
     })
+}
+
+/// Clauses as distributing leaves them, tidied: each literal once, a
+/// clause with a literal and its negation dropped (it always holds), and a
+/// clause said before dropped. Without it nested biconditionals multiply
+/// past any count worth writing out — three propositions have 27 clauses
+/// at most, and Pelletier 12's distribute to thousands.
+fn tidy(clauses: impl IntoIterator<Item = Vec<Expr>>) -> Vec<Vec<Expr>> {
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    for c in clauses {
+        let mut lits: Vec<Expr> = Vec::new();
+        for l in c {
+            if !lits.contains(&l) {
+                lits.push(l);
+            }
+        }
+        let denied = |l: &Expr| match l {
+            Expr::Not(a) => (**a).clone(),
+            l => Expr::negation(l.clone()),
+        };
+        if lits.iter().any(|l| lits.contains(&denied(l))) {
+            continue;
+        }
+        let mut key: Vec<String> = lits.iter().map(print::expr).collect();
+        key.sort();
+        if seen.insert(key) {
+            out.push(lits);
+        }
+    }
+    out
 }
 
 /// Every name anywhere in the argument: a variable or a Skolem function is none of them.

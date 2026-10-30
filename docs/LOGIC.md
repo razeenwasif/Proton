@@ -222,7 +222,7 @@ other logics, for a complete logic workbench.
 
 Each lands with its tests passing.
 
-**Built so far** (2026-10-30): L0 — `crates/proton-logic`: Proton's language
+**Built** (2026-10-30, L0–L9 all): L0 — `crates/proton-logic`: Proton's language
 read statement by statement (a statement runs on past a line ending in an
 operator or with a bracket open), each mistake named at its line and column;
 printed back with only the brackets its meaning needs, which 5,000 random
@@ -423,6 +423,26 @@ engine disagrees with is left out. A formula is answered in Notebook by
 choosing; each problem opens in Logic as a file in a folder named for the
 set — a worksheet line, a `.proof` header to write under, or the puzzle as
 comments — written the first time and opened as the student left it after.
+L9 — measured (below), and what measuring found mended. Resolution could not
+prove Pelletier 12, three propositions in nested biconditionals: distributing
+to clauses made thousands, past the 256 written out, though three
+propositions have 27 clauses at most — clause form now drops a literal said
+twice, a clause with a literal and its negation, and a clause said before,
+as it distributes. Natural deduction could not prove it either, though this
+page promised a proof always for propositional logic: the search had no way
+to use a biconditional neither side of which it had. Now an argument of
+propositions the search does not prove in its first second (or half its
+time, if less) is proved by cases — `p ∨ ¬p` for each proposition in turn,
+a subproof for each side — and at each case's end, every proposition
+decided, the goal (or a premise's falsity, then anything) is built by
+Kalmár's construction, a connective at a time, never searched for. Such a
+proof is long (Pelletier 12's is 285 lines) and certain: forty random
+tautologies of four propositions nested four deep are proved in all three
+systems by a test. In the window, a keystroke in a long file coloured all of
+it again and laid out every line: 55 ms a key at 2,000 lines. Lines are now
+blocks, coloured once and kept, and only the run that changed is put back;
+the gutter adds or takes numbers off its end and changes only the marks that
+moved.
 
 | | What | Proved by |
 |---|---|---|
@@ -455,6 +475,57 @@ In a debug build the 17-clue Sudoku takes 1.2 s. The Sudoku is written with
 search sees no "all different" of its own; giving it one, for sorts it can
 recognise, would make the hard ones quicker still, and waits until one is
 slow in earnest.
+
+## Measured (L9)
+
+Release builds on this Mac (`cargo test --release -p proton-logic --test
+measured -- --nocapture --test-threads 1`), budgets asserted there.
+
+**Pelletier's problems** (*Seventy-five problems for testing automatic
+theorem provers*, 1986), the 37 of 1–44 that need no equality and are not
+Andrews' challenge, written here in Proton's language. All hold, and none is
+said not to by anything.
+
+| | Proved | Slowest | Median | Lines, most and median |
+|---|---|---|---|---|
+| Semantic tableau (the panel's, 0.8 s as typed) | 37 | 0.3 ms | 0.1 ms | — |
+| Natural deduction (Fitch) | 29 | 133 ms (P21) | 0.5 ms | 285 (P12, by cases), 20 |
+| Sequent calculus | 37 | 5 ms (P20) | 0.2 ms | 56, 17 |
+| Resolution | 37 | 5 ms (P29) | 0.2 ms | 56, 7 |
+
+Natural deduction finds no proof of P18, P19, P26, P33, P35, P39, P40 or P42
+in the window's three seconds — its search, back from the goal by
+introductions and forward by eliminations, is bounded for first-order
+logic, as this page says — and why each escapes it has not been looked
+into. The sequent calculus and resolution prove all eight, and the window
+and the agent offer them.
+
+**The calculator**, on chains of conditionals over n propositions:
+
+| Question | Took | Budget |
+|---|---|---|
+| 10 propositions: the table and the least forms, as typed | 16 ms | 300 ms |
+| 16: the table shown, 65,536 rows | 25 ms | 500 ms |
+| 20: the rows counted, not shown | 168 ms | 1 s |
+| 60: a contradiction found by search | 6 ms | 500 ms |
+| An argument over 12 | 0.7 ms | 300 ms |
+| An equivalence over 12 | 1.4 ms | 300 ms |
+
+**What runs as a file is typed**, since the core reads the file, and checks a
+proof, on each edit it is sent:
+
+| On each edit | Took | Budget |
+|---|---|---|
+| A theory of 2,002 lines read and type-checked | 7.6 ms | 100 ms |
+| A proof of 601 lines checked | 5.9 ms | 100 ms |
+| P26's sequent proof (51 lines) checked | 1.3 ms | 50 ms |
+| P26's resolution refutation checked | 0.4 ms | 50 ms |
+
+**In the window** (`tests/ui/suite-logic.js`, Chromium), a file of 2,000
+lines: Logic's own repainting after a keystroke went from about 43 ms to
+6 ms, and after a new line to 8–14 ms; the browser's own layout of the text
+area, which Proton does not draw, is about 12 ms more at that length. The
+budgets asserted are 16 ms and 30 ms.
 
 ## Open
 

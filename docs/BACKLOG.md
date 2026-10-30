@@ -181,17 +181,20 @@ What is left of it.
 ## Logic
 
 A logic mode after logic-calculator.com and Logic for Fun, asked for on
-2026-10-30, is planned in [`LOGIC.md`](LOGIC.md): a calculator (truth
-tables, properties, normal forms, Karnaugh maps, equivalence, arguments),
-a model finder for puzzles written in first-order logic, and proofs by
-semantic tableaux, natural deduction, sequent calculus and resolution.
-Milestones L0–L9, built next: "Logic" on ⌃8, Proton's own language and
-Logic4Fun's both read and written.
+2026-10-30, is built as [`LOGIC.md`](LOGIC.md) describes, L0–L9: a
+calculator (truth tables, properties, normal forms, Karnaugh maps,
+equivalence, arguments), a model finder for puzzles written in first-order
+logic, and proofs by semantic tableaux, natural deduction, sequent calculus
+and resolution; "Logic" on ⌃8, Proton's own language and Logic4Fun's both
+read and written; the agent's logic tools and Notebook's logic practice.
+Fitch's rule names were settled at L6: `forall x`'s written, the common
+others read.
 
-### Waiting on the person
+### Found by measuring
 
-- **Fitch's rule names.** Proton reads the common names; it writes
-  `forall x`'s unless your course uses others. Say which before L6.
+- **Natural deduction on eight Pelletier problems.** P18, P19, P26, P33,
+  P35, P39, P40 and P42 are not found in three seconds; the other systems
+  prove them. Why each escapes the search is not yet looked into.
 
 ### Later builds
 
