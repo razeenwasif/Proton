@@ -366,6 +366,38 @@ the proof's; Find a proof shows one under the header, and Write it in puts
 its lines in place of the file's, as typing would (⌘Z takes them back). A
 valid argument in a worksheet offers its natural-deduction proof too, to
 copy as a `.proof` file.
+L7 — the sequent calculus (`sequent`) and resolution (`resolution`), in
+`.proof` files that say `system sequent` or `system resolution`, read,
+checked and found through one door (`proofs`), which Fitch's files now use
+too. A sequent line is `Γ ⊢ Δ` (or `|-`), its rule and the lines above it in
+the tree; sides are sets, and a line above may leave out what the one below
+has, so LK's rules and G3's both check, with `WL`, `WR`, `CL`, `CR` and
+`Cut` read. Rules are named by connective and side (`∧L`, `→R`, `∀L`), the
+connective spelled any common way (`&L`, `->R`, `allL`); `∀R` and `∃L` need
+a name the sequent below does not mention. Sequent proofs are found by
+working up from the argument — rules that lose nothing first, then those
+that split, then universals on the left and existentials on the right given
+terms, as few as will do — so a propositional argument that fails is said
+not to hold. Resolution puts each premise and the goal denied into clause
+form, each step shown — no `→`, `↔` or `xor`; negations in; each quantifier
+its own variable, moved to the front; Skolem functions `sk1`, `sk2`, …
+numbered through the argument; clauses — and the finder writes those steps
+as comments above its lines. In a clause, `u` to `z` (with digits or primes)
+are variables unless the header uses them as names, and `false` is the empty
+clause; a line is `premise k` or `goal` (a clause of that formula, an
+instance of one, or one with more beside it), `resolve i, j` or `factor i`.
+Refutations are found by saturation, the lightest clause first, with
+factoring, tautologies dropped and clauses subsumed by one no longer set
+aside — a clause subsumes its own factors as sets, so a longer clause never
+subsumes a shorter one, or factoring would be lost (Pelletier 26 was "not
+holding" until that was right). When the clauses saturate, the argument does
+not hold. Both systems prove every argument L5's tableaux were tried on and
+refuse the ones that do not hold; on this Mac, in release builds, Pelletier
+26 takes 4 ms either way (51 sequent lines, 30 resolution lines), the rest
+under a millisecond. In the window, an argument that holds or is undecided
+offers each system's proof — Natural deduction, Sequent calculus,
+Resolution — to read and copy as a `.proof` file; a proof file finds its
+own system's.
 
 | | What | Proved by |
 |---|---|---|

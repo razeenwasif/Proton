@@ -836,12 +836,14 @@ pub enum Command {
     },
     /// The search stopped where it is.
     LogicStop,
-    /// A natural-deduction proof found: of a `.proof` file's goal from its
-    /// premises, or of the argument at `line` of another file. The answer
-    /// for `line` comes back with it.
+    /// A proof found: of a `.proof` file's goal from its premises, in its
+    /// own system; or of the argument at `line` of another file in `system`
+    /// (`fitch`, `sequent` or `resolution`). The answer for `line` comes
+    /// back with it.
     LogicProve {
         generation: u32,
         line: u32,
+        system: String,
     },
     /// A truth table's column — `0`, `1`, `x` — read back as formulas over
     /// the names given (spaces or commas between), or `p`, `q`, `r`.

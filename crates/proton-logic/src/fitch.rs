@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::*;
 use crate::parse::{self, Diag};
-use crate::print;
+use crate::{print, proofs};
 
 /* ── rules ────────────────────────────────────────────────────────── */
 
@@ -115,11 +115,7 @@ pub fn rule_name(r: Rule) -> &'static str {
 
 /* ── the file ─────────────────────────────────────────────────────── */
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Cite {
-    Line(usize),
-    Range(usize, usize),
-}
+pub use crate::proofs::Cite;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PLine {
@@ -146,39 +142,12 @@ pub struct ProofFile {
 /// A `.proof` file read: its header and its lines, and what could not be
 /// read, line by line, so the rest is still checked.
 pub fn read(text: &str) -> ProofFile {
-    let mut f = ProofFile { system: "fitch".into(), ..Default::default() };
-    for (i, raw) in text.lines().enumerate() {
-        let at = i + 1;
-        let line = raw.split('#').next().unwrap_or("").trim_end();
-        let t = line.trim_start();
-        if t.is_empty() {
-            continue;
-        }
-        let bad = |message: String| Diag { line: at, col: 0, message };
-        if let Some(rest) = t.strip_prefix("system ") {
-            f.system = rest.trim().to_string();
-            if f.system != "fitch" {
-                f.unread.push(bad(format!("the system “{}” is not one Proton checks yet: fitch", f.system)));
-            }
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("premises") {
-            match parse::formulas(rest.trim_start_matches(':')) {
-                Ok(ps) => f.premises = ps,
-                Err(d) => f.unread.push(bad(format!("premises: {}", d.message))),
-            }
-            continue;
-        }
-        if let Some(rest) = t.strip_prefix("goal") {
-            match parse::formula(rest.trim_start_matches(':')) {
-                Ok(g) => f.goal = Some(g),
-                Err(d) => f.unread.push(bad(format!("goal: {}", d.message))),
-            }
-            continue;
-        }
-        match read_line(t, at) {
+    let (h, body) = proofs::header(text);
+    let mut f = ProofFile { system: h.system, premises: h.premises, goal: h.goal, lines: Vec::new(), unread: h.unread };
+    for (at, t) in body {
+        match read_line(&t, at) {
             Ok(l) => f.lines.push(l),
-            Err(m) => f.unread.push(bad(m)),
+            Err(message) => f.unread.push(Diag { line: at, col: 0, message }),
         }
     }
     f
@@ -186,39 +155,10 @@ pub fn read(text: &str) -> ProofFile {
 
 /// `12  | | A ∧ B   ∧I 3, 7`
 fn read_line(t: &str, at: usize) -> Result<PLine, String> {
-    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
-    let n: usize = digits.parse().map_err(|_| "a proof's line starts with its number".to_string())?;
-    let mut rest = t[digits.len()..].trim_start_matches(['.', ':', ')']).trim_start();
-    let mut depth = 0;
-    while let Some(r) = rest.strip_prefix('|') {
-        depth += 1;
-        rest = r.trim_start();
-    }
-    // The justification, from the right: citations, and before them a rule.
-    let words: Vec<(usize, &str)> = rest.split_whitespace().map(|w| (w.as_ptr() as usize - rest.as_ptr() as usize, w)).collect();
-    let mut k = words.len();
-    while k > 0 && words[k - 1].1.chars().all(|c| c.is_ascii_digit() || matches!(c, ',' | '-' | '–')) {
-        k -= 1;
-    }
-    // A rule's name may be two words: `ex falso`, `modus tollens`.
-    let (rule, start) = if k >= 2 && rule_named(&format!("{} {}", words[k - 2].1, words[k - 1].1)).is_some() {
-        (rule_named(&format!("{} {}", words[k - 2].1, words[k - 1].1)).unwrap(), k - 2)
-    } else if k >= 1 && rule_named(words[k - 1].1).is_some() {
-        (rule_named(words[k - 1].1).unwrap(), k - 1)
-    } else {
-        return Err(format!("line {n} has no rule at its end: {}", RULES.iter().map(|(r, _)| rule_name(*r)).collect::<Vec<_>>().join(" ")));
-    };
-    let text = rest[..words.get(start).map_or(rest.len(), |w| w.0)].trim();
-    let formula = parse::formula(text).map_err(|d| format!("line {n}: {}", d.message))?;
-    let mut cites = Vec::new();
-    for w in words[k..].iter().flat_map(|(_, w)| w.split(',')).filter(|w| !w.is_empty()) {
-        let w = w.replace('–', "-");
-        cites.push(match w.split_once('-') {
-            Some((a, b)) => Cite::Range(a.parse().map_err(|_| format!("“{w}” is not a line"))?, b.parse().map_err(|_| format!("“{w}” is not a line"))?),
-            None => Cite::Line(w.parse().map_err(|_| format!("“{w}” is not a line"))?),
-        });
-    }
-    Ok(PLine { at, n, depth, formula, rule, cites })
+    let all = RULES.iter().map(|(r, _)| rule_name(*r)).collect::<Vec<_>>().join(" ");
+    let s = proofs::split(t, &|w| rule_named(w).is_some(), &all)?;
+    let formula = parse::formula(&s.body).map_err(|d| format!("line {}: {}", s.n, d.message))?;
+    Ok(PLine { at, n: s.n, depth: s.depth, formula, rule: rule_named(&s.rule).unwrap(), cites: s.cites })
 }
 
 /* ── checking ─────────────────────────────────────────────────────── */
@@ -395,7 +335,7 @@ pub fn same(a: &Expr, b: &Expr) -> bool {
 }
 
 /// The first binder taken off a quantifier: its variable, and the rest.
-fn open_quant(e: &Expr, want: Quant) -> Option<(String, Expr)> {
+pub(crate) fn open_quant(e: &Expr, want: Quant) -> Option<(String, Expr)> {
     match e {
         Expr::Quant(q, bs, body) if *q == want => {
             let rest = if bs.len() > 1 { Expr::Quant(*q, bs[1..].to_vec(), body.clone()) } else { (**body).clone() };
@@ -421,7 +361,7 @@ pub fn subst(e: &Expr, x: &str, t: &Expr) -> Expr {
 /// What `x` stands for if `inst` is `body` with it replaced — every
 /// occurrence by one term — or `Err` if it is not. `Ok(None)`: `x` is not in
 /// `body` and the two are the same.
-fn instance(body: &Expr, x: &str, inst: &Expr) -> Result<Option<Expr>, ()> {
+pub(crate) fn instance(body: &Expr, x: &str, inst: &Expr) -> Result<Option<Expr>, ()> {
     fn go(b: &Expr, x: &str, i: &Expr, got: &mut Option<Expr>, bound: &mut Vec<String>) -> bool {
         match (b, i) {
             (Expr::Name(n), _) if n == x && !bound.contains(n) => match got {
@@ -474,7 +414,7 @@ fn names(e: &Expr) -> BTreeSet<String> {
     e.free().into_iter().collect()
 }
 
-fn is_false(e: &Expr) -> bool {
+pub(crate) fn is_false(e: &Expr) -> bool {
     matches!(e, Expr::Bool(false))
 }
 

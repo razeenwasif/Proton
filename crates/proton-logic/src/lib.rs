@@ -9,7 +9,10 @@
 //!   equivalence, and a formula for a truth table.
 //! - [`solve`]: the model finder: a theory's models, found and counted.
 //! - [`tableau`]: semantic tableaux: arguments proved, or refuted.
+//! - [`proofs`]: a `.proof` file, whatever its system, read and checked.
 //! - [`fitch`]: natural deduction: `.proof` files checked, proofs found.
+//! - [`sequent`]: Gentzen's sequent calculus, likewise.
+//! - [`resolution`]: clause form, step by step, and resolution refutations.
 
 pub mod ast;
 pub mod calc;
@@ -19,6 +22,9 @@ pub mod l4f;
 pub mod lex;
 pub mod parse;
 pub mod print;
+pub mod proofs;
+pub mod resolution;
+pub mod sequent;
 pub mod solve;
 pub mod tableau;
 pub mod types;

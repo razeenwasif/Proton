@@ -18,7 +18,7 @@ use proton_logic::eval::{self, Model};
 use proton_logic::solve::{self as finder, Conflict, Outcome};
 use proton_logic::Checked;
 use proton_logic::calc::{self, What};
-use proton_logic::{check, fitch, print};
+use proton_logic::{check, print, proofs};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -474,10 +474,12 @@ impl Logics {
                 vec![Event::LogicAnswer { answer: Some(Box::new(LogicAnswerView { generation, ..answer })) }]
             }
             Command::LogicSolve { generation, keep, count } => self.solve(generation, keep, count),
-            Command::LogicProve { generation, line } => {
+            Command::LogicProve { generation, line, system } => {
                 let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
                 let mut answer = if open.kind == "proof" { answer_proof(&open.text, line as usize) } else { answer_line(&open.text, open.kind == "l4f", line as usize, false) };
-                match argument_at(&open.text, &open.kind, line as usize).and_then(|(premises, goal)| fitch::find(&premises, &goal, FIND_TIME)) {
+                // A proof file's own system; for anything else, the one asked for.
+                let system = if open.kind == "proof" { proofs::header(&open.text).0.system } else { system };
+                match argument_at(&open.text, &open.kind, line as usize).and_then(|(premises, goal)| proofs::find(&system, &premises, &goal, FIND_TIME)) {
                     Ok(text) => answer.deduction = Some(text),
                     Err(why) => answer.deduction_note = Some(why),
                 }
@@ -632,6 +634,7 @@ of(Cy) != 3
 const PROOF: &str = "\
 # A proof: its premises and goal, then its lines — each its number, a bar |
 # for each subproof it is in, the formula, its rule and the lines it uses.
+# The system may be fitch, sequent or resolution.
 system fitch
 premises p -> q, q -> r
 goal p -> r
@@ -641,7 +644,7 @@ goal p -> r
 3  | p           assume
 ";
 
-/// How long a natural-deduction proof is searched for.
+/// How long a proof is searched for.
 const FIND_TIME: Duration = Duration::from_secs(3);
 
 /// A search's outcome as the window draws it.
@@ -722,9 +725,8 @@ pub fn model_view(c: &Checked, m: &Model) -> LogicModelView {
 fn diagnose(text: &str, kind: &str) -> (Vec<LogicDiag>, Vec<String>, Vec<(u32, bool)>) {
     let diag = |d: proton_logic::Diag| LogicDiag { line: d.line as u32, col: d.col as u32, message: d.message };
     if kind == "proof" {
-        let f = fitch::read(text);
-        let c = fitch::check(&f);
-        let mut diags: Vec<LogicDiag> = f.unread.into_iter().map(diag).collect();
+        let c = proofs::check(text);
+        let mut diags: Vec<LogicDiag> = c.header.unread.iter().cloned().map(diag).collect();
         diags.extend(c.lines.iter().filter(|l| !l.ok).map(|l| LogicDiag { line: l.at as u32, col: 0, message: format!("{}: {}", l.n, l.message) }));
         diags.sort_by_key(|d| d.line);
         return (diags, Vec::new(), c.lines.iter().map(|l| (l.at as u32, l.ok)).collect());
@@ -741,17 +743,16 @@ fn diagnose(text: &str, kind: &str) -> (Vec<LogicDiag>, Vec<String>, Vec<(u32, b
 /// A line of a `.proof` file answered: its check, with the proof's; on the
 /// header or a line that is not one of the proof's, the proof's alone.
 pub fn answer_proof(text: &str, line: usize) -> LogicAnswerView {
-    let f = fitch::read(text);
-    let c = fitch::check(&f);
+    let c = proofs::check(text);
+    let f = &c.header;
     let whole = |ok: bool, message: String| LogicProofView { n: None, rule: None, ok, message, complete: c.complete, summary: c.summary.clone() };
     let mut v = LogicAnswerView { line: line as u32, kind: "proof".into(), ..Default::default() };
     if let Some(d) = f.unread.iter().find(|d| d.line == line) {
         v.text = text.lines().nth(line - 1).unwrap_or("").trim().to_string();
         v.proof = Some(whole(false, d.message.clone()));
-    } else if let Some(k) = c.lines.iter().position(|l| l.at == line) {
-        let (l, p) = (&c.lines[k], &f.lines[k]);
-        v.text = print::expr(&p.formula);
-        v.proof = Some(LogicProofView { n: Some(l.n as u32), rule: Some(fitch::rule_name(p.rule).to_string()), ok: l.ok, message: l.message.clone(), ..whole(l.ok, String::new()) });
+    } else if let Some(l) = c.lines.iter().find(|l| l.at == line) {
+        v.text = l.text.clone();
+        v.proof = Some(LogicProofView { n: Some(l.n as u32), rule: Some(l.rule.clone()), ok: l.ok, message: l.message.clone(), ..whole(l.ok, String::new()) });
     } else {
         v.line = 0;
         let premises = f.premises.iter().map(print::expr).collect::<Vec<_>>().join(", ");
@@ -765,11 +766,11 @@ pub fn answer_proof(text: &str, line: usize) -> LogicAnswerView {
     v
 }
 
-/// The argument a natural-deduction proof is found for: a `.proof` file's
+/// The argument a proof is found for: a `.proof` file's
 /// header, or the question at `line` of another file.
 fn argument_at(text: &str, kind: &str, line: usize) -> Result<(Vec<proton_logic::Expr>, proton_logic::Expr), String> {
     if kind == "proof" {
-        let f = fitch::read(text);
+        let (f, _) = proofs::header(text);
         return f.goal.map(|g| (f.premises, g)).ok_or_else(|| "the header names no goal to prove: goal A".to_string());
     }
     let (theory, _) = proton_logic::read(text, kind == "l4f").map_err(|d| format!("line {}: {}", d.line, d.message))?;
@@ -1077,7 +1078,11 @@ mod tests {
         println!("PROOF_ANSWERS {}", serde_json::Value::Object(proofs));
         println!("PROOF_CHECKS {}", serde_json::to_string(&diagnose(PROOF, "proof").2).unwrap());
         let (premises, goal) = argument_at(PROOF, "proof", 1).unwrap();
-        println!("FOUND {}", serde_json::to_string(&fitch::find(&premises, &goal, FIND_TIME).unwrap()).unwrap());
+        println!("FOUND {}", serde_json::to_string(&proofs::find("fitch", &premises, &goal, FIND_TIME).unwrap()).unwrap());
+        // The worksheet's modus ponens, line 3, in each system.
+        let (premises, goal) = argument_at(WORKSHEET, "logic", 3).unwrap();
+        let each: serde_json::Map<String, serde_json::Value> = proofs::SYSTEMS.iter().map(|s| (s.to_string(), proofs::find(s, &premises, &goal, FIND_TIME).unwrap().into())).collect();
+        println!("ARGUMENT_PROOFS {}", serde_json::Value::Object(each));
     }
 
     /// Solved on its thread, and polled until it says it is done.
@@ -1302,15 +1307,28 @@ mod tests {
         let a = answer(&l.apply(&root, Command::LogicAsk { generation: f.generation, line: at(&text, "4 ") as u32, more: false }));
         assert!(!a.proof.as_ref().unwrap().ok && a.proof.unwrap().message.contains("→E needs"));
         // On the header: the argument, and the proof found for it, checked.
-        let a = answer(&l.apply(&root, Command::LogicProve { generation: f.generation, line: 2 }));
+        let a = answer(&l.apply(&root, Command::LogicProve { generation: f.generation, line: 2, system: "sequent".into() }));
         assert_eq!((a.line, a.text.as_str()), (0, "p -> q, q -> r ⊢ p -> r"));
         let found = a.deduction.expect("a proof");
-        let c = fitch::check(&fitch::read(&found));
-        assert!(c.complete, "{found}");
+        let c = proofs::check(&found);
+        // In the file's own system, whatever was asked.
+        assert!(c.complete && found.starts_with("system fitch\n"), "{found}");
+        // A file in another system is checked by its rules.
+        let sequent = "system sequent\npremises p\ngoal p or q\n\n1  p ⊢ p, q     Ax\n2  p ⊢ p or q   ∧R 1\n";
+        let f = file(&l.apply(&root, Command::LogicEdit { generation: f.generation, text: sequent.into() })).unwrap();
+        assert_eq!((f.checks.clone(), f.diagnostics.len()), (vec![(5, true), (6, false)], 1), "{:?}", f.diagnostics);
+        let a = answer(&l.apply(&root, Command::LogicAsk { generation: f.generation, line: 6, more: false }));
+        let p = a.proof.unwrap();
+        assert_eq!((a.text.as_str(), p.rule.as_deref(), p.ok), ("p ⊢ p or q", Some("∧R"), false));
+        let a = answer(&l.apply(&root, Command::LogicProve { generation: f.generation, line: 6, system: "fitch".into() }));
+        assert!(a.deduction.as_deref().is_some_and(|d| d.starts_with("system sequent\n")), "{:?}", a.deduction_note);
         // From a worksheet's argument too; and none for one that does not hold.
         let sheet = "? p, p -> q |= q\n? q, p -> q |= p\n";
-        assert!(fitch::check(&fitch::read(&argument_at(sheet, "logic", 1).and_then(|(p, g)| fitch::find(&p, &g, FIND_TIME)).unwrap())).complete);
-        assert!(argument_at(sheet, "logic", 2).and_then(|(p, g)| fitch::find(&p, &g, Duration::from_millis(300))).is_err());
+        for system in proofs::SYSTEMS {
+            let found = argument_at(sheet, "logic", 1).and_then(|(p, g)| proofs::find(system, &p, &g, FIND_TIME)).unwrap();
+            assert!(found.starts_with(&format!("system {system}\n")) && proofs::check(&found).complete, "{found}");
+            assert!(argument_at(sheet, "logic", 2).and_then(|(p, g)| proofs::find(system, &p, &g, Duration::from_millis(300))).is_err(), "{system}");
+        }
         assert!(l.apply(&root, Command::LogicSave).iter().any(|e| matches!(e, Event::LogicHome { files } if files.iter().any(|f| f.kind == "proof"))));
     }
 
