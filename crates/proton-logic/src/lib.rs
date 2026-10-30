@@ -7,6 +7,7 @@
 //! - [`eval`]: formulas worked out in a model.
 //! - [`calc`]: the calculator: truth tables, properties, forms, arguments,
 //!   equivalence, and a formula for a truth table.
+//! - [`solve`]: the model finder: a theory's models, found and counted.
 
 pub mod ast;
 pub mod calc;
@@ -15,6 +16,7 @@ pub mod l4f;
 pub mod lex;
 pub mod parse;
 pub mod print;
+pub mod solve;
 pub mod types;
 
 pub use ast::{Expr, Item, Theory};

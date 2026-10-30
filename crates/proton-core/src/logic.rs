@@ -9,8 +9,14 @@
 //! formula is, its forms, and the terms its Karnaugh map rings.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
 use proton_logic::ast::{Item, Question, SortKind, Theory};
+use proton_logic::eval::{self, Model};
+use proton_logic::solve::{self as finder, Outcome};
+use proton_logic::Checked;
 use proton_logic::calc::{self, What};
 use proton_logic::{check, print};
 use serde::{Deserialize, Serialize};
@@ -122,6 +128,76 @@ pub struct LogicAnswerView {
     pub pos_terms: Vec<(u32, u32)>,
 }
 
+/// A symbol's values in a model, laid out: `value` for a constant or a
+/// proposition, `row` for one argument, `grid` for two, `list` for more.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicTableView {
+    pub name: String,
+    pub shape: String,
+    /// A grid's first argument's values, down the side.
+    pub rows: Vec<String>,
+    /// A row's or a grid's last argument's values, across the top.
+    pub cols: Vec<String>,
+    /// The values: one row for `value` and `row`; a row of the side's
+    /// values for `grid`; for `list`, each line its arguments then its value.
+    /// `—` where a partial function has none.
+    pub cells: Vec<Vec<String>>,
+}
+
+/// One model: the sizes chosen for sorts that had a range of them, and
+/// each symbol's values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicModelView {
+    pub sizes: Vec<(String, u32)>,
+    pub tables: Vec<LogicTableView>,
+}
+
+/// A search for a theory's models: going, or done.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicModelsView {
+    pub generation: u32,
+    pub running: bool,
+    /// How many were found, and whether that is all of them.
+    pub found: u32,
+    pub finished: bool,
+    pub timed_out: bool,
+    /// Whether it was asked to count them all.
+    pub counted: bool,
+    pub elapsed_ms: u32,
+    pub choices: u32,
+    pub models: Vec<LogicModelView>,
+    pub error: Option<String>,
+}
+
+/// No more models than this are kept to be shown.
+pub const MOST_KEPT: u32 = 100;
+/// A search stops after this long.
+pub const SOLVE_TIME: Duration = Duration::from_secs(20);
+/// A list of a symbol's values stops after this many lines.
+const MOST_LIST: usize = 300;
+
+/// A search on its thread; stopped when this is dropped.
+#[derive(Debug)]
+struct Solving {
+    stop: Arc<AtomicBool>,
+    news: mpsc::Receiver<Result<Outcome, String>>,
+    checked: Box<Checked>,
+    generation: u32,
+    counted: bool,
+}
+
+impl Drop for Solving {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
 #[derive(Debug)]
 struct Open {
     path: PathBuf,
@@ -138,11 +214,70 @@ struct Open {
 pub struct Logics {
     open: Option<Open>,
     generations: u32,
+    solving: Option<Solving>,
+    /// The last search's outcome, shown until the next.
+    models: Option<LogicModelsView>,
 }
 
 impl Logics {
     pub fn events(&self, root: &Path) -> Vec<Event> {
-        vec![Event::LogicHome { files: find(root) }, self.file_event()]
+        vec![Event::LogicHome { files: find(root) }, self.file_event(), self.models_event()]
+    }
+
+    fn models_event(&self) -> Event {
+        Event::LogicModels { models: self.models.clone().map(Box::new) }
+    }
+
+    /// A search's end, when it has come.
+    pub fn poll(&mut self) -> Vec<Event> {
+        let Some(s) = &self.solving else { return Vec::new() };
+        let got = match s.news.try_recv() {
+            Ok(got) => got,
+            Err(mpsc::TryRecvError::Empty) => return Vec::new(),
+            Err(mpsc::TryRecvError::Disconnected) => Err("the search ended without saying".into()),
+        };
+        let s = self.solving.take().unwrap();
+        self.models = Some(match got {
+            Ok(out) => models_view(&s.checked, &out, s.generation, s.counted),
+            Err(why) => LogicModelsView { generation: s.generation, error: Some(why), ..Default::default() },
+        });
+        vec![self.models_event()]
+    }
+
+    fn solve(&mut self, generation: u32, keep: u32, count: bool) -> Vec<Event> {
+        let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
+        let fail = |why: String| LogicModelsView { generation, error: Some(why), ..Default::default() };
+        let theory = match proton_logic::read(&open.text, open.kind == "l4f") {
+            Ok((t, _)) => t,
+            Err(d) => {
+                self.models = Some(fail(format!("line {}: {}", d.line, d.message)));
+                return vec![self.models_event()];
+            }
+        };
+        let checked = match check(&theory) {
+            Ok(c) => c,
+            Err(ds) => {
+                self.models = Some(fail(ds.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("; ")));
+                return vec![self.models_event()];
+            }
+        };
+        // Questions are asked, not solved: a file of only them has nothing to find.
+        if !checked.theory.lines.iter().any(|l| matches!(l.item, Some(Item::Symbol(_)) | Some(Item::Constraint(_)))) {
+            self.models = Some(fail("there is nothing to find: a theory names functions, predicates or constants, and says what is true of them".into()));
+            return vec![self.models_event()];
+        }
+        // Another search going is stopped by being dropped.
+        self.solving = None;
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tell, news) = mpsc::channel();
+        let (c, flag) = (checked.clone(), stop.clone());
+        let keep = keep.clamp(1, MOST_KEPT) as usize;
+        std::thread::spawn(move || {
+            let _ = tell.send(finder::solve_or_stop(&c, keep, count, SOLVE_TIME, &flag));
+        });
+        self.solving = Some(Solving { stop, news, checked: Box::new(checked), generation, counted: count });
+        self.models = Some(LogicModelsView { generation, running: true, counted: count, ..Default::default() });
+        vec![self.models_event()]
     }
 
     pub fn apply(&mut self, root: &Path, command: Command) -> Vec<Event> {
@@ -172,6 +307,8 @@ impl Logics {
                     return vec![notice("the file has unsaved changes".into(), NoticeLevel::Warn)];
                 }
                 self.open = None;
+                self.solving = None;
+                self.models = None;
                 let mut events = self.events(root);
                 events.push(Event::LogicAnswer { answer: None });
                 events
@@ -195,6 +332,13 @@ impl Logics {
                 let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
                 let answer = answer_line(&open.text, open.kind == "l4f", line as usize, more);
                 vec![Event::LogicAnswer { answer: Some(Box::new(LogicAnswerView { generation, ..answer })) }]
+            }
+            Command::LogicSolve { generation, keep, count } => self.solve(generation, keep, count),
+            Command::LogicStop => {
+                if let Some(s) = &self.solving {
+                    s.stop.store(true, Ordering::Relaxed);
+                }
+                Vec::new()
             }
             Command::LogicFromTable { names, column } => {
                 let names: Vec<String> = names.split(|c: char| c.is_whitespace() || c == ',').filter(|s| !s.is_empty()).map(String::from).collect();
@@ -252,6 +396,8 @@ impl Logics {
 
     fn show(&mut self, root: &Path, path: PathBuf, text: String) {
         self.generations += 1;
+        self.solving = None;
+        self.models = None;
         let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let rel = path.strip_prefix(root).or_else(|_| path.strip_prefix(&real));
         let kind = path.extension().and_then(|e| e.to_str()).unwrap_or("logic").to_string();
@@ -331,6 +477,74 @@ of(Ann) > of(Bo)
 of(Cy) != 3
 ";
 
+/// A search's outcome as the window draws it.
+fn models_view(c: &Checked, out: &Outcome, generation: u32, counted: bool) -> LogicModelsView {
+    LogicModelsView {
+        generation,
+        running: false,
+        found: out.found.min(u32::MAX as u64) as u32,
+        finished: out.finished,
+        timed_out: out.timed_out,
+        counted,
+        elapsed_ms: out.elapsed_ms.min(u32::MAX as u64) as u32,
+        choices: out.choices.min(u32::MAX as u64) as u32,
+        models: out.models.iter().map(|m| model_view(c, m)).collect(),
+        error: None,
+    }
+}
+
+/// A model laid out: its symbols in the order the theory declares them,
+/// then the propositions it uses undeclared.
+pub fn model_view(c: &Checked, m: &Model) -> LogicModelView {
+    let sig = &c.sig;
+    let mut names: Vec<String> = c.theory.lines.iter().filter_map(|l| match &l.item {
+        Some(Item::Symbol(s)) => Some(s.names.clone()),
+        _ => None,
+    }).flatten().collect();
+    names.extend(sig.propositions.iter().cloned());
+    let tables = names
+        .into_iter()
+        .filter_map(|name| {
+            let (args, result) = match sig.symbols.get(&name) {
+                Some(s) => (s.args.clone(), s.result.clone()),
+                None => (Vec::new(), proton_logic::types::Ty::Bool),
+            };
+            let table = m.values.get(&name)?;
+            let show = |args: &[i64]| table.get(args).map_or("—".to_string(), |v| eval::show(sig, &result, *v));
+            let names_of = |t: &proton_logic::types::Ty| -> (Vec<i64>, Vec<String>) {
+                let d = eval::domain(sig, m, t);
+                let shown = d.iter().map(|v| eval::show(sig, t, *v)).collect();
+                (d, shown)
+            };
+            Some(match args.len() {
+                0 => LogicTableView { name, shape: "value".into(), rows: Vec::new(), cols: Vec::new(), cells: vec![vec![show(&[])]] },
+                1 => {
+                    let (d, cols) = names_of(&args[0]);
+                    LogicTableView { name, shape: "row".into(), rows: Vec::new(), cols, cells: vec![d.iter().map(|v| show(&[*v])).collect()] }
+                }
+                2 => {
+                    let ((d0, rows), (d1, cols)) = (names_of(&args[0]), names_of(&args[1]));
+                    let cells = d0.iter().map(|a| d1.iter().map(|b| show(&[*a, *b])).collect()).collect();
+                    LogicTableView { name, shape: "grid".into(), rows, cols, cells }
+                }
+                _ => {
+                    let cells = eval::arguments(sig, m, &args)
+                        .into_iter()
+                        .take(MOST_LIST)
+                        .map(|a| {
+                            let mut line: Vec<String> = a.iter().zip(&args).map(|(v, t)| eval::show(sig, t, *v)).collect();
+                            line.push(show(&a));
+                            line
+                        })
+                        .collect();
+                    LogicTableView { name, shape: "list".into(), rows: Vec::new(), cols: Vec::new(), cells }
+                }
+            })
+        })
+        .collect();
+    LogicModelView { sizes: m.sizes.iter().map(|(k, v)| (k.clone(), *v)).collect(), tables }
+}
+
 /// What is wrong with the file as a whole, and Logic4Fun's notes.
 fn diagnose(text: &str, l4f: bool) -> (Vec<LogicDiag>, Vec<String>) {
     match proton_logic::read(text, l4f) {
@@ -390,7 +604,7 @@ pub fn answer_line(text: &str, l4f: bool, line: usize, more: bool) -> LogicAnswe
     let least = if more { proton_circuit::analysis::MOST_VARIABLES } else { calc::MOST_LEAST };
     match calc::ask_up_to(&checked, &question, least) {
         Ok(a) => view(a, at, shown),
-        Err(why) if matches!(item, Item::Constraint(_)) => say("theory", at, shown, format!("{why} — a constraint of the theory, whose models the solver finds")),
+        Err(why) if matches!(item, Item::Constraint(_)) => say("theory", at, shown, format!("{why} — a constraint of the theory: ⌘⇧↩ finds its models")),
         Err(why) => say("error", at, shown, why),
     }
 }
@@ -600,6 +814,81 @@ mod tests {
         let mut l = Logics::default();
         let t = answer(&l.apply(&std::env::temp_dir(), Command::LogicFromTable { names: "a b c".into(), column: "00010111".into() }));
         println!("TABLE {}", serde_json::to_string(&t).unwrap());
+        let c = check(&proton_logic::parse(THEORY).unwrap()).unwrap();
+        let out = finder::solve(&c, MOST_KEPT as usize, true, SOLVE_TIME).unwrap();
+        let mut v = models_view(&c, &out, 0, true);
+        v.elapsed_ms = 1;
+        println!("THEORY {}", serde_json::to_string(THEORY).unwrap());
+        println!("MODELS {}", serde_json::to_string(&v).unwrap());
+    }
+
+    /// Solved on its thread, and polled until it says it is done.
+    fn solved(l: &mut Logics, root: &Path, generation: u32, keep: u32, count: bool) -> LogicModelsView {
+        let first = l.apply(root, Command::LogicSolve { generation, keep, count });
+        assert!(matches!(&first[0], Event::LogicModels { models: Some(m) } if m.running));
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(Event::LogicModels { models: Some(m) }) = l.poll().pop() {
+                return *m;
+            }
+            assert!(std::time::Instant::now() < deadline, "the search never ended");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_theorys_models_are_found_and_laid_out() {
+        let root = scratch("solve");
+        std::fs::write(
+            root.join("friends.logic"),
+            "friend = Ana | Ben | Cy\npet = cat | dog | eel\nfloor = 1..3\nkeeps: friend -> pet  one-to-one\nhome: friend -> floor  one-to-one\n\
+             likes: friend, pet -> bool\nbest: friend\n\
+             all f: keeps(f) = cat -> home(f) = 1\nall f: keeps(f) = cat -> home(Ben) > home(f)\nkeeps(Cy) = eel\nhome(Ana) != 3\nhome(Cy) < home(Ben)\n\
+             all f, p: likes(f, p) <-> keeps(f) = p\nbest = Cy\n",
+        )
+        .unwrap();
+        let mut l = Logics::default();
+        let g = file(&l.apply(&root, Command::LogicOpen { path: "friends.logic".into() })).unwrap().generation;
+        let m = solved(&mut l, &root, g, 10, true);
+        assert!(m.error.is_none(), "{:?}", m.error);
+        assert_eq!((m.found, m.finished, m.models.len()), (1, true, 1));
+        let tables = &m.models[0].tables;
+        assert_eq!(tables.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), vec!["keeps", "home", "likes", "best"]);
+        assert_eq!((tables[0].shape.as_str(), tables[0].cols.clone(), tables[0].cells[0].clone()), ("row", vec!["Ana".to_string(), "Ben".into(), "Cy".into()], vec!["cat".to_string(), "dog".into(), "eel".into()]));
+        assert_eq!(tables[1].cells[0], vec!["1", "3", "2"]);
+        assert_eq!(tables[2].shape, "grid");
+        assert_eq!(tables[2].cells[2], vec!["false", "false", "true"]);
+        assert_eq!((tables[3].shape.as_str(), tables[3].cells[0][0].as_str()), ("value", "Cy"));
+        // The next open file forgets the search.
+        l.apply(&root, Command::LogicClose { discard: true });
+        assert!(matches!(l.events(&root).pop(), Some(Event::LogicModels { models: None })));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_search_is_stopped_and_one_with_nothing_to_find_says_so() {
+        let root = scratch("stop");
+        // Latin squares of order 6: far too many to count before it is stopped.
+        std::fs::write(root.join("big.logic"), "n = size 6\ncell: n, n -> n\nall r, a, b: a != b -> cell(r, a) != cell(r, b)\nall c, a, b: a != b -> cell(a, c) != cell(b, c)\n").unwrap();
+        std::fs::write(root.join("sheet.logic"), "? p -> q\n").unwrap();
+        let mut l = Logics::default();
+        let g = file(&l.apply(&root, Command::LogicOpen { path: "big.logic".into() })).unwrap().generation;
+        l.apply(&root, Command::LogicSolve { generation: g, keep: 5, count: true });
+        std::thread::sleep(Duration::from_millis(200));
+        l.apply(&root, Command::LogicStop);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let m = loop {
+            if let Some(Event::LogicModels { models: Some(m) }) = l.poll().pop() {
+                break m;
+            }
+            assert!(std::time::Instant::now() < deadline, "the stop was not heard");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(!m.finished && !m.timed_out && m.found >= 5 && m.models.len() == 5, "{m:?}");
+        let g = file(&l.apply(&root, Command::LogicOpen { path: "sheet.logic".into() })).unwrap().generation;
+        let events = l.apply(&root, Command::LogicSolve { generation: g, keep: 5, count: false });
+        assert!(matches!(&events[0], Event::LogicModels { models: Some(m) } if m.error.as_deref().is_some_and(|e| e.contains("nothing to find"))));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

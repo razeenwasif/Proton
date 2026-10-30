@@ -1487,6 +1487,8 @@ impl Workspace {
             | Command::LogicSave
             | Command::LogicEdit { .. }
             | Command::LogicAsk { .. }
+            | Command::LogicSolve { .. }
+            | Command::LogicStop
             | Command::LogicFromTable { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.logics.apply(&root, command);
@@ -2729,6 +2731,11 @@ impl Workspace {
         let ran = self.circuits.poll();
         if !self.quiet {
             events.extend(ran);
+        }
+        // And a search for a theory's models.
+        let solved = self.logics.poll();
+        if !self.quiet {
+            events.extend(solved);
         }
         events.extend(self.poll_external_format());
 

@@ -826,6 +826,15 @@ pub enum Command {
         line: u32,
         more: bool,
     },
+    /// The theory's models searched for, on a thread: the first `keep`,
+    /// and with `count` all of them counted, for some seconds at most.
+    LogicSolve {
+        generation: u32,
+        keep: u32,
+        count: bool,
+    },
+    /// The search stopped where it is.
+    LogicStop,
     /// A truth table's column — `0`, `1`, `x` — read back as formulas over
     /// the names given (spaces or commas between), or `p`, `q`, `r`.
     LogicFromTable {
@@ -1701,6 +1710,10 @@ pub enum Event {
     /// The Logic file open, as typed, and what is wrong with it — or none.
     LogicFile {
         file: Option<Box<crate::logic::LogicFileView>>,
+    },
+    /// A theory's models, as found so far, or none.
+    LogicModels {
+        models: Option<Box<crate::logic::LogicModelsView>>,
     },
     /// What the statement at the cursor is, or a table read back; none when
     /// there is nothing to say.
