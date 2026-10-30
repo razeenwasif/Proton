@@ -7,6 +7,10 @@
 //! from being answered. The answer is the engine's (`proton_logic::calc`),
 //! made into what the window draws: the truth table's columns, what the
 //! formula is, its forms, and the terms its Karnaugh map rings.
+//!
+//! The agent has the same: [`TOOLS`] ask, solve, prove, read and write,
+//! their answers in words; its writes are held until saved, as typing is.
+//! `@logic` sends the file on screen, the line at the cursor and its answer.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -334,6 +338,9 @@ struct Open {
     text: String,
     saved: String,
     generation: u32,
+    /// The line last asked about — the cursor's — and its answer, for `@logic`.
+    cursor: u32,
+    answer: Option<LogicAnswerView>,
 }
 
 /// The file open in Logic, in a project.
@@ -344,7 +351,22 @@ pub struct Logics {
     solving: Option<Solving>,
     /// The last search's outcome, shown until the next.
     models: Option<LogicModelsView>,
+    /// What the agent's last call changed on screen, for the window.
+    pending: Vec<Event>,
 }
+
+/// The tools the agent has for Logic.
+pub const TOOLS: [&str; 5] = ["logic_ask", "logic_solve", "logic_prove", "logic_read", "logic_write"];
+
+/// No more lines of a file than this go to the model at once.
+const MOST_LINES: usize = 400;
+/// How long the agent's search for models, or for a proof, may take: it
+/// waits for the answer.
+const TOOL_SOLVE_TIME: Duration = Duration::from_secs(10);
+const TOOL_FIND_TIME: Duration = Duration::from_secs(10);
+/// Models the agent is given, unless it asks for more; and the most.
+const TOOL_MODELS: u64 = 3;
+const TOOL_MOST_MODELS: u64 = 20;
 
 impl Logics {
     pub fn events(&self, root: &Path) -> Vec<Event> {
@@ -367,11 +389,7 @@ impl Logics {
         self.models = Some(match got {
             Ok((out, why)) => {
                 let mut v = models_view(&s.checked, &out, s.generation, s.counted);
-                v.conflict = why.map(|c| LogicConflictView {
-                    lines: c.lines.iter().map(|l| *l as u32).collect(),
-                    kinds: c.kinds.into_iter().map(|(line, name, kind)| (line as u32, format!("{name} is {kind}"))).collect(),
-                    minimal: c.minimal,
-                });
+                v.conflict = why.map(conflict_view);
                 v
             }
             Err(why) => LogicModelsView { generation: s.generation, error: Some(why), ..Default::default() },
@@ -469,9 +487,11 @@ impl Logics {
                 vec![self.file_event()]
             }
             Command::LogicAsk { generation, line, more } => {
-                let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
                 let answer = if open.kind == "proof" { answer_proof(&open.text, line as usize) } else { answer_line(&open.text, open.kind == "l4f", line as usize, more) };
-                vec![Event::LogicAnswer { answer: Some(Box::new(LogicAnswerView { generation, ..answer })) }]
+                let answer = LogicAnswerView { generation, ..answer };
+                (open.cursor, open.answer) = (line, Some(answer.clone()));
+                vec![Event::LogicAnswer { answer: Some(Box::new(answer)) }]
             }
             Command::LogicSolve { generation, keep, count } => self.solve(generation, keep, count),
             Command::LogicProve { generation, line, system } => {
@@ -483,7 +503,11 @@ impl Logics {
                     Ok(text) => answer.deduction = Some(text),
                     Err(why) => answer.deduction_note = Some(why),
                 }
-                vec![Event::LogicAnswer { answer: Some(Box::new(LogicAnswerView { generation, ..answer })) }]
+                let answer = LogicAnswerView { generation, ..answer };
+                if let Some(open) = self.open.as_mut() {
+                    (open.cursor, open.answer) = (line, Some(answer.clone()));
+                }
+                vec![Event::LogicAnswer { answer: Some(Box::new(answer)) }]
             }
             Command::LogicStop => {
                 if let Some(s) = &self.solving {
@@ -491,6 +515,7 @@ impl Logics {
                 }
                 Vec::new()
             }
+            Command::LogicPractice { folder, name, kind, text } => self.practice(root, &folder, &name, &kind, &text),
             Command::LogicFromTable { names, column } => {
                 let names: Vec<String> = names.split(|c: char| c.is_whitespace() || c == ',').filter(|s| !s.is_empty()).map(String::from).collect();
                 let generation = self.open.as_ref().map_or(0, |o| o.generation);
@@ -546,6 +571,41 @@ impl Logics {
         events
     }
 
+    /// A practice problem from Notebook, opened: its file in a folder named
+    /// for its set, written from `text` the first time — after that, opened
+    /// as the student left it.
+    fn practice(&mut self, root: &Path, folder: &str, name: &str, kind: &str, text: &str) -> Vec<Event> {
+        if !matches!(kind, "logic" | "proof") {
+            return vec![notice(format!("“{kind}” is not a kind of practice file: logic or proof"), NoticeLevel::Warn)];
+        }
+        let rel = format!("{}/{}.{kind}", slug(folder), slug(name));
+        let file = match inside(root, &rel) {
+            Ok(f) => f,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        if self.open.as_ref().is_some_and(|o| o.path == file) {
+            return self.events(root);
+        }
+        if self.dirty() {
+            return vec![notice("save or discard the open file's changes before opening another".into(), NoticeLevel::Warn)];
+        }
+        if !file.exists() {
+            let made = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&file, text));
+            if let Err(e) = made {
+                return vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)];
+            }
+        }
+        match std::fs::read_to_string(&file) {
+            Ok(text) => {
+                self.show(root, file, text);
+                let mut events = self.events(root);
+                events.push(Event::LogicAnswer { answer: None });
+                events
+            }
+            Err(e) => vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)],
+        }
+    }
+
     fn show(&mut self, root: &Path, path: PathBuf, text: String) {
         self.generations += 1;
         self.solving = None;
@@ -562,6 +622,8 @@ impl Logics {
             saved: text.clone(),
             text,
             generation: self.generations,
+            cursor: 0,
+            answer: None,
         });
     }
 
@@ -582,6 +644,10 @@ impl Logics {
         let Some(open) = &mut self.open else { return Vec::new() };
         if open.text == open.saved {
             return Vec::new();
+        }
+        // A file the agent made may be in a folder not there yet.
+        if let Some(dir) = open.path.parent() {
+            let _ = std::fs::create_dir_all(dir);
         }
         match std::fs::write(&open.path, &open.text) {
             Ok(()) => {
@@ -609,6 +675,427 @@ impl Logics {
                 })
             }),
         }
+    }
+}
+
+/* ── the agent's ──────────────────────────────────────────────────── */
+
+impl Logics {
+    /// What the agent's calls changed on screen since the last time asked.
+    pub fn take_pending(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// An agent's call: its answer in words, or why there is none.
+    pub fn tool(&mut self, root: &Path, name: &str, input: &serde_json::Value) -> Result<String, String> {
+        let text = |k: &str| input.get(k).and_then(|v| v.as_str()).map(str::to_string);
+        let flag = |k: &str| input.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+        let number = |k: &str| input.get(k).and_then(|v| v.as_u64());
+        match name {
+            "logic_read" => match text("path") {
+                None => Ok(self.info(root)),
+                Some(path) => {
+                    let (text, kind, _) = self.file_text(root, &path)?;
+                    Ok(format!("{path} ({})\n{}\n{}", kind_said(&kind), numbered(&text), mistakes_said(&text, &kind)))
+                }
+            },
+            "logic_write" => self.write(root, input),
+            "logic_ask" => {
+                let more = flag("more");
+                if let Some(question) = text("question") {
+                    let l4f = flag("l4f");
+                    let q = question.trim_end();
+                    // One line is a question, asked with or without its `?`;
+                    // with declarations above it, the last statement is asked.
+                    let asked = if q.lines().count() == 1 && !q.trim_start().starts_with('?') { format!("? {}", q.trim()) } else { q.to_string() };
+                    let mut v = answer_line(&asked, l4f, asked.lines().count(), more);
+                    if v.kind == "error" && asked != q {
+                        v = answer_line(q, l4f, q.lines().count(), more);
+                    }
+                    return Ok(answer_text(&v));
+                }
+                let (text, kind, open) = self.source(root, input)?;
+                let line = number("line").map(|n| n as usize).or(open.then(|| self.open.as_ref().map_or(0, |o| o.cursor as usize))).filter(|n| *n > 0).ok_or("logic_ask: give `question`, or the `line` of the file to answer")?;
+                let v = if kind == "proof" { answer_proof(&text, line) } else { answer_line(&text, kind == "l4f", line, more) };
+                Ok(answer_text(&v))
+            }
+            "logic_solve" => {
+                let keep = number("keep").unwrap_or(TOOL_MODELS).clamp(1, TOOL_MOST_MODELS) as usize;
+                let count = flag("count");
+                let (text, kind, open) = match text("theory") {
+                    Some(t) => (t, if flag("l4f") { "l4f".to_string() } else { "logic".to_string() }, false),
+                    None => self.source(root, input)?,
+                };
+                if kind == "proof" {
+                    return Err("logic_solve: a .proof file has no models to find — logic_prove checks it".into());
+                }
+                let (theory, _) = proton_logic::read(&text, kind == "l4f").map_err(|d| format!("line {}: {}", d.line, d.message))?;
+                let checked = check(&theory).map_err(|ds| ds.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("; "))?;
+                if !checked.theory.lines.iter().any(|l| matches!(l.item, Some(Item::Symbol(_)) | Some(Item::Constraint(_)))) {
+                    return Err("there is nothing to find: a theory names functions, predicates or constants, and says what is true of them".into());
+                }
+                let stop = AtomicBool::new(false);
+                let out = finder::solve_or_stop(&checked, keep, count, TOOL_SOLVE_TIME, &stop)?;
+                let why = if out.found == 0 && out.finished { finder::conflict(&checked, CONFLICT_TIME, &stop).ok() } else { None };
+                let generation = self.open.as_ref().map_or(0, |o| o.generation);
+                let mut v = models_view(&checked, &out, generation, count);
+                v.conflict = why.map(conflict_view);
+                let said = models_text(&v, &text);
+                // The file on screen: its models shown there too.
+                if open {
+                    self.solving = None;
+                    self.models = Some(v);
+                    self.pending.push(self.models_event());
+                }
+                Ok(said)
+            }
+            "logic_prove" => {
+                if let Some(proof) = text("proof") {
+                    return Ok(report_text(&proofs::check(&proof)));
+                }
+                let mut system = text("system").unwrap_or_else(|| "fitch".into()).to_lowercase();
+                let (premises, goal) = match text("argument") {
+                    Some(a) => argument_at(&format!("? {}", a.trim().trim_start_matches('?')), "logic", 1)?,
+                    None => {
+                        let (text, kind, open) = self.source(root, input)?;
+                        if kind == "proof" {
+                            let r = proofs::check(&text);
+                            if !flag("find") {
+                                return Ok(report_text(&r));
+                            }
+                            system = r.header.system.clone();
+                            argument_at(&text, "proof", 0)?
+                        } else {
+                            let line = number("line").map(|n| n as usize).or(open.then(|| self.open.as_ref().map_or(0, |o| o.cursor as usize))).filter(|n| *n > 0).ok_or("logic_prove: give `argument`, or the `line` of the file it is on")?;
+                            argument_at(&text, &kind, line)?
+                        }
+                    }
+                };
+                Ok(match proofs::find(&system, &premises, &goal, TOOL_FIND_TIME) {
+                    Ok(found) => format!("A proof by {}, checked by Proton — a .proof file:\n\n{found}", system_said(&system)),
+                    Err(why) => format!("No proof by {} was found: {why}", system_said(&system)),
+                })
+            }
+            other => Err(format!("no such tool: {other}")),
+        }
+    }
+
+    /// The file open and the project's Logic files.
+    fn info(&self, root: &Path) -> String {
+        let files = find(root);
+        let mut out = String::new();
+        match &self.open {
+            Some(o) => out.push_str(&format!("Open in Logic: {} ({}){}\n", o.shown_path, kind_said(&o.kind), if o.text != o.saved { ", with unsaved changes" } else { "" })),
+            None => out.push_str("No file is open in Logic.\n"),
+        }
+        if files.is_empty() {
+            out.push_str("The project has no .logic, .proof or .l4f files: logic_write makes one.\n");
+        } else {
+            out.push_str("The project's Logic files:\n");
+            for f in files.iter().take(100) {
+                out.push_str(&format!("- {} ({})\n", f.path, kind_said(&f.kind)));
+            }
+            if files.len() > 100 {
+                out.push_str(&format!("and {} more\n", files.len() - 100));
+            }
+        }
+        if let Some(o) = &self.open {
+            out.push_str(&format!("\n{}:\n{}\n{}", o.shown_path, numbered(&o.text), mistakes_said(&o.text, &o.kind)));
+        }
+        out
+    }
+
+    /// What `@logic` sends: the file on screen, the line at the cursor and
+    /// its answer, and the last search's models.
+    pub fn about(&self) -> String {
+        let Some(o) = &self.open else { return "No file is open in Logic.".into() };
+        let mut out = format!("Logic file {} ({}){}\n{}\n{}", o.shown_path, kind_said(&o.kind), if o.text != o.saved { ", with unsaved changes" } else { "" }, numbered(&o.text), mistakes_said(&o.text, &o.kind));
+        match (&o.answer, o.cursor) {
+            (Some(a), line) if line > 0 => out.push_str(&format!("\nThe cursor is on line {line}. What Logic says of it:\n{}\n", answer_text(a))),
+            _ => out.push_str("\nNothing has been asked of a line yet.\n"),
+        }
+        if let Some(m) = self.models.as_ref().filter(|m| m.generation == o.generation) {
+            out.push_str(&format!("\nThe last search for models:\n{}\n", models_text(m, &o.text)));
+        }
+        out
+    }
+
+    /// A file's text: the open file's as typed, another's from the disk;
+    /// its kind; and whether it is the one open.
+    fn file_text(&self, root: &Path, path: &str) -> Result<(String, String, bool), String> {
+        let file = inside(root, path)?;
+        if let Some(o) = self.open.as_ref().filter(|o| o.path == file) {
+            return Ok((o.text.clone(), o.kind.clone(), true));
+        }
+        let text = std::fs::read_to_string(&file).map_err(|e| format!("{path}: {e}"))?;
+        let kind = file.extension().and_then(|e| e.to_str()).unwrap_or("logic").to_string();
+        Ok((text, kind, false))
+    }
+
+    /// The file a call is about: `path`, or the one open.
+    fn source(&self, root: &Path, input: &serde_json::Value) -> Result<(String, String, bool), String> {
+        match input.get("path").and_then(|v| v.as_str()) {
+            Some(path) => self.file_text(root, path),
+            None => self.open.as_ref().map(|o| (o.text.clone(), o.kind.clone(), true)).ok_or_else(|| "No file is open in Logic: give `path`, or the statement itself".to_string()),
+        }
+    }
+
+    /// A file changed, or made, as the agent asks: opened in Logic if it is
+    /// not, and held there until the person saves.
+    fn write(&mut self, root: &Path, input: &serde_json::Value) -> Result<String, String> {
+        let text = |k: &str| input.get(k).and_then(|v| v.as_str()).map(str::to_string);
+        let path = text("path").ok_or("logic_write: `path` is required")?;
+        let file = inside(root, &path)?;
+        let whole = text("text");
+        let (old, new) = (text("old_text"), text("new_text"));
+        if whole.is_none() && (old.is_none() || new.is_none()) {
+            return Err("logic_write: give `text`, the file whole, or `old_text` and `new_text`".into());
+        }
+        let opened = !self.open.as_ref().is_some_and(|o| o.path == file);
+        if opened {
+            if let Some(o) = self.open.as_ref().filter(|o| o.text != o.saved) {
+                return Err(format!("{} is open in Logic with unsaved changes: the person saves or discards them before another file is changed", o.shown_path));
+            }
+            let on_disk = match std::fs::read_to_string(&file) {
+                Ok(t) => t,
+                Err(_) if !file.exists() && whole.is_some() => String::new(),
+                Err(_) if !file.exists() => return Err(format!("{path} is not there: give `text` to make it")),
+                Err(e) => return Err(format!("{path}: {e}")),
+            };
+            self.show(root, file, on_disk);
+        }
+        let open = self.open.as_mut().expect("opened");
+        let changed = match whole {
+            Some(t) => t,
+            None => crate::review::substitute(&open.text, &old.unwrap_or_default(), &new.unwrap_or_default())?,
+        };
+        open.text = changed;
+        let (lines, said, kind) = (open.text.lines().count(), mistakes_said(&open.text, &open.kind), open.kind.clone());
+        let fresh = open.saved.is_empty() && !open.path.exists();
+        self.pending.push(self.file_event());
+        if opened {
+            self.pending.push(self.models_event());
+            self.pending.push(Event::LogicAnswer { answer: None });
+        }
+        Ok(format!(
+            "{path} ({}) {}: {lines} line{}, open in Logic and held until the person saves it with ⌘S.\n{said}",
+            kind_said(&kind),
+            if fresh { "made" } else { "changed" },
+            if lines == 1 { "" } else { "s" }
+        ))
+    }
+}
+
+/// A kind of file in words.
+fn kind_said(kind: &str) -> &'static str {
+    match kind {
+        "proof" => "a proof",
+        "l4f" => "Logic4Fun's language",
+        _ => "Proton's language",
+    }
+}
+
+fn system_said(system: &str) -> &'static str {
+    match system {
+        "sequent" => "the sequent calculus",
+        "resolution" => "resolution",
+        _ => "natural deduction",
+    }
+}
+
+/// A file with its lines numbered, as the gutter numbers them.
+fn numbered(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out: Vec<String> = lines.iter().take(MOST_LINES).enumerate().map(|(i, l)| format!("{:>4}  {l}", i + 1)).collect();
+    if lines.len() > MOST_LINES {
+        out.push(format!("… and {} lines more", lines.len() - MOST_LINES));
+    }
+    out.join("\n")
+}
+
+/// What is wrong with a file, in words: a proof's check, or the mistakes.
+fn mistakes_said(text: &str, kind: &str) -> String {
+    if kind == "proof" {
+        return report_text(&proofs::check(text));
+    }
+    let (diags, notes, _) = diagnose(text, kind);
+    let mut out = if diags.is_empty() {
+        "It reads without a mistake.".to_string()
+    } else {
+        let mut said: Vec<String> = diags.iter().take(20).map(|d| if d.col > 0 { format!("- line {}, column {}: {}", d.line, d.col, d.message) } else { format!("- line {}: {}", d.line, d.message) }).collect();
+        if diags.len() > 20 {
+            said.push(format!("and {} more", diags.len() - 20));
+        }
+        format!("Its mistakes:\n{}", said.join("\n"))
+    };
+    if !notes.is_empty() {
+        out.push_str(&format!("\nLogic4Fun's settings left out: {}", notes.join("; ")));
+    }
+    out
+}
+
+/// A `.proof` file checked, in words: the whole, then each line.
+fn report_text(r: &proofs::Report) -> String {
+    let mut out = vec![format!("The proof ({}): {}", system_said(&r.header.system), r.summary)];
+    out.extend(r.header.unread.iter().map(|d| format!("- line {} of the file: {}", d.line, d.message)));
+    for l in &r.lines {
+        let mark = if l.ok { "right" } else { "WRONG" };
+        out.push(format!("{:>3}  {}  {}  — {mark}{}", l.n, l.text, l.rule, if l.message.is_empty() { String::new() } else { format!(": {}", l.message) }));
+    }
+    out.join("\n")
+}
+
+/// Each proposition's value in a row: `p = 1, q = 0`.
+fn row_said(atoms: &[String], row: &[bool]) -> String {
+    atoms.iter().zip(row).map(|(a, v)| format!("{a} = {}", u8::from(*v))).collect::<Vec<_>>().join(", ")
+}
+
+/// What the line asked is, in words, as the panel shows it.
+pub fn answer_text(v: &LogicAnswerView) -> String {
+    let mut out = Vec::new();
+    if !v.text.is_empty() {
+        out.push(if v.line > 0 { format!("Line {}: {}", v.line, v.text) } else { v.text.clone() });
+    }
+    let note = v.proof_note.as_ref().map_or(String::new(), |n| format!(" ({n})"));
+    match v.kind.as_str() {
+        "formula" => {
+            let rows = 1u64 << v.atoms.len().min(63);
+            let models = v.models.map_or(String::new(), |m| format!(", true in {m} of its {rows} rows"));
+            out.push(format!("A {}{models}.", v.status.as_deref().unwrap_or("formula")));
+            if let Some(r) = &v.model {
+                out.push(format!("True when {}.", row_said(&v.atoms, r)));
+            }
+            if let Some(r) = &v.falsifier {
+                out.push(format!("False when {}.", row_said(&v.atoms, r)));
+            }
+        }
+        "argument" => out.push(match v.valid {
+            Some(true) => format!("Valid: the conclusion follows{note}."),
+            Some(false) => {
+                let mut s = format!("Not valid{note}.");
+                if let Some(r) = &v.countermodel {
+                    s.push_str(&format!(" The premises are true and the conclusion false when {}.", row_said(&v.atoms, r)));
+                } else if !v.open.is_empty() {
+                    s.push_str(&format!(" An open branch: {}.", v.open.iter().map(|(a, t)| format!("{a} = {}", u8::from(*t))).collect::<Vec<_>>().join(", ")));
+                }
+                if let Some(m) = &v.counter {
+                    s.push_str(&format!(" A countermodel:\n{}", model_text(m)));
+                }
+                s
+            }
+            None => format!("Neither proved nor refuted{note}."),
+        }),
+        "same" => out.push(match (v.same, &v.differ) {
+            (Some(true), _) => "Equivalent: the same in every row.".into(),
+            (_, Some(r)) => format!("Not equivalent: they differ when {}.", row_said(&v.atoms, r)),
+            _ => "Not equivalent.".into(),
+        }),
+        "proof" => {
+            if let Some(p) = &v.proof {
+                if let (Some(n), Some(rule)) = (p.n, &p.rule) {
+                    out.push(format!("Proof line {n}, by {rule}: {}{}", if p.ok { "right" } else { "wrong" }, if p.message.is_empty() { String::new() } else { format!(" — {}", p.message) }));
+                } else if !p.message.is_empty() {
+                    out.push(p.message.clone());
+                }
+                out.push(format!("The proof: {}", p.summary));
+            }
+        }
+        "nothing" => out.push("There is no statement on that line.".into()),
+        _ => out.extend(v.message.clone()),
+    }
+    // The truth table, while it is small enough to read.
+    if !v.columns.is_empty() && v.atoms.len() <= 5 {
+        let mut heads: Vec<&str> = v.atoms.iter().map(String::as_str).collect();
+        heads.extend(v.columns.iter().map(|c| c.name.as_str()));
+        let mut table = vec![heads.join(" | ")];
+        for r in 0..(1usize << v.atoms.len()) {
+            let mut cells: Vec<String> = (0..v.atoms.len()).map(|i| ((r >> (v.atoms.len() - 1 - i)) & 1).to_string()).collect();
+            cells.extend(v.columns.iter().map(|c| c.values.chars().nth(r).map_or(String::new(), String::from)));
+            table.push(cells.join(" | "));
+        }
+        out.push(format!("Its truth table:\n{}", table.join("\n")));
+    }
+    if !v.forms.is_empty() {
+        out.push(v.forms.iter().map(|f| format!("{}: {}", f.name, f.text)).collect::<Vec<_>>().join("\n"));
+    }
+    if let Some(d) = &v.deduction {
+        out.push(format!("A proof found:\n{d}"));
+    }
+    if let Some(n) = &v.deduction_note {
+        out.push(format!("No proof was found: {n}"));
+    }
+    out.join("\n")
+}
+
+/// A model in words: each symbol's values.
+fn model_text(m: &LogicModelView) -> String {
+    let mut out = Vec::new();
+    if !m.sizes.is_empty() {
+        out.push(format!("sizes: {}", m.sizes.iter().map(|(s, n)| format!("{s} has {n}")).collect::<Vec<_>>().join(", ")));
+    }
+    for t in &m.tables {
+        match t.shape.as_str() {
+            "value" => out.push(format!("{} = {}", t.name, t.cells.first().and_then(|r| r.first()).map_or("—", String::as_str))),
+            "row" => out.push(format!("{}: {}", t.name, t.cols.iter().zip(t.cells.first().into_iter().flatten()).map(|(a, v)| format!("{a} ↦ {v}")).collect::<Vec<_>>().join(", "))),
+            "grid" => {
+                out.push(format!("{} (down: its first argument; across: {}):", t.name, t.cols.join(" ")));
+                for (r, cells) in t.rows.iter().zip(&t.cells) {
+                    out.push(format!("  {r}: {}", cells.join(" ")));
+                }
+            }
+            _ => {
+                for line in &t.cells {
+                    if let Some((value, args)) = line.split_last() {
+                        out.push(format!("{}({}) = {value}", t.name, args.join(", ")));
+                    }
+                }
+            }
+        }
+    }
+    out.join("\n")
+}
+
+/// A search's outcome in words, the lines of a conflict quoted from `text`.
+fn models_text(v: &LogicModelsView, text: &str) -> String {
+    if let Some(e) = &v.error {
+        return e.clone();
+    }
+    if v.running {
+        return "Still searching.".into();
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let quote = |l: u32| format!("  {l}: {}", lines.get(l as usize - 1).map_or("", |t| t.trim()));
+    if v.found == 0 {
+        let mut out = if v.finished { "There is no model.".to_string() } else { format!("No model was found in {:.1} s; the search did not finish.", v.elapsed_ms as f64 / 1000.0) };
+        if let Some(c) = &v.conflict {
+            out.push_str(&format!("\nThese cannot all hold{}:", if c.minimal { " (and without any one of them, there is a model)" } else { "" }));
+            for l in &c.lines {
+                out.push('\n');
+                out.push_str(&quote(*l));
+            }
+            for (l, said) in &c.kinds {
+                out.push_str(&format!("\n  {l}: {said}"));
+            }
+        }
+        return out;
+    }
+    let how_many = match (v.finished, v.timed_out) {
+        (true, _) => format!("{} model{}, all there are{}", v.found, if v.found == 1 { "" } else { "s" }, if v.symmetry { " up to which unnamed element is which" } else { "" }),
+        (false, true) => format!("{} model{} found before the search stopped, after {:.1} s", v.found, if v.found == 1 { "" } else { "s" }, v.elapsed_ms as f64 / 1000.0),
+        (false, false) => format!("at least {} models (counting them all is `count`)", v.found),
+    };
+    let mut out = format!("{how_many}.");
+    for (k, m) in v.models.iter().enumerate() {
+        out.push_str(&format!("\n\nModel {}:\n{}", k + 1, model_text(m)));
+    }
+    out
+}
+
+fn conflict_view(c: Conflict) -> LogicConflictView {
+    LogicConflictView {
+        lines: c.lines.iter().map(|l| *l as u32).collect(),
+        kinds: c.kinds.into_iter().map(|(line, name, kind)| (line as u32, format!("{name} is {kind}"))).collect(),
+        minimal: c.minimal,
     }
 }
 

@@ -579,6 +579,101 @@ impl Agent {
                     "required": ["name"]
                 }),
             },
+            // Logic's files. Writes are held until the person saves.
+            Tool {
+                name: "logic_read".into(),
+                description: "The file open in Logic mode (with its lines numbered and its mistakes, or a proof's check) \
+                              and the project's .logic, .proof and .l4f files; or, with `path`, that file — the open one \
+                              as typed, unsaved changes and all."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": { "path": { "type": "string" } }
+                }),
+            },
+            Tool {
+                name: "logic_write".into(),
+                description: "Change a Logic file, or make one: `text` the file whole, or `old_text` (once in the file) \
+                              and `new_text`. It is opened in Logic and held until the person saves; answers with its \
+                              mistakes, or a proof's check. Proton's language: sorts `person = Ann | Bo`, `age = 1..3`, \
+                              `thing = size 4` (four elements), `box = size 2..5` (as many as a model needs); symbols \
+                              `of: person -> age  one-to-one` (onto, partial, symmetric), `likes: person, person -> bool`, \
+                              `p, q: bool`; constraints, one a line: `not`, `and`, `or`, `->`, `<->`, `xor`, `=`, `!=`, \
+                              `<`, `+`, `all x: …`, `some x in person: …`, `exactly 2 x: …`; questions `? p -> q`, \
+                              `? p, p -> q |= q`, `? A == B`. `#` comments. A .proof file is a header — `system fitch` \
+                              (or sequent, resolution), `premises A, B`, `goal C` — then its numbered lines: Fitch's \
+                              `3  | p  assume`, `5  q  ->E 1, 3`; a sequent `2  p, q |- p  Ax`, cited lines after the \
+                              rule; a clause `4  not P(x) or Q(x)  premise 1` / `goal` / `resolve 2, 3` / `factor 4`."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "In the project, ending .logic, .proof or .l4f." },
+                        "text": { "type": "string" },
+                        "old_text": { "type": "string" },
+                        "new_text": { "type": "string" }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            Tool {
+                name: "logic_ask".into(),
+                description: "Logic's calculator: a formula's truth table, whether it is a tautology, a contradiction or \
+                              contingent, and its forms (least sum of products, CNF, DNF, NNF, NAND, NOR); whether an \
+                              argument `A, B |= C` is valid, with a countermodel or a tableau's verdict for first-order \
+                              ones; whether `A == B`. `question` is one statement (declarations may come above it, \
+                              their last statement asked); or `line` of the file open (or of `path`), the cursor's \
+                              when left out. `more` finds least forms for up to 16 propositions."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "question": { "type": "string" },
+                        "line": { "type": "integer" },
+                        "path": { "type": "string" },
+                        "l4f": { "type": "boolean", "description": "The question is in Logic4Fun's language." },
+                        "more": { "type": "boolean" }
+                    }
+                }),
+            },
+            Tool {
+                name: "logic_solve".into(),
+                description: "The models of a theory — the file open in Logic, `path`, or `theory` given here — found by \
+                              Proton's model finder: the first `keep` (3 unless asked, 20 at most) with each symbol's \
+                              values, `count` to count them all; or, when there is none, the lines that cannot all hold. \
+                              The file open shows them too. Ten seconds at most."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "theory": { "type": "string" },
+                        "path": { "type": "string" },
+                        "l4f": { "type": "boolean" },
+                        "keep": { "type": "integer" },
+                        "count": { "type": "boolean" }
+                    }
+                }),
+            },
+            Tool {
+                name: "logic_prove".into(),
+                description: "A proof found, as a .proof file Proton has checked — of `argument` (`A, B |= C`, or a formula) \
+                              in `system`: fitch (natural deduction, the default), sequent (Gentzen's LK) or resolution \
+                              (clause form shown step by step, then a refutation) — or of the argument at `line` of the \
+                              file open (or of `path`). A .proof file is checked line by line instead, each mistake said; \
+                              `find` finds one for its header. `proof` checks a .proof file's text given here."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "argument": { "type": "string" },
+                        "system": { "type": "string", "enum": ["fitch", "sequent", "resolution"] },
+                        "line": { "type": "integer" },
+                        "path": { "type": "string" },
+                        "proof": { "type": "string" },
+                        "find": { "type": "boolean" }
+                    }
+                }),
+            },
         ]
     }
 
@@ -1142,7 +1237,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 23);
+        assert_eq!(tools.len(), 28);
         // `search_library` has to say how to cite, because the bracketed
         // citation is the only thing that makes a result clickable — and an
         // answer about somebody's notes that they cannot check against the
@@ -1166,6 +1261,10 @@ mod tests {
                 editing.description
             );
         }
+        // Logic's writes are held, and it says so: a model told only "write
+        // a file" reports the file as written, and it is not, yet.
+        let writing = tools.iter().find(|t| t.name == "logic_write").unwrap();
+        assert!(writing.description.contains("held until the person saves"), "{}", writing.description);
         // The modes that left took their tools with them.
         let gone = ["pdf_", "latex_log", "game_", "canvas_", "flow_"];
         assert!(!tools.iter().any(|t| gone.iter().any(|g| t.name.starts_with(g))), "a tool of a mode that left is still offered");

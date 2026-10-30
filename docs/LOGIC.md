@@ -398,6 +398,31 @@ under a millisecond. In the window, an argument that holds or is undecided
 offers each system's proof — Natural deduction, Sequent calculus,
 Resolution — to read and copy as a `.proof` file; a proof file finds its
 own system's.
+L8 — the agent, and Notebook. Five tools answer in words: `logic_ask` (the
+calculator, on a question given or a line of a file — the truth table while
+it has five propositions or fewer, the verdict, the forms, a countermodel's
+row), `logic_solve` (a theory's models, each symbol's values said, or the
+lines that cannot all hold, quoted; ten seconds at most, the file on screen
+showing them too), `logic_prove` (a proof found in a named system, checked
+by Proton before it is given, or a `.proof` file checked line by line),
+`logic_read` (the file open, numbered, with its mistakes, and the project's
+Logic files) and `logic_write` (a file changed by `old_text`/`new_text` or
+made whole, opened in Logic and held until saved — with an unsaved file
+open, another is refused). `@logic` sends the file on screen, the line at
+the cursor (the window asks each line the caret moves to, so the core
+knows it) and what Logic said of it, and the last search's models. Logic's
+window has the agent's dock, shut until asked for, as Circuit's. Notebook
+makes "Logic practice" (kept as `studio/logic/V001.json`): formulas to
+classify — tautology, contradiction or contingent; valid or not; equivalent
+or not — arguments to prove in a named system, and puzzles to write as
+theories. Each is checked by the engine before it is kept: a claim against
+the calculator (or, past propositions, the tableau), an argument by finding
+its proof (kept as the reference answer), a puzzle by counting its
+reference theory's models, which must be as many as it says; a problem the
+engine disagrees with is left out. A formula is answered in Notebook by
+choosing; each problem opens in Logic as a file in a folder named for the
+set — a worksheet line, a `.proof` header to write under, or the puzzle as
+comments — written the first time and opened as the student left it after.
 
 | | What | Proved by |
 |---|---|---|

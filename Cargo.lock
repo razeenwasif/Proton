@@ -4544,6 +4544,7 @@ dependencies = [
  "libc",
  "proton-circuit",
  "proton-library",
+ "proton-logic",
  "proton-research",
  "serde",
  "serde_json",

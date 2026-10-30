@@ -197,11 +197,12 @@ impl Layout {
                 DocumentKind::CircuitProject,
             ),
             // The project's logic files and the one open, with what the line
-            // at the cursor is beside it; the agent joins in L8.
+            // at the cursor is beside it; and the agent with its logic
+            // tools — shut until asked for.
             ModeId::Logic => (
                 Slot::Explorer,
                 Slot::Worksheet,
-                Slot::Empty,
+                Slot::Agent,
                 DocumentKind::LogicFile,
             ),
         };

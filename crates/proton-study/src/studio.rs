@@ -28,6 +28,7 @@ use ts_rs::TS;
 
 use crate::audio::{self, AudioFormat, StudyChapter, StudySegment};
 use crate::circuits;
+use crate::logic;
 use crate::code;
 use crate::deck::{self, StudyCard};
 use crate::exam;
@@ -64,6 +65,9 @@ pub enum Make {
     /// Digital logic to build in Circuit mode, each with a test table its
     /// reference answer was checked against.
     Circuits,
+    /// Logic to do in Logic mode — formulas to classify, arguments to
+    /// prove, puzzles to write — each checked by Logic's engine.
+    Logic,
     /// A paper like the past papers, to be sat against the clock.
     Exam,
     /// A past paper itself, transcribed, marked by its solutions.
@@ -120,6 +124,8 @@ pub enum Shape {
     Coding,
     /// Circuit problems, in `studio/circuits/`.
     Circuits,
+    /// Logic problems, in `studio/logic/`.
+    Logic,
     /// What was found on the web, in `studio/found/`.
     Found,
     /// A source's guide, in `.notebook/guides/`.
@@ -149,6 +155,7 @@ impl Make {
             Make::Practice => "Practice problems",
             Make::Coding => "Coding practice",
             Make::Circuits => "Circuit practice",
+            Make::Logic => "Logic practice",
             Make::Exam => "Practice exam",
             Make::PastPaper => "Past paper",
             Make::Diagnostic => "Diagnostic quiz",
@@ -178,6 +185,7 @@ impl Make {
             Make::Infographic => Shape::Graphic,
             Make::Coding => Shape::Coding,
             Make::Circuits => Shape::Circuits,
+            Make::Logic => Shape::Logic,
             Make::Discover | Make::DeepResearch => Shape::Found,
             Make::SourceGuide => Shape::Guide,
             Make::Labels => Shape::Labels,
@@ -204,6 +212,7 @@ impl Make {
             Make::Practice => "practice",
             Make::Coding => "coding",
             Make::Circuits => "circuits",
+            Make::Logic => "logic",
             Make::Exam => "exam",
             Make::PastPaper => "pastPaper",
             Make::Diagnostic => "diagnostic",
@@ -233,7 +242,7 @@ impl Make {
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Coding, Make::Circuits, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels, Make::Readable]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Coding, Make::Circuits, Make::Logic, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels, Make::Readable]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -430,6 +439,7 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
         Make::Slides => slides::prompt(options.amount, &options.focus, &options.language, &course),
         Make::Infographic => infographic::prompt(&options.focus, &course),
         Make::Circuits => circuits::prompt(options.count.map_or(options.amount.problems(), |c| c as usize), options.level.says(), &options.focus, &course),
+        Make::Logic => logic::prompt(options.count.map_or(options.amount.problems(), |c| c as usize), options.level.says(), &options.focus, &course),
         Make::Coding => code::prompt(
             options.count.map_or(options.amount.problems(), |c| c as usize),
             options.level.says(),
@@ -621,6 +631,7 @@ pub fn schema(make: Make, options: &Options) -> Option<Value> {
         Shape::Graphic => infographic::schema(),
         Shape::Coding => code::schema(),
         Shape::Circuits => circuits::schema(),
+        Shape::Logic => logic::schema(),
         Shape::Found => found::schema(),
         Shape::Guide => guide::schema(),
         Shape::Labels => guide::labels_schema(),
@@ -765,6 +776,8 @@ pub enum StudyMadeBody {
     },
     /// Circuits to build: each its statement, signals, table and reference.
     Circuits { title: String, problems: Vec<circuits::StudyCircuitProblem> },
+    /// Logic to do: each its statement, its kind, and the engine's answer.
+    Logic { title: String, problems: Vec<logic::StudyLogicProblem> },
     /// What was found on the web: a report of it, for Deep Research, and
     /// the sources.
     Found { title: String, report: String, found: Vec<StudyFound> },
@@ -819,6 +832,7 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
     match make.shape() {
         Shape::Coding => code::mend(&mut value),
         Shape::Circuits => circuits::mend(&mut value),
+        Shape::Logic => logic::mend(&mut value),
         _ => crate::tex::mend_json(&mut value),
     }
     match make.shape() {
@@ -861,6 +875,11 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
             // Problems whose reference fails their own table are left out.
             let (title, problems, _left_out) = circuits::read(&value)?;
             Ok(StudyMadeBody::Circuits { title, problems })
+        }
+        Shape::Logic => {
+            // Problems the engine disagrees with are left out.
+            let (title, problems, _left_out) = logic::read(&value)?;
+            Ok(StudyMadeBody::Logic { title, problems })
         }
         Shape::Coding => {
             let (title, problems) = code::read(&value, &runnable(options))?;
@@ -946,6 +965,7 @@ impl Book {
             Shape::Graphic => self.dir().join("studio/graphics"),
             Shape::Coding => self.dir().join("studio/coding"),
             Shape::Circuits => self.dir().join("studio/circuits"),
+            Shape::Logic => self.dir().join("studio/logic"),
             Shape::Found => self.dir().join("studio/found"),
             Shape::Guide | Shape::Labels | Shape::Pages => self.dir().join(".notebook"),
             Shape::Objectives => self.dir().to_path_buf(),
@@ -1062,6 +1082,7 @@ impl Book {
             Shape::Graphic => ('G', "json"),
             Shape::Coding => ('K', "json"),
             Shape::Circuits => ('C', "json"),
+            Shape::Logic => ('V', "json"),
             Shape::Found => ('W', "json"),
             Shape::Objectives => ('O', "json"),
             Shape::Guide | Shape::Labels | Shape::Pages => return Err("kept beside the sources".into()),
@@ -1109,7 +1130,7 @@ impl Book {
     /// Everything made, the latest first.
     pub fn made(&self) -> Vec<StudyMade> {
         let mut out: Vec<StudyMade> = Vec::new();
-        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json"), (Shape::Slides, "json"), (Shape::Graphic, "json"), (Shape::Coding, "json"), (Shape::Circuits, "json"), (Shape::Found, "json")] {
+        for (shape, ext) in [(Shape::Prose, "md"), (Shape::Map, "json"), (Shape::Table, "json"), (Shape::Deck, "json"), (Shape::Questions, "json"), (Shape::Overview, "json"), (Shape::Audio, "json"), (Shape::Slides, "json"), (Shape::Graphic, "json"), (Shape::Coding, "json"), (Shape::Circuits, "json"), (Shape::Logic, "json"), (Shape::Found, "json")] {
             for entry in std::fs::read_dir(self.studio(shape)).into_iter().flat_map(|e| e.flatten()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let Some(id) = name.strip_suffix(&format!(".{ext}")) else { continue };
@@ -1141,6 +1162,7 @@ impl Book {
                 "G" => (self.studio(Shape::Graphic).join(format!("{id}.json")), false),
                 "K" => (self.studio(Shape::Coding).join(format!("{id}.json")), false),
                 "C" => (self.studio(Shape::Circuits).join(format!("{id}.json")), false),
+                "V" => (self.studio(Shape::Logic).join(format!("{id}.json")), false),
                 "W" => (self.studio(Shape::Found).join(format!("{id}.json")), false),
                 _ => return None,
             },
@@ -1200,6 +1222,7 @@ impl Book {
                 python: serde_json::from_value(value["python"].clone()).ok().flatten(),
             },
             Shape::Circuits => StudyMadeBody::Circuits { title: header.title.clone(), problems: serde_json::from_value(value["problems"].clone()).ok()? },
+            Shape::Logic => StudyMadeBody::Logic { title: header.title.clone(), problems: serde_json::from_value(value["problems"].clone()).ok()? },
             Shape::Prose | Shape::Mark | Shape::Guide | Shape::Labels | Shape::Pages => return None,
         };
         Some((made_of(id, header), body))

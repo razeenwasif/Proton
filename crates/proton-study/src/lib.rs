@@ -34,6 +34,7 @@ pub mod found;
 pub mod fsrs;
 pub mod guide;
 pub mod lock;
+pub mod logic;
 pub mod mastery;
 pub mod model;
 pub mod overview;

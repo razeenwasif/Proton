@@ -291,7 +291,7 @@ fn logic_shows_its_files_answers_the_line_at_the_cursor_and_the_quit_prompt_name
     let mut space = Workspace::rooted(root.clone());
     let events = space.apply(Command::SetMode { mode: ModeId::Logic });
     let layout = layout_in(&events).expect("a mode change carries its layout");
-    assert_eq!((layout.stage, layout.document), (Slot::Worksheet, DocumentKind::LogicFile));
+    assert_eq!((layout.stage, layout.dock, layout.document), (Slot::Worksheet, Slot::Agent, DocumentKind::LogicFile));
     let found = events.iter().find_map(|e| match e {
         Event::LogicHome { files } => Some(files.iter().map(|f| f.path.clone()).collect::<Vec<_>>()),
         _ => None,
@@ -315,6 +315,95 @@ fn logic_shows_its_files_answers_the_line_at_the_cursor_and_the_quit_prompt_name
     assert_eq!(space.unsaved(), vec!["week1/sheet.logic".to_string()]);
     assert!(space.save_unsaved().is_empty());
     assert_eq!(std::fs::read_to_string(root.join("week1/sheet.logic")).unwrap(), "? p or not p\n");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn the_agents_logic_tools_ask_solve_prove_and_write_held_until_saved() {
+    let root = project("logic-agent");
+    let mut space = Workspace::rooted(root.clone());
+    space.apply(Command::SetMode { mode: ModeId::Logic });
+    let none = space.run_tool("logic_read", &serde_json::json!({})).unwrap();
+    assert!(none.contains("No file is open in Logic") && none.contains("no .logic, .proof or .l4f files"), "{none}");
+    // The calculator, on a question given in the call.
+    let asked = space.run_tool("logic_ask", &serde_json::json!({"question": "p -> q"})).unwrap();
+    assert!(asked.contains("A contingent, true in 3 of its 4 rows.") && asked.contains("False when p = 1, q = 0.") && asked.contains("p | q | p -> q\n0 | 0 | 1"), "{asked}");
+    let argued = space.run_tool("logic_ask", &serde_json::json!({"question": "p or q |= p"})).unwrap();
+    assert!(argued.contains("Not valid") && argued.contains("when p = 0, q = 1"), "{argued}");
+    let first = space.run_tool("logic_ask", &serde_json::json!({"question": "all x: man(x) -> mortal(x), man(socrates) |= mortal(socrates)"})).unwrap();
+    assert!(first.contains("Valid: the conclusion follows"), "{first}");
+    // A theory written, held until saved, and its models found.
+    let theory = "person = Ann | Bo | Cy\nage = 1..3\nof: person -> age  one-to-one\n\nof(Ann) > of(Bo)\nof(Cy) != 3\n";
+    let wrote = space.run_tool("logic_write", &serde_json::json!({"path": "puzzles/ages.logic", "text": theory})).unwrap();
+    assert!(wrote.contains("puzzles/ages.logic (Proton's language) made: 6 lines") && wrote.contains("It reads without a mistake."), "{wrote}");
+    assert_eq!(space.unsaved(), vec!["puzzles/ages.logic".to_string()], "an agent's file is held");
+    assert!(!root.join("puzzles/ages.logic").exists());
+    let solved = space.run_tool("logic_solve", &serde_json::json!({"count": true})).unwrap();
+    assert!(solved.starts_with("2 models, all there are.") && solved.contains("of: Ann ↦ 3, Bo ↦ 1, Cy ↦ 2"), "{solved}");
+    // A change that cannot all hold: the lines that say so.
+    space.run_tool("logic_write", &serde_json::json!({"path": "puzzles/ages.logic", "old_text": "of(Cy) != 3", "new_text": "of(Cy) != 3\nof(Bo) = 3"})).unwrap();
+    let clash = space.run_tool("logic_solve", &serde_json::json!({})).unwrap();
+    assert!(clash.contains("There is no model.") && clash.contains("  7: of(Bo) = 3") && clash.contains("  5: of(Ann) > of(Bo)"), "{clash}");
+    let bad = space.run_tool("logic_write", &serde_json::json!({"path": "puzzles/ages.logic", "old_text": "of(Bo) = 3", "new_text": "of(Bo) = "})).unwrap();
+    assert!(bad.contains("Its mistakes:\n- line 7"), "{bad}");
+    assert!(space.run_tool("logic_write", &serde_json::json!({"path": "other.logic", "text": "p\n"})).unwrap_err().contains("unsaved changes"));
+    assert!(space.save_unsaved().is_empty());
+    assert!(std::fs::read_to_string(root.join("puzzles/ages.logic")).unwrap().ends_with("of(Bo) = \n"));
+    // Proofs, found in each system and checked.
+    for system in ["fitch", "sequent", "resolution"] {
+        let found = space.run_tool("logic_prove", &serde_json::json!({"argument": "p -> q, q -> r |= p -> r", "system": system})).unwrap();
+        assert!(found.contains("checked by Proton") && found.contains(&format!("system {system}")), "{found}");
+    }
+    let refused = space.run_tool("logic_prove", &serde_json::json!({"argument": "p or q |= p"})).unwrap();
+    assert!(refused.starts_with("No proof by natural deduction was found"), "{refused}");
+    let proof = "system fitch\npremises p -> q, p\ngoal q\n\n1  p -> q  premise\n2  p       premise\n3  q       ->E 2, 2\n";
+    let checked = space.run_tool("logic_prove", &serde_json::json!({"proof": proof})).unwrap();
+    assert!(checked.contains("3  q  →E  — WRONG"), "{checked}");
+    // A proof file of its own: checked as it is, and its proof found.
+    space.run_tool("logic_write", &serde_json::json!({"path": "mp.proof", "text": proof})).unwrap();
+    let read = space.run_tool("logic_read", &serde_json::json!({})).unwrap();
+    assert!(read.contains("Open in Logic: mp.proof (a proof), with unsaved changes") && read.contains("   7  3  q       ->E 2, 2") && read.contains("- puzzles/ages.logic"), "{read}");
+    let mended = space.run_tool("logic_write", &serde_json::json!({"path": "mp.proof", "old_text": "->E 2, 2", "new_text": "->E 1, 2"})).unwrap();
+    assert!(mended.contains("The proof (natural deduction): a proof of q"), "{mended}");
+    let found = space.run_tool("logic_prove", &serde_json::json!({"find": true})).unwrap();
+    assert!(found.contains("A proof by natural deduction"), "{found}");
+    // @logic: the file on screen, the line at the cursor, and its answer.
+    let generation = space
+        .apply(Command::LogicOpen { path: "mp.proof".into() })
+        .iter()
+        .find_map(|e| match e {
+            Event::LogicFile { file: Some(f) } => Some(f.generation),
+            _ => None,
+        })
+        .expect("the proof open");
+    space.apply(Command::LogicAsk { generation, line: 7, more: false });
+    let context = space.with_context("is @logic right?");
+    assert!(context.contains("# @logic\nLogic file mp.proof (a proof)") && context.contains("The cursor is on line 7. What Logic says of it:\nLine 7: q\nProof line 3, by →E: right"), "{context}");
+    assert!(space.run_tool("logic_read", &serde_json::json!({"path": "../x.logic"})).is_err());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_practice_problem_from_notebook_opens_in_logic_and_keeps_the_students_work() {
+    let root = project("logic-practice");
+    let mut space = Workspace::rooted(root.clone());
+    space.apply(Command::SetMode { mode: ModeId::Logic });
+    let practise = |space: &mut Workspace| {
+        space.apply(Command::LogicPractice { folder: "Validity and puzzles".into(), name: "Hypothetical syllogism".into(), kind: "proof".into(), text: "system fitch\npremises p -> q, q -> r\ngoal p -> r\n".into() })
+    };
+    let opened = practise(&mut space).iter().find_map(|e| match e {
+        Event::LogicFile { file: Some(f) } => Some(f.path.clone()),
+        _ => None,
+    });
+    assert_eq!(opened.as_deref(), Some("validity-and-puzzles/hypothetical-syllogism.proof"));
+    let file = root.join("validity-and-puzzles/hypothetical-syllogism.proof");
+    std::fs::write(&file, "system fitch\npremises p -> q, q -> r\ngoal p -> r\n\n1  p -> q  premise\n").unwrap();
+    space.apply(Command::LogicClose { discard: false });
+    let again = practise(&mut space).iter().find_map(|e| match e {
+        Event::LogicFile { file: Some(f) } => Some(f.text.clone()),
+        _ => None,
+    });
+    assert!(again.unwrap().ends_with("1  p -> q  premise\n"), "the student's work was written over");
     let _ = std::fs::remove_dir_all(root);
 }
 

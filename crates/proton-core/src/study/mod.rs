@@ -2088,6 +2088,7 @@ impl Study {
             StudyMadeBody::Graphic { blocks, .. } => blocks.iter().flat_map(|b| b.cites.iter()).map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "),
             StudyMadeBody::Coding { problems, .. } => problems.iter().map(|p| format!("{}\n{}", p.prompt, p.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n"),
             StudyMadeBody::Circuits { problems, .. } => problems.iter().map(|p| format!("{}\n{}", p.statement, p.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n"),
+            StudyMadeBody::Logic { problems, .. } => problems.iter().map(|p| format!("{}\n{}", p.statement, p.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n"),
             // What the web gave cites the web, by number, not the notebook;
             // a guide and labels are shown with their sources.
             StudyMadeBody::Found { .. } | StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } | StudyMadeBody::Pages { .. } => String::new(),

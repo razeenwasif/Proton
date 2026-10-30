@@ -1490,6 +1490,7 @@ impl Workspace {
             | Command::LogicSolve { .. }
             | Command::LogicStop
             | Command::LogicProve { .. }
+            | Command::LogicPractice { .. }
             | Command::LogicFromTable { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.logics.apply(&root, command);
@@ -3924,6 +3925,10 @@ impl Workspace {
             if crate::circuit::TOOLS.contains(&call.name.as_str()) {
                 events.extend(self.circuits.take_pending());
             }
+            // And a Logic file written, or its models found.
+            if crate::logic::TOOLS.contains(&call.name.as_str()) {
+                events.extend(self.logics.take_pending());
+            }
             self.agent.answer(&call.id, answer);
         }
 
@@ -4162,6 +4167,7 @@ impl Workspace {
                 crate::mention::Mention::Dataframe => self.selected_frame(),
                 crate::mention::Mention::Sheet => self.sheets.about(),
                 crate::mention::Mention::Circuit => self.circuits.about(),
+                crate::mention::Mention::Logic => self.logics.about(),
             });
         }
         out
@@ -4929,6 +4935,12 @@ impl Workspace {
             name if crate::circuit::TOOLS.contains(&name) => {
                 let root = self.root().to_path_buf();
                 self.circuits.tool(&root, name, input)
+            }
+
+            // Logic's files: asked, solved, proved, and written — held too.
+            name if crate::logic::TOOLS.contains(&name) => {
+                let root = self.root().to_path_buf();
+                self.logics.tool(&root, name, input)
             }
 
             other => Err(format!("no such tool: {other}")),

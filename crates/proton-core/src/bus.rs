@@ -845,6 +845,14 @@ pub enum Command {
         line: u32,
         system: String,
     },
+    /// A practice problem from Notebook opened in Logic: `folder/name.kind`
+    /// (`kind` is `logic` or `proof`), written from `text` the first time.
+    LogicPractice {
+        folder: String,
+        name: String,
+        kind: String,
+        text: String,
+    },
     /// A truth table's column — `0`, `1`, `x` — read back as formulas over
     /// the names given (spaces or commas between), or `p`, `q`, `r`.
     LogicFromTable {

@@ -7,6 +7,7 @@ import type { StudyCircuitProblem } from "./StudyCircuitProblem";
 import type { StudyCodingProblem } from "./StudyCodingProblem";
 import type { StudyFound } from "./StudyFound";
 import type { StudyGraphicStyle } from "./StudyGraphicStyle";
+import type { StudyLogicProblem } from "./StudyLogicProblem";
 import type { StudyMapNode } from "./StudyMapNode";
 import type { StudyObjective } from "./StudyObjective";
 import type { StudyOverviewTopic } from "./StudyOverviewTopic";
@@ -24,4 +25,4 @@ export type StudyMadeBody = { "shape": "prose", markdown: string, } | { "shape":
 /**
  * The Python its problems were checked with, and are run with.
  */
-python: StudyPythonUsed | null, } | { "shape": "circuits", title: string, problems: Array<StudyCircuitProblem>, } | { "shape": "found", title: string, report: string, found: Array<StudyFound>, } | { "shape": "guide", summary: string, topics: Array<string>, questions: Array<string>, } | { "shape": "labels", labels: { [key in string]?: Array<string> }, } | { "shape": "pages", pages: Array<[number, string]>, } | { "shape": "overview", topics: Array<StudyOverviewTopic>, quiz: Array<StudyQuestion>, deckId: string | null, quizId: string | null, };
+python: StudyPythonUsed | null, } | { "shape": "circuits", title: string, problems: Array<StudyCircuitProblem>, } | { "shape": "logic", title: string, problems: Array<StudyLogicProblem>, } | { "shape": "found", title: string, report: string, found: Array<StudyFound>, } | { "shape": "guide", summary: string, topics: Array<string>, questions: Array<string>, } | { "shape": "labels", labels: { [key in string]?: Array<string> }, } | { "shape": "pages", pages: Array<[number, string]>, } | { "shape": "overview", topics: Array<StudyOverviewTopic>, quiz: Array<StudyQuestion>, deckId: string | null, quizId: string | null, };
