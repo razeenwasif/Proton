@@ -4467,6 +4467,7 @@ dependencies = [
 name = "proton-logic"
 version = "0.0.1"
 dependencies = [
+ "proton-circuit",
  "serde",
 ]
 

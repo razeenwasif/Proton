@@ -5,8 +5,11 @@
 //! - [`l4f`]: Logic for Fun's language, read and written.
 //! - [`types`]: a theory's names checked, each variable given its sort.
 //! - [`eval`]: formulas worked out in a model.
+//! - [`calc`]: the calculator: truth tables, properties, forms, arguments,
+//!   equivalence, and a formula for a truth table.
 
 pub mod ast;
+pub mod calc;
 pub mod eval;
 pub mod l4f;
 pub mod lex;

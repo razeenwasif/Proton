@@ -283,6 +283,15 @@ impl Checker {
                     Some(t) => Some(t),
                     None => self.infer(a, scope, tb.as_ref(), last),
                 };
+                // Neither side saying: `p = q` between undeclared names is
+                // between propositions.
+                let loose = |e: &Expr, c: &Checker| matches!(e, Expr::Name(n) if !scope.iter().any(|(v, _)| v == n) && !c.taken(n));
+                let (ta, tb) = match (ta, tb) {
+                    (None, None) if matches!(op, Op::Eq | Op::Ne) && loose(a, self) && loose(b, self) => {
+                        (self.infer(a, scope, Some(&Ty::Bool), last), self.infer(b, scope, Some(&Ty::Bool), last))
+                    }
+                    other => other,
+                };
                 match (&ta, &tb) {
                     (Some(x), Some(y)) => {
                         let same = x == y || (self.sig.numeric(x) && self.sig.numeric(y)) || (self.sig.ordered(x) && *y == Ty::Int) || (self.sig.ordered(y) && *x == Ty::Int);

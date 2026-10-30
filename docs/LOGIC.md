@@ -106,7 +106,8 @@ calculator's box:
   model; the number of models.
 - **Equivalent forms:** negation normal form, CNF and DNF, the full (canonical)
   CNF and DNF, the least sum of products and product of sums (Circuit's
-  Quine–McCluskey), and the formula in NAND only and NOR only.
+  Quine–McCluskey; as a formula is typed up to 10 propositions, past that
+  when asked), and the formula in NAND only and NOR only.
 - **A Karnaugh map** for two to six propositions, groups ringed, as Circuit
   draws them.
 - **Equivalence** of two formulas, with a row where they differ if they do.
@@ -238,6 +239,23 @@ model, partial functions' missing values included, a model's tables checked
 against their kinds (one-to-one, onto, symmetric, total). Checked on a
 puzzle written here in both languages, and on eight queens. Logic4Fun's text
 is checked by reading it back, not by the site's solver.
+L1 — the calculator's engine (`calc`): a question's formulas made
+propositional, `=` and `!=` between formulas read as `<->` and `xor`;
+truth tables up to 16 propositions, with a column for each part of a
+formula up to 10; tautology, contradiction or contingent, with a model and
+a row that falsifies it, and the models counted up to 20 propositions —
+past that, the formula is made clauses by Tseitin's encoding and searched
+by DPLL, which answers without counting (an argument over 26 propositions,
+a chain of 30); arguments valid or a countermodel; equivalence or a row
+where two formulas differ; negation normal form, CNF and DNF by
+distributing (clauses that hold anyway, or that another already says,
+dropped), the full forms, and — up to 10 propositions, quick enough to
+answer as a formula is typed — the least sum of products and product of
+sums by Circuit's Quine–McCluskey, with NAND-only and NOR-only forms built
+from them; and a column of `0`, `1` and `x` read back as formulas. A form
+too long to read is left out rather than made: negation normal form's size
+is reckoned first, since `<->` and `xor` double what they hold. Each form
+is checked equivalent to its formula by truth table.
 
 | | What | Proved by |
 |---|---|---|
