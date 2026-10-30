@@ -17,4 +17,8 @@ figures: Array<string>,
 /**
  * 3D scenes it saved.
  */
-scenes: Array<string>, record: Record<string, unknown>, };
+scenes: Array<string>, 
+/**
+ * Molecules it saved, by the endings in [`MOLECULES`].
+ */
+molecules: Array<string>, record: Record<string, unknown>, };

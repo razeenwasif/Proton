@@ -214,6 +214,7 @@ fn sandbox_entry(run: &Run, experiment: &Experiment) -> String {
         }
         let mut saved = d.figures.clone();
         saved.extend(d.scenes.iter().cloned());
+        saved.extend(d.molecules.iter().cloned());
         if !saved.is_empty() {
             text.push_str(&format!("\n**Saved.** {}\n", saved.join(", ")));
         }
@@ -443,7 +444,7 @@ impl Research {
             return None;
         }
         let ext = rel.extension()?.to_str()?.to_ascii_lowercase();
-        if !["png", "jpg", "jpeg", "svg", "json", "txt", "csv"].contains(&ext.as_str()) {
+        if !["png", "jpg", "jpeg", "svg", "json", "txt", "csv"].contains(&ext.as_str()) && !proton_lab::run::MOLECULES.contains(&ext.as_str()) {
             return None;
         }
         let dir = self.store.root().join(slug).join("runs").join(run).canonicalize().ok()?;

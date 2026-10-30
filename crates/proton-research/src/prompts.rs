@@ -223,7 +223,10 @@ no network, and no files outside its own folder. Print what it found, briefly, t
 `import proton_lab as lab`: `lab.figure(fig, \"name\")` saves a matplotlib figure; `lab.metric(\"name\", value)` \
 records a number; and for 3D, `scene = lab.Scene(\"title\")`, then `scene.points(xyz)`, `scene.line(xyz)`, \
 `scene.spheres(centres, radii)`, `scene.bonds(pairs)`, `scene.mesh(vertices, faces)` or \
-`scene.arrows(origins, vectors)` — each taking `frames=` (time × N × 3) to animate — and `scene.save(\"name\")`.";
+`scene.arrows(origins, vectors)` — each taking `frames=` (time × N × 3) to animate — and `scene.save(\"name\")`. \
+Molecules are drawn too, from any .xyz, .pdb, .cif, .mol, .sdf or .smi file the run writes beside it: \
+`lab.xyz(\"name\", elements, xyz, frames=)` writes one, frames making a trajectory, and `lab.smiles(\"name\", smiles)` \
+a SMILES string, laid out in 3D by the Lab; a protein's PDB or mmCIF is drawn as a cartoon.";
 
 /// Standing instructions for a seat in a role.
 pub fn instructions(role_: Role, discipline: Discipline, seat: Seat, timeout_s: u32) -> String {

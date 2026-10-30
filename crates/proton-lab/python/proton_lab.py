@@ -8,6 +8,11 @@ and is what the Lab pane draws:
     metric("peak_nm", 405.2, "nm") # into metrics.json
     scene = Scene("orbit")          # a 3D scene, as orbit.scene.json (see Scene)
     scene.spheres(centres, radii, frames=positions); scene.save()
+    xyz("water", ["O", "H", "H"], places)  # a molecule, as water.xyz; frames= for a trajectory
+    smiles("caffeine", "Cn1cnc2c1c(=O)n(C)c(=O)n2C")  # as caffeine.smi, laid out by the Lab
+
+Any .xyz, .pdb, .cif, .mol, .sdf or .smi file the run writes is drawn as a
+molecule; a protein's PDB or mmCIF as a cartoon.
 
 Nothing here reaches the network or anything outside the run's folder; the
 sandbox would refuse it if it did.
@@ -85,6 +90,37 @@ def _each_color(value, i):
 
 def _xyz(points):
     return [list(map(float, p)) for p in points]
+
+
+def xyz(name, elements, places=None, frames=None, comment=""):
+    """Write a molecule as <name>.xyz: an element and a place (Å) an atom.
+    `frames` — time × N × 3 — makes it a trajectory, a frame a step; then
+    `places` may be left out."""
+    if frames is None:
+        frames = [places]
+    elements = [str(e) for e in elements]
+    lines = []
+    for at, frame in enumerate(frames):
+        frame = _xyz(frame)
+        if len(frame) != len(elements):
+            raise ValueError(f"frame {at} has {len(frame)} places for {len(elements)} elements")
+        lines.append(str(len(elements)))
+        lines.append(f"{comment} {at}".strip() if len(frames) > 1 else str(comment))
+        lines.extend(f"{e} {x:.5f} {y:.5f} {z:.5f}" for e, (x, y, z) in zip(elements, frame))
+    path = RUN / _name(name, "molecule", ".xyz")
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def smiles(name, text, title=None):
+    """Write a molecule as <name>.smi, a SMILES string — or several, a list,
+    each a frame — which the Lab lays out in 3D itself."""
+    many = [text] if isinstance(text, str) else list(text)
+    label = title or name
+    lines = [f"{s} {label}" if len(many) == 1 else s for s in many]
+    path = RUN / _name(name, "molecule", ".smi")
+    path.write_text("\n".join(lines) + "\n")
+    return path
 
 
 class Scene:

@@ -1004,6 +1004,9 @@ fn the_window_reads_only_what_a_run_left_in_its_own_folder() {
     std::fs::create_dir_all(run.join("figures")).unwrap();
     std::fs::write(run.join("figures/spectrum.png"), b"png").unwrap();
     std::fs::write(run.join("orbit.scene.json"), b"{}").unwrap();
+    std::fs::write(run.join("fold.PDB"), b"END\n").unwrap();
+    std::fs::write(run.join("caffeine.smi"), b"Cn1cnc2c1c(=O)n(C)c(=O)n2C\n").unwrap();
+    std::fs::write(run.join("model.pkl"), b"pickle").unwrap();
     std::fs::write(run.join("main.py"), b"print(1)").unwrap();
     std::fs::write(dir.join("secret.txt"), b"secret").unwrap();
     std::os::unix::fs::symlink(dir.join("secret.txt"), run.join("figures/escape.txt")).unwrap();
@@ -1011,7 +1014,9 @@ fn the_window_reads_only_what_a_run_left_in_its_own_folder() {
     let key = |rest: &str| format!("{SLUG}/R001/{rest}");
     assert_eq!(research.lab_file(&key("figures/spectrum.png")), Some(run.join("figures/spectrum.png").canonicalize().unwrap()));
     assert!(research.lab_file(&key("orbit.scene.json")).is_some());
-    for refused in ["../../../secret.txt", "/etc/hosts", "main.py", "figures/escape.txt", "figures/missing.png", "figures/../../R001/main.py"] {
+    // Molecules, by their endings in any case; nothing else new.
+    assert!(research.lab_file(&key("fold.PDB")).is_some() && research.lab_file(&key("caffeine.smi")).is_some());
+    for refused in ["../../../secret.txt", "/etc/hosts", "main.py", "model.pkl", "figures/escape.txt", "figures/missing.png", "figures/../../R001/main.py"] {
         assert_eq!(research.lab_file(&key(refused)), None, "{refused} was given");
     }
     for refused in [format!("../{SLUG}/R001/figures/spectrum.png"), format!("{SLUG}/../R001/figures/spectrum.png"), format!("{SLUG}/X001/figures/spectrum.png"), "nope".into()] {

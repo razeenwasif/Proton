@@ -11,6 +11,7 @@
 //! metrics.json   numbers it recorded
 //! figures/       pictures it saved
 //! *.scene.json   3D scenes it saved
+//! *.pdb, *.xyz …  molecules it saved (see MOLECULES)
 //! ```
 //!
 //! Its output goes to files rather than pipes, so a run printing a lot
@@ -30,6 +31,10 @@ use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
 use crate::sandbox::{self, Kind};
+
+/// The endings of the molecule files the Lab draws: XYZ, PDB, mmCIF, MOL,
+/// SDF and SMILES. The window reads them; here they are only found.
+pub const MOLECULES: [&str; 8] = ["xyz", "pdb", "ent", "cif", "mmcif", "mol", "sdf", "smi"];
 
 /// The helper a run imports, copied into every run.
 pub const HELPER: &str = include_str!("../python/proton_lab.py");
@@ -376,6 +381,8 @@ pub struct Detail {
     pub figures: Vec<String>,
     /// 3D scenes it saved.
     pub scenes: Vec<String>,
+    /// Molecules it saved, by the endings in [`MOLECULES`].
+    pub molecules: Vec<String>,
     #[ts(type = "Record<string, unknown>")]
     pub record: Value,
 }
@@ -414,7 +421,16 @@ pub fn detail(dir: &Path) -> Option<Detail> {
     let files = outputs(dir);
     let figures = files.iter().filter(|f| f.starts_with("figures/") && [".png", ".svg", ".jpg", ".jpeg"].iter().any(|x| f.to_lowercase().ends_with(x))).cloned().collect();
     let scenes = files.iter().filter(|f| f.ends_with(".scene.json")).cloned().collect();
-    Some(Detail { row, stdout, stdout_cut, stderr, stderr_cut, metrics, figures, scenes, record })
+    let molecules = files.iter().filter(|f| is_molecule(f)).cloned().collect();
+    Some(Detail { row, stdout, stdout_cut, stderr, stderr_cut, metrics, figures, scenes, molecules, record })
+}
+
+/// Whether a file's name ends as a molecule file the Lab draws.
+pub fn is_molecule(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| MOLECULES.contains(&e.to_ascii_lowercase().as_str()))
 }
 
 /// The folder a process is working in, if it can be told.
@@ -711,7 +727,10 @@ mod tests {
                     scene.bonds([([0, 0, 0], [1, 0, 0])], frames=[[([0, 0, 0], [1, 0, 0])], [([0, 0, 0], [0, 1, 0])]])\n\
                     scene.mesh([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]])\n\
                     scene.arrows([[0, 0, 0]], [[0, 1, 0]])\n\
-                    print(scene.save('planet').name)\n";
+                    print(scene.save('planet').name)\n\
+                    lab.xyz('water', ['O', 'H', 'H'], [[0, 0, 0], [0.96, 0, 0], [-0.24, 0.93, 0]])\n\
+                    lab.xyz('stretch', ['H', 'H'], frames=[[[0, 0, 0], [0.74, 0, 0]], [[0, 0, 0], [0.9, 0, 0]]], comment='H2')\n\
+                    lab.smiles('caffeine', 'Cn1cnc2c1c(=O)n(C)c(=O)n2C')\n";
         let mut spec = spec(&base, &python, code, 60, Kind::None);
         spec.env = env;
         let mut run = Run::start(&spec).unwrap();
@@ -731,6 +750,12 @@ mod tests {
         let last = frames[2].as_array().unwrap();
         assert_eq!((last[5]["center"].clone(), last[5]["radius"].as_f64(), last[5]["color"].as_str()), (json!([-1.0, 0.0, 0.0]), Some(0.2), Some("blue")));
         assert_eq!(last[6]["b"], json!([0.0, 1.0, 0.0]), "a moving thing shorter than the rest stays at its last place");
+        // Molecules: written as files the Lab draws, and found as such.
+        assert_eq!(std::fs::read_to_string(dir.join("water.xyz")).unwrap(), "3\n\nO 0.00000 0.00000 0.00000\nH 0.96000 0.00000 0.00000\nH -0.24000 0.93000 0.00000\n");
+        let stretch = std::fs::read_to_string(dir.join("stretch.xyz")).unwrap();
+        assert!(stretch.starts_with("2\nH2 0\nH 0.00000") && stretch.contains("\n2\nH2 1\nH 0.00000 0.00000 0.00000\nH 0.90000"), "{stretch}");
+        assert_eq!(std::fs::read_to_string(dir.join("caffeine.smi")).unwrap(), "Cn1cnc2c1c(=O)n(C)c(=O)n2C caffeine\n");
+        assert_eq!(detail(&dir).unwrap().molecules, ["caffeine.smi", "stretch.xyz", "water.xyz"]);
         let _ = std::fs::remove_dir_all(base);
     }
 }
