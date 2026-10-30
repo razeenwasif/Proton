@@ -275,22 +275,35 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     assert(sent(edits, 'logicEdit').some((c) => c.text.includes('→I 3-5')), 'the proof written in was not sent');
   });
 
-  await test('A valid argument offers a natural-deduction proof, to copy as a .proof file', async () => {
+  await test('A valid argument offers a proof in each system, to copy as a .proof file', async () => {
     await win.pushEvents([file({generation: 7})]); await settle();
     await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 7, line: 3, kind: 'argument', text: '? p, p -> q |= q', valid: true, columns: [], atoms: [], tableau: null, open: [],
       deduction: null, deductionNote: null}}]);
     await settle();
-    const before = win.commands.length;
-    answer().querySelector('[data-logic-prove]').click(); await settle();
-    assert(sent(before, 'logicProve')[0]?.generation === 7, 'Natural deduction did not ask for a proof');
+    const asks = [...answer().querySelectorAll('[data-logic-prove]')];
+    assert(asks.map((b) => b.textContent).join() === 'Natural deduction,Sequent calculus,Resolution', `the systems are not offered: ${asks.map((b) => b.textContent)}`);
+    let before = win.commands.length;
+    asks[0].click(); await settle();
+    assert(sent(before, 'logicProve')[0]?.generation === 7 && sent(before, 'logicProve')[0].system === 'fitch', 'Natural deduction did not ask for a proof');
+    before = win.commands.length;
+    asks[2].click(); await settle();
+    assert(sent(before, 'logicProve')[0]?.system === 'resolution', 'Resolution did not ask for a refutation');
     await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 7, line: 3, kind: 'argument', text: '? p, p -> q |= q', valid: true, columns: [], atoms: [], tableau: null, open: [],
       deduction: 'system fitch\npremises p, p -> q\ngoal q\n\n1  p       premise\n2  p -> q  premise\n3  q       →E 2, 1\n', deductionNote: null}}]);
     await settle();
     assert(answer().querySelector('.lg-proof')?.textContent.includes('→E 2, 1') && answer().querySelector('[data-logic-copy-proof]'), 'the proof found is not shown to copy');
+    assert([...answer().querySelectorAll('h3')].some((h) => h.textContent === 'Natural deduction'), 'the proof\'s system is not named');
+    assert(![...answer().querySelectorAll('[data-logic-prove]')].some((b) => b.dataset.logicProve === 'fitch'), 'the system shown is offered again');
+    await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 7, line: 3, kind: 'argument', text: '? p, p -> q |= q', valid: true, columns: [], atoms: [], tableau: null, open: [],
+      deduction: 'system resolution\npremises p, p -> q\ngoal q\n\n# Premise 2, p -> q:\n#   clauses:  not p or q\n\n1  p           premise 1\n2  not p or q  premise 2\n3  not q       goal\n4  q           resolve 1, 2\n5  false       resolve 3, 4\n', deductionNote: null}}]);
+    await settle();
+    const pre = answer().querySelector('.lg-proof');
+    assert([...(pre?.querySelectorAll('.lg-c') ?? [])].some((c) => c.textContent.includes('clauses')) && [...pre.querySelectorAll('.lg-rule')].map((r) => r.textContent).join() === 'premise,premise,goal,resolve,resolve',
+      `a refutation is not shown with its clause form: ${pre?.innerHTML}`);
     await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 7, line: 3, kind: 'argument', text: '? p, p -> q |= q', valid: true, columns: [], atoms: [], tableau: null, open: [],
       deduction: null, deductionNote: 'no proof found in the time'}}]);
     await settle();
-    assert(answer().textContent.includes('No natural-deduction proof: no proof found in the time'), 'no proof found is not said');
+    assert(answer().textContent.includes('No proof: no proof found in the time'), 'no proof found is not said');
   });
 
   await test('Closing a file with unsaved changes asks first, then goes home', async () => {

@@ -20,6 +20,9 @@ import { drawKmap } from "./kmap.js";
 /** @typedef {import("./bindings/LogicTableView").LogicTableView} Table */
 /** @typedef {import("./bindings/LogicTabView").LogicTabView} Tab */
 
+/** The proof systems, as the core names them, in words. @type {Record<string, string>} */
+const SYSTEMS = { fitch: "Natural deduction", sequent: "Sequent calculus", resolution: "Resolution" };
+
 /** No more rows of a truth table than this are drawn. */
 const MOST_ROWS = 256;
 /** How long typing must stop before the text, and then the line, are sent. */
@@ -361,17 +364,18 @@ export function createLogic(host) {
       `<input name="column" placeholder="Column: 00010111 (x for either)" aria-label="Column" value="${esc(state.column)}" spellcheck="false"><button type="submit">Read</button></form></details>`;
   }
 
-  /** A natural-deduction proof: the button to find one, or the one found,
-   *  to write into a proof or to copy. @param {Answer} a @param {boolean} inProof */
+  /** A proof found: the buttons to find one, or the one found, to write
+   *  into a proof file or to copy. In a proof file, its own system; for an
+   *  argument, any of the three. @param {Answer} a @param {boolean} inProof */
   function deductionHtml(a, inProof) {
-    if (a.deduction) {
-      const lines = a.deduction.split("\n\n").slice(1).join("\n\n").trimEnd();
-      return `<h3>Natural deduction</h3><pre class="lg-proof">${colour(lines, false, true)}</pre>` +
-        (inProof ? `<button class="cc-quiet" data-logic-write title="Its lines in place of this proof's: ⌘Z takes them back">Write it in</button>`
-          : `<button class="cc-quiet" data-logic-copy-proof title="As a .proof file's text">Copy as a .proof file</button>`);
-    }
-    if (a.deductionNote) return `<p class="lg-faint">No natural-deduction proof: ${esc(a.deductionNote)}.</p>`;
-    return `<button class="cc-quiet" data-logic-prove title="Found by working back from the goal and forward from what is had">${inProof ? "Find a proof" : "Natural deduction"}</button>`;
+    const system = /^system (\w+)/.exec(a.deduction ?? "")?.[1] ?? "";
+    const found = a.deduction ? `<h3>${esc(SYSTEMS[system] ?? system)}</h3><pre class="lg-proof">${colour(a.deduction.split("\n\n").slice(1).join("\n\n").trimEnd(), false, true)}</pre>` +
+      (inProof ? `<button class="cc-quiet" data-logic-write title="Its lines in place of this proof's: ⌘Z takes them back">Write it in</button>`
+        : `<button class="cc-quiet" data-logic-copy-proof title="As a .proof file's text">Copy as a .proof file</button>`) : "";
+    const none = a.deductionNote ? `<p class="lg-faint">No proof: ${esc(a.deductionNote)}.</p>` : "";
+    if (inProof) return found || none || `<button class="cc-quiet" data-logic-prove title="Found by the file's own system's rules">Find a proof</button>`;
+    const asks = Object.entries(SYSTEMS).filter(([k]) => k !== system).map(([k, label]) => `<button class="cc-quiet" data-logic-prove="${k}">${label}</button>`).join("");
+    return found + none + `<div class="lg-build"><span class="lg-faint">${a.deduction ? "Or prove it by" : "Prove it by"}</span>${asks}</div>`;
   }
 
   function renderAnswer() {
@@ -408,7 +412,7 @@ export function createLogic(host) {
       const harder = a.more ? `<button class="cc-quiet" data-logic-more title="Up to ten seconds">Try harder</button>` : "";
       body = `<p class="lg-said"><code>${esc(a.text)}</code></p>` + verdict + why + (n > 0 ? tableHtml(a, counter) : "") +
         (a.tableau ? `<h3>Tableau</h3><div class="lg-tab-wrap">${tabHtml(a.tableau)}</div>` : "") + note + harder +
-        (a.valid === true ? deductionHtml(a, false) : "");
+        (a.valid !== false ? deductionHtml(a, false) : "");
     } else if (a.kind === "proof" && a.proof) {
       const p = a.proof;
       const line = p.n != null ? (p.ok ? head("good", `${icon("check")}Line ${p.n}: ${esc(p.message)}`) : head("bad", `${icon("d-error")}Line ${p.n}${p.rule ? ` (${esc(p.rule)})` : ""}`) + `<p class="lg-message">${esc(p.message)}</p>`)
@@ -468,9 +472,10 @@ export function createLogic(host) {
       return void host.dispatch({ type: "logicClose", discard: true });
     }
     if (t.closest("[data-logic-more]")) return void ask(true, true);
-    if (t.closest("[data-logic-prove]") && state.file) {
+    const prove = /** @type {HTMLElement | null} */ (t.closest("[data-logic-prove]"));
+    if (prove && state.file) {
       send();
-      return void host.dispatch({ type: "logicProve", generation: state.file.generation, line: lineAt(els.text.value, els.text.selectionStart) });
+      return void host.dispatch({ type: "logicProve", generation: state.file.generation, line: lineAt(els.text.value, els.text.selectionStart), system: prove.dataset.logicProve || "fitch" });
     }
     if (t.closest("[data-logic-write]") && state.answer?.deduction) {
       // The header as typed, and the proof found's lines after it.
