@@ -132,10 +132,53 @@ export function createLogic(host) {
   const isL4f = () => state.file?.kind === "l4f";
   const isProof = () => state.file?.kind === "proof";
 
+  /** Each line as coloured, by how the file reads and the line itself:
+   *  a keystroke colours its own line again, not the file. @type {Map<string, string>} */
+  const coloured = new Map();
+  /** The lines as painted, and the gutter as drawn, so only what changed is put back. */
+  let painted = { mode: "", lines: /** @type {string[]} */ ([]) };
+  /** Each line's marks as the gutter shows them. @type {string[]} */
+  let drawnMarks = [];
+
+  /** The coloured text: a span a line, only the run that changed replaced —
+   *  a file of 2,000 lines put back whole each keystroke took three frames. */
+  function paintText(/** @type {string} */ text) {
+    const l4f = isL4f(), proof = isProof(), mode = `${l4f}${proof}`;
+    const html = text.split("\n").map((line) => {
+      const key = `${mode}\u0000${line}`;
+      let h = coloured.get(key);
+      if (h === undefined) {
+        if (coloured.size > 20000) coloured.clear();
+        h = colour(line, l4f, proof);
+        coloured.set(key, h);
+      }
+      return h;
+    });
+    // A line a block: what changes on one is laid out alone.
+    const spans = (/** @type {string[]} */ hs) => hs.map((h) => `<span class="lg-l">${h || " "}</span>`).join("");
+    const old = painted.mode === mode && els.hl.childElementCount === painted.lines.length ? painted.lines : null;
+    painted = { mode, lines: html };
+    if (!old) {
+      // A last newline needs a line under it to scroll to.
+      els.hl.innerHTML = spans(html) + " ";
+      return;
+    }
+    let a = 0;
+    while (a < old.length && a < html.length && old[a] === html[a]) a++;
+    let b = 0;
+    while (b < old.length - a && b < html.length - a && old[old.length - 1 - b] === html[html.length - 1 - b]) b++;
+    const kids = els.hl.children;
+    for (let i = old.length - b - 1; i >= a; i--) kids[i].remove();
+    const fresh = html.slice(a, html.length - b);
+    if (!fresh.length) return;
+    const t = document.createElement("template");
+    t.innerHTML = spans(fresh);
+    els.hl.insertBefore(t.content, kids[a] ?? els.hl.lastChild);
+  }
+
   function paint() {
     const text = els.text.value;
-    // A last newline needs a line under it to scroll to.
-    els.hl.innerHTML = colour(text, isL4f(), isProof()) + "\n ";
+    paintText(text);
     const bad = new Set((state.file?.diagnostics ?? []).map((d) => d.line));
     // A proof's lines that check.
     const right = new Set((state.file?.checks ?? []).filter(([, ok]) => ok).map(([l]) => l));
@@ -144,11 +187,38 @@ export function createLogic(host) {
     // The lines of a conflict, when there is no model.
     const clash = new Set(state.models?.conflict ? [...state.models.conflict.lines, ...state.models.conflict.kinds.map(([l]) => l)] : []);
     const n = text.split("\n").length;
-    els.gutter.innerHTML = Array.from({ length: n }, (_, i) => {
-      const cls = [bad.has(i + 1) ? "bad" : right.has(i + 1) ? "ok" : "", clash.has(i + 1) ? "clash" : "", i + 1 === answered ? "on" : ""].filter(Boolean).join(" ");
-      return cls ? `<span class="${cls}">${i + 1}</span>` : String(i + 1);
-    }).join("\n") + "\n ";
+    const marks = Array.from({ length: n }, (_, i) =>
+      [bad.has(i + 1) ? "bad" : right.has(i + 1) ? "ok" : "", clash.has(i + 1) ? "clash" : "", i + 1 === answered ? "on" : ""].filter(Boolean).join(" "));
+    paintGutter(marks);
     follow();
+  }
+
+  /** The gutter's numbers, a span a line and one under the last: numbers
+   *  added or taken off the end, and only the marks that changed changed. */
+  function paintGutter(/** @type {string[]} */ marks) {
+    const g = els.gutter;
+    if (g.childElementCount !== drawnMarks.length + 1) {
+      g.innerHTML = marks.map((c, i) => c ? `<span class="${c}">${i + 1}</span>` : `<span>${i + 1}</span>`).join("") + "<span> </span>";
+      drawnMarks = marks;
+      return;
+    }
+    const under = /** @type {Element} */ (g.lastElementChild);
+    while (drawnMarks.length > marks.length) {
+      under.previousElementSibling?.remove();
+      drawnMarks.pop();
+    }
+    for (let i = drawnMarks.length; i < marks.length; i++) {
+      const number = document.createElement("span");
+      number.textContent = String(i + 1);
+      g.insertBefore(number, under);
+      drawnMarks.push("");
+    }
+    marks.forEach((c, i) => {
+      if (c !== drawnMarks[i]) {
+        g.children[i].className = c;
+        drawnMarks[i] = c;
+      }
+    });
   }
 
   function follow() {

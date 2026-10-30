@@ -306,6 +306,37 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     assert(answer().textContent.includes('No proof: no proof found in the time'), 'no proof found is not said');
   });
 
+  await test('A file of 2,000 lines: a keystroke repaints only its line, and a new line only what moved', async () => {
+    let big = 'person = size 40\nthing = 1..30\n';
+    for (let i = 0; i < 1000; i++) big += `f${i}: person -> thing\nall x: f${i}(x) != ${i % 30} or some y: f${i}(y) > f${i}(x)\n`;
+    await win.pushEvents([file({generation: 9, text: big})]); await settle();
+    const t = text(), hl = ws().querySelector('[data-logic-hl]'), gutter = ws().querySelector('.lg-gutter');
+    /** Logic's own time for a keystroke, the textarea laid out first: the median of fifteen. */
+    const ours = (/** @type {string} */ piece) => {
+      const times = [];
+      for (let k = 0; k < 15; k++) {
+        const at = t.value.length - 200 - k;
+        t.setRangeText(piece, at, at, 'end');
+        void t.scrollHeight;
+        const s = win.performance.now();
+        t.dispatchEvent(new win.Event('input', {bubbles: true}));
+        void hl.offsetHeight; void gutter.offsetHeight;
+        times.push(win.performance.now() - s);
+      }
+      return times.sort((a, b) => a - b)[7];
+    };
+    const typed = ours('x'), broken = ours('\n');
+    assert(typed < 16, `a keystroke took ${typed.toFixed(1)} ms to repaint`);
+    assert(broken < 30, `a new line took ${broken.toFixed(1)} ms to repaint`);
+    // What is painted is what is typed, line for line, and numbered.
+    const lines = t.value.split('\n');
+    assert(hl.childElementCount === lines.length && [...hl.children].every((l, i) => l.textContent === (lines[i] || ' ')), 'the painted lines are not the typed ones');
+    assert(gutter.childElementCount === lines.length + 1 && gutter.children[lines.length - 1].textContent === String(lines.length), 'the gutter does not number every line');
+    t.setRangeText('', 0, t.value.length, 'end');
+    t.dispatchEvent(new win.Event('input', {bubbles: true}));
+    assert(hl.childElementCount === 1 && gutter.childElementCount === 2, 'emptied, the file still paints its old lines');
+  });
+
   await test('Logic has the agent in its dock, shut until asked for, with @logic', async () => {
     await win.pushEvents([file({generation: 4})]); await settle();
     const dock = ws().querySelector('.xl-dock');

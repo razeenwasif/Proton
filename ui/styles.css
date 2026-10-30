@@ -5020,6 +5020,9 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .lg-hl, .lg-input { position: absolute; inset: 0; box-sizing: border-box; width: 100%; height: 100%; margin: 0; padding: 10px 12px; border: 0;
   font: inherit; letter-spacing: 0; font-variant-ligatures: none; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
 .lg-hl { overflow: hidden; color: var(--code, var(--text)); pointer-events: none; }
+/* A line a block: typing in a long file lays out the line typed on, not
+   the file. */
+.lg-l, .lg-gutter > span { display: block; }
 .lg-input { overflow: auto; resize: none; outline: none; background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--text); }
 .lg-input::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
 .lg-k { color: var(--syn-keyword); }
