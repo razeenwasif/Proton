@@ -5013,6 +5013,7 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .lg-gutter { flex: 0 0 auto; min-width: 2.5em; margin: 0; padding: 10px 8px 10px 10px; border-right: 1px solid var(--xl-line); overflow: hidden; color: var(--muted);
   font: inherit; text-align: right; white-space: pre; user-select: none; opacity: .7; }
 .lg-gutter .bad { color: var(--danger, #e55); opacity: 1; }
+.lg-gutter .ok { color: var(--ok, #4ade80); opacity: .85; }
 .lg-gutter .on { color: var(--accent); opacity: 1; font-weight: 700; }
 .lg-gutter .clash { color: var(--warn, #eab308); opacity: 1; }
 .lg-area { position: relative; flex: 1 1 auto; min-width: 0; }
@@ -5026,6 +5027,11 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .lg-n { color: var(--syn-number); }
 .lg-c { color: var(--syn-comment); font-style: italic; }
 .lg-q { color: var(--accent); font-weight: 700; }
+/* Three kinds of file to make: they wrap rather than crowd. */
+.lg .cc-side-head { flex-wrap: wrap; }
+.lg-bar { color: var(--syn-punct); }
+.lg-rule { color: var(--syn-function); }
+.lg-proof { margin: 6px 0 8px; padding: 8px 10px; border: 1px solid var(--xl-line); border-radius: 6px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre; }
 .lg-diags { flex: none; max-height: 30%; overflow: auto; border-top: 1px solid var(--xl-line); }
 .lg-diags:empty { display: none; }
 .lg-diag { display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 4px 12px; border: 0; background: none; color: var(--text); text-align: left;

@@ -17,16 +17,25 @@ const MODELS = {"generation":0,"running":false,"found":2,"finished":true,"timedO
 /** The column 00010111 over a b c, read back. */
 const TABLE = {"generation":0,"line":0,"kind":"table","text":"00010111","message":null,"atoms":["a","b","c"],"columns":[],"status":null,"models":null,"model":null,"falsifier":null,"valid":null,"countermodel":null,"same":null,"differ":null,"forms":[{"name":"Least sum of products","text":"b and c or a and c or a and b"},{"name":"Least product of sums","text":"(b or c) and (a or c) and (a or b)"},{"name":"Full DNF","text":"not a and b and c or a and not b and c or a and b and not c or a and b and c"},{"name":"Full CNF","text":"(a or b or c) and (a or b or not c) and (a or not b or c) and (not a or b or c)"},{"name":"NAND only","text":"nand(nand(b, c), nand(a, c), nand(a, b))"},{"name":"NOR only","text":"nor(nor(b, c), nor(a, c), nor(a, b))"}],"exact":true,"more":false,"column":"00010111","sopTerms":[[3,3],[5,5],[6,6]],"posTerms":[[0,3],[0,5],[0,6]],"tableau":null,"proofNote":null,"counter":null,"open":[]};
 
+/** The sample proof, as a new one starts; the core's answer for each of its
+ *  lines, its lines' checks, and the proof it finds for its header. */
+const PROOF = "# A proof: its premises and goal, then its lines — each its number, a bar |\n# for each subproof it is in, the formula, its rule and the lines it uses.\nsystem fitch\npremises p -> q, q -> r\ngoal p -> r\n\n1  p -> q        premise\n2  q -> r        premise\n3  | p           assume\n";
+/** @type {Record<string, any>} */
+const PROOF_ANSWERS = {"1":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":0,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"","n":null,"ok":false,"rule":null,"summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"p -> q, q -> r ⊢ p -> r","valid":null},"2":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":0,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"","n":null,"ok":false,"rule":null,"summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"p -> q, q -> r ⊢ p -> r","valid":null},"3":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":0,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"","n":null,"ok":false,"rule":null,"summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"p -> q, q -> r ⊢ p -> r","valid":null},"4":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":0,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"","n":null,"ok":false,"rule":null,"summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"p -> q, q -> r ⊢ p -> r","valid":null},"5":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":0,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"","n":null,"ok":false,"rule":null,"summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"p -> q, q -> r ⊢ p -> r","valid":null},"6":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":0,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"","n":null,"ok":false,"rule":null,"summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"p -> q, q -> r ⊢ p -> r","valid":null},"7":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":7,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"a premise","n":1,"ok":true,"rule":"premise","summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"p -> q","valid":null},"8":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":8,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"a premise","n":2,"ok":true,"rule":"premise","summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"q -> r","valid":null},"9":{"atoms":[],"column":null,"columns":[],"counter":null,"countermodel":null,"deduction":null,"deductionNote":null,"differ":null,"exact":false,"falsifier":null,"forms":[],"generation":0,"kind":"proof","line":9,"message":null,"model":null,"models":null,"more":false,"open":[],"posTerms":[],"proof":{"complete":false,"message":"an assumption: it opens a subproof","n":3,"ok":true,"rule":"assume","summary":"every line is right; the goal is not reached yet"},"proofNote":null,"same":null,"sopTerms":[],"status":null,"tableau":null,"text":"p","valid":null}};
+/** @type {[number, boolean][]} */
+const PROOF_CHECKS = [[7,true],[8,true],[9,true]];
+const FOUND = "system fitch\npremises p -> q, q -> r\ngoal p -> r\n\n1  p -> q  premise\n2  q -> r  premise\n3  | p     assume\n4  | q     →E 1, 3\n5  | r     →E 2, 4\n6  p -> r  →I 3-5\n";
+
 /** @param {(events: any[]) => void} _deliver */
 export function createLogicPreview(_deliver) {
   const files = [{ path: "week1/theory.logic", name: "theory", kind: "logic" }, { path: "week1/worksheet.logic", name: "worksheet", kind: "logic" },
-    { path: "puzzles/pets.l4f", name: "pets", kind: "l4f" }];
+    { path: "puzzles/pets.l4f", name: "pets", kind: "l4f" }, { path: "week1/syllogism.proof", name: "syllogism", kind: "proof" }];
   /** @type {null | {path: string, name: string, kind: string, text: string, saved: string, generation: number}} */
   let open = null;
   let generations = 0;
   const home = () => ({ type: "logicHome", files });
   const fileEvent = () => ({ type: "logicFile", file: open ? { path: open.path, name: open.name, kind: open.kind, text: open.text, dirty: open.text !== open.saved,
-    generation: open.generation, diagnostics: [], notes: [] } : null });
+    generation: open.generation, diagnostics: [], notes: [], checks: open.kind === "proof" && open.text === PROOF ? PROOF_CHECKS : [] } : null });
   const notice = (/** @type {string} */ message) => ({ type: "notice", message, level: "warn" });
   const show = (/** @type {string} */ path, /** @type {string} */ text) => {
     const f = files.find((x) => x.path === path);
@@ -44,6 +53,8 @@ export function createLogicPreview(_deliver) {
             show(command.path, "Sorts:\npet enum: cat, dog.\nVocabulary:\nfunction f(pet) : pet {all_different}\nConstraints:\nf(cat) = dog.\n");
           } else if (command.path === "week1/worksheet.logic") {
             show(command.path, WORKSHEET);
+          } else if (command.path === "week1/syllogism.proof") {
+            show(command.path, PROOF);
           } else if (command.path === "week1/theory.logic") {
             show(command.path, THEORY);
           } else {
@@ -52,11 +63,12 @@ export function createLogicPreview(_deliver) {
           return [fileEvent(), { type: "logicAnswer", answer: null }];
         case "logicNew": {
           const slug = String(command.name).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "logic";
-          const path = `${slug}.logic`;
+          const ext = command.kind === "proof" ? "proof" : "logic";
+          const path = `${slug}.${ext}`;
           if (files.some((f) => f.path === path)) return [notice(`${path} is already there`)];
-          files.push({ path, name: slug, kind: "logic" });
+          files.push({ path, name: slug, kind: ext });
           files.sort((a, b) => a.path.localeCompare(b.path));
-          show(path, WORKSHEET);
+          show(path, ext === "proof" ? PROOF : command.kind === "theory" ? THEORY : WORKSHEET);
           return [home(), fileEvent(), { type: "logicAnswer", answer: null }];
         }
         case "logicClose":
@@ -74,7 +86,7 @@ export function createLogicPreview(_deliver) {
           // The sample's own lines, unchanged, as the core answered them.
           const pristine = open.text === WORKSHEET && open.kind === "logic";
           const line = open.text.split("\n")[command.line - 1] ?? "";
-          const canned = pristine ? ANSWERS[String(command.line)] : null;
+          const canned = pristine ? ANSWERS[String(command.line)] : open.kind === "proof" && open.text === PROOF ? PROOF_ANSWERS[String(command.line)] : null;
           const answer = canned ? { ...canned, generation: open.generation }
             : line.trim() === "" || line.trim().startsWith("#") ? { ...ANSWERS["2"], kind: "nothing", generation: open.generation, line: command.line }
             : { ...ANSWERS["2"], kind: "error", generation: open.generation, line: command.line, message: "The preview answers the sample worksheet's own lines; the app answers any." };
@@ -88,6 +100,14 @@ export function createLogicPreview(_deliver) {
         }
         case "logicStop":
           return [];
+        case "logicProve": {
+          if (!open || open.generation !== command.generation) return [];
+          // The sample proof's header, as typed: the proof the core finds for it.
+          const header = PROOF.split("\n").slice(0, 5).join("\n");
+          const answer = open.kind === "proof" && open.text.startsWith(header) ? { ...(open.text === PROOF && PROOF_ANSWERS[String(command.line)] || PROOF_ANSWERS["1"]), deduction: FOUND }
+            : { ...PROOF_ANSWERS["1"], kind: "error", message: "The preview finds a proof for the sample proof's header; the app finds one for any." };
+          return [{ type: "logicAnswer", answer: { ...answer, generation: open.generation } }];
+        }
         case "logicFromTable":
           return [{ type: "logicAnswer", answer: command.column.replace(/\s/g, "") === "00010111" ? { ...TABLE, generation: open?.generation ?? 0 }
             : { ...TABLE, kind: "error", message: "The preview reads back only 00010111; the app reads any column." } }];

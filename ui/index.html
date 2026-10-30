@@ -1028,6 +1028,7 @@
         <div class="cc-side-head">
           <button class="cc-new" data-logic-new="worksheet" title="A new worksheet: a line beginning ? is asked"><svg class="i"><use href="#i-plus"/></svg>Worksheet</button>
           <button class="cc-new" data-logic-new="theory" title="A new theory: sorts, names and what is true of them"><svg class="i"><use href="#i-plus"/></svg>Theory</button>
+          <button class="cc-new" data-logic-new="proof" title="A new proof: natural deduction, each line checked against its rule"><svg class="i"><use href="#i-plus"/></svg>Proof</button>
         </div>
         <!-- From Event::LogicHome. -->
         <div class="scroll xl-list" data-logic-list></div>
@@ -1038,10 +1039,10 @@
       <main class="pane xl-main">
         <div class="xl-home" data-logic-home>
           <h2>Logic</h2>
-          <p>A calculator and a solver for logic. Write a formula or an argument on a line beginning <code>?</code> — <code>? p, p -&gt; q |= q</code> — and the line at the cursor is answered: its truth table, whether it is a tautology, its normal forms, its Karnaugh map. Theories of sorts, names and constraints are written the same way, and Logic for Fun's <code>.l4f</code> text is read as it is.</p>
+          <p>A calculator and a solver for logic. Write a formula or an argument on a line beginning <code>?</code> — <code>? p, p -&gt; q |= q</code> — and the line at the cursor is answered: its truth table, whether it is a tautology, its normal forms, its Karnaugh map. Theories of sorts, names and constraints are written the same way, and Logic for Fun's <code>.l4f</code> text is read as it is. A <code>.proof</code> file is a natural-deduction proof, Fitch style, each line checked against its rule — or found.</p>
           <form class="xl-form" data-logic-form>
             <input type="text" placeholder="Name" aria-label="File name" required>
-            <select aria-label="What to start with"><option value="worksheet">Worksheet</option><option value="theory">Theory</option></select>
+            <select aria-label="What to start with"><option value="worksheet">Worksheet</option><option value="theory">Theory</option><option value="proof">Proof</option></select>
             <button type="submit">Make</button>
           </form>
           <div class="xl-found" data-logic-found></div>

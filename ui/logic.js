@@ -32,15 +32,31 @@ const KEYWORDS = new Set(["all", "some", "exactly", "at", "least", "most", "not"
   "ALL", "SOME", "NOT", "AND", "OR", "XOR", "IMP", "IFF", "TRUE", "FALSE", "EST", "DIF", "MIN", "MAX", "PRED", "SUCC", "enum", "cardinality",
   "function", "predicate", "name", "all_different", "Sorts", "Vocabulary", "Constraints"]);
 
-/** The text coloured: comments, `?`, keywords, operators and numbers.
- *  @param {string} text @param {boolean} l4f */
-export function colour(text, l4f) {
+/** A proof's line: its number, its bars, its formula, its rule and what it cites. */
+const PROOF_LINE = /^(\s*\d+[.:)]?)((?:\s*\|)*)(.*?)(\s+)((?:ex falso|modus tollens|modus ponens|[^\s]+))((?:\s+[\d,\-–\s]*)?)$/u;
+const HEADER = /^(\s*)(system|premises|goal)\b/;
+
+/** The text coloured: comments, `?`, keywords, operators and numbers; in
+ *  a proof, line numbers, bars and rules too.
+ *  @param {string} text @param {boolean} l4f @param {boolean} [proof] @returns {string} */
+export function colour(text, l4f, proof = false) {
   const comment = l4f ? "%" : "#";
-  return text.split("\n").map((line) => {
+  return text.split("\n").map((/** @type {string} */ line) => {
     let out = "", rest = line;
     const at = rest.indexOf(comment);
     const tail = at >= 0 ? rest.slice(at) : "";
     rest = at >= 0 ? rest.slice(0, at) : rest;
+    const m = proof ? PROOF_LINE.exec(rest) : null;
+    if (m) {
+      const [, n, bars, formula, gap, rule, cites] = m;
+      return `<span class="lg-n">${esc(n)}</span><span class="lg-bar">${esc(bars)}</span>${colour(formula, false)}${gap}<span class="lg-rule">${esc(rule)}</span>` +
+        `<span class="lg-n">${esc(cites)}</span>` + (tail ? `<span class="lg-c">${esc(tail)}</span>` : "");
+    }
+    const h = proof ? HEADER.exec(rest) : null;
+    if (h) {
+      out = `${h[1]}<span class="lg-k">${h[2]}</span>`;
+      rest = rest.slice(h[0].length);
+    }
     const re = /(\?)|([A-Za-z_][A-Za-z0-9_']*)|(\d+)|(<->|<=>|->|=>|\|=|\|-|==|!=|<=|>=|\.\.|[¬∧∨⊕→↔⊨⊢∀∃⊤⊥~!&|^=<>+*-])|(\s+|.)/gu;
     for (const m of rest.matchAll(re)) {
       const [t, q, word, num, op] = m;
@@ -111,19 +127,22 @@ export function createLogic(host) {
   /* ── the file ─────────────────────────────────────────────────────── */
 
   const isL4f = () => state.file?.kind === "l4f";
+  const isProof = () => state.file?.kind === "proof";
 
   function paint() {
     const text = els.text.value;
     // A last newline needs a line under it to scroll to.
-    els.hl.innerHTML = colour(text, isL4f()) + "\n ";
+    els.hl.innerHTML = colour(text, isL4f(), isProof()) + "\n ";
     const bad = new Set((state.file?.diagnostics ?? []).map((d) => d.line));
+    // A proof's lines that check.
+    const right = new Set((state.file?.checks ?? []).filter(([, ok]) => ok).map(([l]) => l));
     // The line the answer is of, marked.
     const answered = state.answer && state.answer.kind !== "table" ? state.answer.line : 0;
     // The lines of a conflict, when there is no model.
     const clash = new Set(state.models?.conflict ? [...state.models.conflict.lines, ...state.models.conflict.kinds.map(([l]) => l)] : []);
     const n = text.split("\n").length;
     els.gutter.innerHTML = Array.from({ length: n }, (_, i) => {
-      const cls = [bad.has(i + 1) ? "bad" : "", clash.has(i + 1) ? "clash" : "", i + 1 === answered ? "on" : ""].filter(Boolean).join(" ");
+      const cls = [bad.has(i + 1) ? "bad" : right.has(i + 1) ? "ok" : "", clash.has(i + 1) ? "clash" : "", i + 1 === answered ? "on" : ""].filter(Boolean).join(" ");
       return cls ? `<span class="${cls}">${i + 1}</span>` : String(i + 1);
     }).join("\n") + "\n ";
     follow();
@@ -342,12 +361,25 @@ export function createLogic(host) {
       `<input name="column" placeholder="Column: 00010111 (x for either)" aria-label="Column" value="${esc(state.column)}" spellcheck="false"><button type="submit">Read</button></form></details>`;
   }
 
+  /** A natural-deduction proof: the button to find one, or the one found,
+   *  to write into a proof or to copy. @param {Answer} a @param {boolean} inProof */
+  function deductionHtml(a, inProof) {
+    if (a.deduction) {
+      const lines = a.deduction.split("\n\n").slice(1).join("\n\n").trimEnd();
+      return `<h3>Natural deduction</h3><pre class="lg-proof">${colour(lines, false, true)}</pre>` +
+        (inProof ? `<button class="cc-quiet" data-logic-write title="Its lines in place of this proof's: ⌘Z takes them back">Write it in</button>`
+          : `<button class="cc-quiet" data-logic-copy-proof title="As a .proof file's text">Copy as a .proof file</button>`);
+    }
+    if (a.deductionNote) return `<p class="lg-faint">No natural-deduction proof: ${esc(a.deductionNote)}.</p>`;
+    return `<button class="cc-quiet" data-logic-prove title="Found by working back from the goal and forward from what is had">${inProof ? "Find a proof" : "Natural deduction"}</button>`;
+  }
+
   function renderAnswer() {
     const a = state.answer;
     const head = (/** @type {string} */ cls, /** @type {string} */ words) => `<div class="lg-verdict ${cls}">${words}</div>`;
     let body = "";
     if (!a || a.kind === "nothing") {
-      body = `<p class="lg-hint">Put the cursor on a line beginning <code>?</code> — a formula, <code>? A, B |= C</code> to ask if an argument holds, <code>? A == B</code> to ask if two formulas are the same — or on any formula or declaration, and it is answered here.</p>`;
+      body = isProof() ? `<p class="lg-hint">Put the cursor on a line of the proof, and it is checked against its rule here.</p>` : `<p class="lg-hint">Put the cursor on a line beginning <code>?</code> — a formula, <code>? A, B |= C</code> to ask if an argument holds, <code>? A == B</code> to ask if two formulas are the same — or on any formula or declaration, and it is answered here.</p>`;
     } else if (a.kind === "error") {
       body = head("bad", `${icon("d-error")}Line ${a.line}`) + `<p class="lg-message">${esc(a.message ?? "")}</p>`;
     } else if (a.kind === "declaration" || a.kind === "theory") {
@@ -375,7 +407,14 @@ export function createLogic(host) {
       const note = a.proofNote ? `<p class="lg-faint">${esc(a.proofNote)}.</p>` : "";
       const harder = a.more ? `<button class="cc-quiet" data-logic-more title="Up to ten seconds">Try harder</button>` : "";
       body = `<p class="lg-said"><code>${esc(a.text)}</code></p>` + verdict + why + (n > 0 ? tableHtml(a, counter) : "") +
-        (a.tableau ? `<h3>Tableau</h3><div class="lg-tab-wrap">${tabHtml(a.tableau)}</div>` : "") + note + harder;
+        (a.tableau ? `<h3>Tableau</h3><div class="lg-tab-wrap">${tabHtml(a.tableau)}</div>` : "") + note + harder +
+        (a.valid === true ? deductionHtml(a, false) : "");
+    } else if (a.kind === "proof" && a.proof) {
+      const p = a.proof;
+      const line = p.n != null ? (p.ok ? head("good", `${icon("check")}Line ${p.n}: ${esc(p.message)}`) : head("bad", `${icon("d-error")}Line ${p.n}${p.rule ? ` (${esc(p.rule)})` : ""}`) + `<p class="lg-message">${esc(p.message)}</p>`)
+        : p.message ? head(p.ok ? "" : "bad", esc(p.message)) : "";
+      const whole = p.complete ? head("good", `${icon("check")}${esc(p.summary[0].toUpperCase() + p.summary.slice(1))}`) : `<p class="lg-faint">The proof: ${esc(p.summary)}.</p>`;
+      body = (a.text ? `<p class="lg-said"><code>${esc(a.text)}</code></p>` : "") + line + whole + (p.complete && !a.deduction ? "" : deductionHtml(a, true));
     } else if (a.kind === "same") {
       const differ = (/** @type {number} */ r) => a.columns.length === 2 && a.columns[0].values[r] !== a.columns[1].values[r];
       body = `<p class="lg-said"><code>${esc(a.text)}</code></p>` +
@@ -408,7 +447,7 @@ export function createLogic(host) {
     if (open) return void host.dispatch({ type: "logicOpen", path: open.dataset.logicOpen });
     const made = /** @type {HTMLElement | null} */ (t.closest("[data-logic-new]"));
     if (made) {
-      const name = window.prompt?.(made.dataset.logicNew === "theory" ? "The new theory's name" : "The new worksheet's name");
+      const name = window.prompt?.(`The new ${made.dataset.logicNew}'s name`);
       if (name) host.dispatch({ type: "logicNew", name, kind: made.dataset.logicNew });
       return;
     }
@@ -429,6 +468,23 @@ export function createLogic(host) {
       return void host.dispatch({ type: "logicClose", discard: true });
     }
     if (t.closest("[data-logic-more]")) return void ask(true, true);
+    if (t.closest("[data-logic-prove]") && state.file) {
+      send();
+      return void host.dispatch({ type: "logicProve", generation: state.file.generation, line: lineAt(els.text.value, els.text.selectionStart) });
+    }
+    if (t.closest("[data-logic-write]") && state.answer?.deduction) {
+      // The header as typed, and the proof found's lines after it.
+      const lines = els.text.value.split("\n");
+      const first = lines.findIndex((l) => /^\s*\d/.test(l));
+      const head = (first < 0 ? lines : lines.slice(0, first)).join("\n").trimEnd();
+      const body = state.answer.deduction.split("\n\n").slice(1).join("\n\n");
+      els.text.focus();
+      els.text.select();
+      typeIn(`${head}\n\n${body}`);
+      send();
+      return void ask(true);
+    }
+    if (t.closest("[data-logic-copy-proof]") && state.answer?.deduction) return void navigator.clipboard?.writeText?.(state.answer.deduction).catch(() => {});
     if (t.closest("[data-logic-solve]")) return void solve(false);
     if (t.closest("[data-logic-count]")) return void solve(true);
     if (t.closest("[data-logic-stop]")) return void host.dispatch({ type: "logicStop" });

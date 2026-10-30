@@ -243,6 +243,56 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     assert(!answer().textContent.includes('No model'), 'the line\'s tab still shows the models');
   });
 
+  await test('A proof is coloured, its lines marked right or wrong, checked at the caret, and one found is written in', async () => {
+    const proof = 'system fitch\npremises p -> q, q -> r\ngoal p -> r\n\n1  p -> q   premise\n2  q -> r   premise\n3  | p      assume\n4  | r      →E 2, 3\n';
+    await win.pushEvents([file({path: 'week1/s.proof', name: 's', kind: 'proof', generation: 6, text: proof,
+      diagnostics: [{line: 8, col: 0, message: '4: →E needs q, the antecedent of 2: line 3 is p'}], checks: [[5, true], [6, true], [7, true], [8, false]]})]);
+    await settle();
+    const gutter = [...ws().querySelectorAll('.lg-gutter span')];
+    assert(gutter.filter((g) => g.classList.contains('ok')).map((g) => g.textContent).join() === '5,6,7', 'the right lines are not marked');
+    assert(gutter.find((g) => g.textContent === '8')?.classList.contains('bad'), 'the wrong line is not marked');
+    const hl = ws().querySelector('[data-logic-hl]');
+    assert([...hl.querySelectorAll('.lg-rule')].map((r) => r.textContent).join() === 'premise,premise,assume,→E', 'the rules are not coloured');
+    assert(hl.querySelectorAll('.lg-bar').length >= 2 && hl.querySelector('.lg-k')?.textContent === 'system', 'the bars and the header are not coloured');
+    assert(ws().querySelector('[data-logic-kind]').textContent === 'proof', 'the file is not said to be a proof');
+    const p = (/** @type {any} */ more) => ({n: 4, rule: '→E', ok: false, message: '→E needs q, the antecedent of 2: line 3 is p', complete: false, summary: '1 line is wrong', ...more});
+    await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 6, line: 8, kind: 'proof', text: 'r', proof: p({}), deduction: null, deductionNote: null}}]);
+    await settle();
+    assert(answer().textContent.includes('Line 4 (→E)') && answer().textContent.includes('the antecedent of 2'), 'the wrong line\'s answer does not say what is wrong');
+    assert(answer().textContent.includes('1 line is wrong'), 'the proof as a whole is not said');
+    await caret(8);
+    const before = win.commands.length;
+    answer().querySelector('[data-logic-prove]').click(); await settle();
+    const asked = sent(before, 'logicProve')[0];
+    assert(asked?.generation === 6 && asked.line === 8, `Find a proof did not ask: ${JSON.stringify(asked)}`);
+    const found = 'system fitch\npremises p -> q, q -> r\ngoal p -> r\n\n1  p -> q  premise\n2  q -> r  premise\n3  | p     assume\n4  | q     →E 1, 3\n5  | r     →E 2, 4\n6  p -> r  →I 3-5\n';
+    await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 6, line: 8, kind: 'proof', text: 'r', proof: p({}), deduction: found, deductionNote: null}}]);
+    await settle();
+    assert(answer().querySelector('.lg-proof')?.textContent.includes('→I 3-5'), 'the proof found is not shown');
+    const edits = win.commands.length;
+    answer().querySelector('[data-logic-write]').click(); await settle();
+    assert(text().value === 'system fitch\npremises p -> q, q -> r\ngoal p -> r\n\n' + found.split('\n\n')[1], `the proof found was not written in under the header: ${JSON.stringify(text().value)}`);
+    assert(sent(edits, 'logicEdit').some((c) => c.text.includes('→I 3-5')), 'the proof written in was not sent');
+  });
+
+  await test('A valid argument offers a natural-deduction proof, to copy as a .proof file', async () => {
+    await win.pushEvents([file({generation: 7})]); await settle();
+    await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 7, line: 3, kind: 'argument', text: '? p, p -> q |= q', valid: true, columns: [], atoms: [], tableau: null, open: [],
+      deduction: null, deductionNote: null}}]);
+    await settle();
+    const before = win.commands.length;
+    answer().querySelector('[data-logic-prove]').click(); await settle();
+    assert(sent(before, 'logicProve')[0]?.generation === 7, 'Natural deduction did not ask for a proof');
+    await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 7, line: 3, kind: 'argument', text: '? p, p -> q |= q', valid: true, columns: [], atoms: [], tableau: null, open: [],
+      deduction: 'system fitch\npremises p, p -> q\ngoal q\n\n1  p       premise\n2  p -> q  premise\n3  q       →E 2, 1\n', deductionNote: null}}]);
+    await settle();
+    assert(answer().querySelector('.lg-proof')?.textContent.includes('→E 2, 1') && answer().querySelector('[data-logic-copy-proof]'), 'the proof found is not shown to copy');
+    await win.pushEvents([{type: 'logicAnswer', answer: {...IMPLIES, generation: 7, line: 3, kind: 'argument', text: '? p, p -> q |= q', valid: true, columns: [], atoms: [], tableau: null, open: [],
+      deduction: null, deductionNote: 'no proof found in the time'}}]);
+    await settle();
+    assert(answer().textContent.includes('No natural-deduction proof: no proof found in the time'), 'no proof found is not said');
+  });
+
   await test('Closing a file with unsaved changes asks first, then goes home', async () => {
     await win.pushEvents([file({generation: 4, dirty: true})]); await settle();
     const confirm = win.confirm;
