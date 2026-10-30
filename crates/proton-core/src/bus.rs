@@ -984,6 +984,11 @@ pub enum Command {
     StudyMakeReadable {
         id: String,
     },
+    /// Digest a source too long to read whole: each of its parts not
+    /// digested yet, one call each. The person has been told how many.
+    StudyMakeDigest {
+        id: String,
+    },
     /// The artifacts Proton keeps, to choose sources from.
     StudyArtifacts,
     /// Add artifacts as sources, each as its latest version reads.
@@ -2022,6 +2027,10 @@ pub enum Event {
         /// Its guide, if it has one, and its summary's citations.
         guide: Option<proton_study::guide::StudySourceGuide>,
         citations: Vec<proton_study::cite::StudyCitation>,
+        /// For a source too long to read whole: its digest so far, and the
+        /// citations in it.
+        digest: Option<proton_study::digest::StudyDigestView>,
+        digest_citations: Vec<proton_study::cite::StudyCitation>,
     },
     /// The open notebook's chat with the tutor, whole: its turns, each
     /// answer's citations resolved, the answer coming if one is, and the

@@ -40,9 +40,6 @@ left of the plan, and what came of building it.
 - **Transcribing on the machine.** whisper.cpp and a model (from about
   150 MB), installed with two say-sos as the Lab's Python is, for
   recordings that are not to leave it; Fish transcribes today, paid.
-- **Digests of sources too long to read whole.** A book of a thousand pages
-  is read through the notebook's server today; a digest per section, made
-  once with an estimate shown first, would let a call see all of it.
 - **A PowerPoint's pictures.** Slides read from a .pptx are its words alone;
   reading its pictures needs its slides drawn, which needs LibreOffice or
   Keynote.

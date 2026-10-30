@@ -74,6 +74,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyAddUrls { .. }
             | Command::StudyTranscribe { .. }
             | Command::StudyMakeReadable { .. }
+            | Command::StudyMakeDigest { .. }
             | Command::StudyArtifacts
             | Command::StudyAddArtifacts { .. }
             | Command::StudyRemove { .. }
@@ -596,6 +597,7 @@ impl Study {
             Command::StudyAddUrls { urls } => self.add_urls(&urls),
             Command::StudyTranscribe { id } => self.transcribe(&id),
             Command::StudyMakeReadable { id } => self.make_readable(&id),
+            Command::StudyMakeDigest { id } => self.make_digest(&id),
             Command::StudyArtifacts => vec![self.artifacts_event()],
             Command::StudyAddArtifacts { ids } => self.add_artifacts(&ids),
             Command::StudyRemove { id } => self.remove(&id),
@@ -1395,6 +1397,35 @@ impl Study {
     /// A source's pages with few words, drawn on a worker and then read from
     /// their pictures, eight to a call: the source's own file, here, never
     /// one in iCloud.
+    /// Digest a long source: a call for each part not digested and not
+    /// being digested, run as the studio runs its calls.
+    fn make_digest(&mut self, id: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let Some(source) = open.book.sources.get(id).filter(|s| s.status.has_words()) else {
+            return vec![notice(format!("{id} has no words to digest."), NoticeLevel::Info)];
+        };
+        let Some(parts) = proton_study::digest::parts(&open.book, id) else {
+            return vec![notice(format!("{} is short enough to be read whole.", source.title), NoticeLevel::Info)];
+        };
+        let book = open.book.clone();
+        let underway = self.jobs.digesting(book.dir(), id);
+        let missing = proton_study::digest::missing(&book, id);
+        if missing.is_empty() {
+            return vec![notice(format!("{} is digested already.", source.title), NoticeLevel::Info)];
+        }
+        let missing: Vec<_> = missing.into_iter().filter(|p| !underway.contains(&p.hash)).collect();
+        if missing.is_empty() {
+            return vec![notice(format!("{} is being digested already.", source.title), NoticeLevel::Info)];
+        }
+        for part in &missing {
+            let options = proton_study::studio::Options { source: Some(id.to_string()), part: Some(part.asked(parts.len())), ..Default::default() };
+            self.jobs.ask(&book, proton_study::studio::Make::Digest, options);
+        }
+        let roots = self.kb.labelled_roots();
+        self.jobs.poll(self.tutors.as_mut(), &roots);
+        self.studio_event().into_iter().collect()
+    }
+
     fn make_readable(&mut self, id: &str) -> Vec<Event> {
         let Some(open) = &self.open else { return Vec::new() };
         let Some(source) = open.book.sources.get(id) else {
@@ -2091,7 +2122,7 @@ impl Study {
             StudyMadeBody::Logic { problems, .. } => problems.iter().map(|p| format!("{}\n{}", p.statement, p.cites.iter().map(|c| format!("[[{c}]]")).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n"),
             // What the web gave cites the web, by number, not the notebook;
             // a guide and labels are shown with their sources.
-            StudyMadeBody::Found { .. } | StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } | StudyMadeBody::Pages { .. } => String::new(),
+            StudyMadeBody::Found { .. } | StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } | StudyMadeBody::Pages { .. } | StudyMadeBody::Digest { .. } => String::new(),
         };
         let citations = proton_study::cite::resolve(&open.book, &text);
         vec![Event::StudyMadeOpen { made, body, citations }]
@@ -2170,7 +2201,9 @@ impl Study {
         };
         let guide = open.book.guide(id);
         let citations = guide.as_ref().map(|g| proton_study::cite::resolve(&open.book, &g.summary)).unwrap_or_default();
-        vec![Event::StudySource { id: id.to_string(), title: source.title.clone(), kind: source.kind.clone(), at, said, view, guide, citations }]
+        let digest = proton_study::digest::view(&open.book, id);
+        let digest_citations = digest.as_ref().map(|d| proton_study::cite::resolve(&open.book, &d.sections.iter().map(|s| format!("[[{}]] {}", s.at, s.summary)).collect::<Vec<_>>().join("\n"))).unwrap_or_default();
+        vec![Event::StudySource { id: id.to_string(), title: source.title.clone(), kind: source.kind.clone(), at, said, view, guide, citations, digest, digest_citations }]
     }
 
     /* ── notes ──────────────────────────────────────────────────────── */

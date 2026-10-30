@@ -44,6 +44,10 @@ const LONGEST: Duration = Duration::from_secs(15 * 60);
 const LONGEST_WEB: Duration = Duration::from_secs(25 * 60);
 /// The most of a notebook's words given to a call whole.
 const WHOLE: usize = 120_000;
+/// What a call given digests is told of them.
+const DIGESTS: &str = "The long sources, digested — what each section says, where it begins, citing it. Work from them for what \
+                       the sources cover, and cite as they do; for what a digest only names — a formula, a definition's words, \
+                       a worked example — read the passage itself.";
 
 /// A call, as the studio lists it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -172,6 +176,13 @@ impl Jobs {
             (Make::Slides, _) if options.slide.is_some() => format!("Revising slide {} of {}", options.slide.as_deref().unwrap_or_default().trim_start_matches('s'), options.slides.as_deref().unwrap_or_default()),
             (Make::Flashcards, _) if options.deck.is_some() => format!("More cards for {}", options.deck.as_deref().and_then(|d| book.deck(d)).map_or_else(String::new, |d| d.title)),
             (Make::SourceGuide, _) => format!("Guide to {}", options.source.as_deref().and_then(|s| book.sources.get(s)).map_or("a source", |s| s.title.as_str())),
+            (Make::Digest, _) => {
+                let of = options.source.as_deref().and_then(|s| book.sources.get(s)).map_or("a source", |s| s.title.as_str());
+                match &options.part {
+                    Some(part) => format!("Digesting part {} of {} of {of}", part.n, part.of),
+                    None => format!("Digesting {of}"),
+                }
+            }
             (Make::Readable, _) => {
                 let pages = match (options.pages.first(), options.pages.last()) {
                     (Some(a), Some(b)) if a != b => format!("pages {a}–{b}"),
@@ -224,6 +235,13 @@ impl Jobs {
             unmarked(&running.asked, "Cancelled.");
         }
         self.set(dir, id, "failed", Some("Cancelled.".into()), None);
+    }
+
+    /// The parts of a source being digested, or waiting to be, by their
+    /// words' hashes.
+    pub fn digesting(&self, dir: &std::path::Path, source: &str) -> Vec<String> {
+        let of = |a: &Asked| (a.dir == dir && a.make == Make::Digest && a.options.source.as_deref() == Some(source)).then(|| a.options.part.as_ref().map(|p| p.hash.clone())).flatten();
+        self.waiting.iter().filter_map(of).chain(self.running.iter().filter_map(|r| of(&r.asked))).collect()
     }
 
     /// Whether a quiz's question is being marked, or waits to be.
@@ -486,16 +504,47 @@ fn asking(book: &Book, asked: &Asked, tutors: &mut dyn Tutors, roots: &[(String,
         }
         given.extend(of);
     }
-    let prompt = match given.is_empty() {
+    // The long sources ticked are given as their digests, as many as fit.
+    let mut digests = String::new();
+    let mut digested: Vec<&str> = Vec::new();
+    for source in book.sources.sources.iter().filter(|s| ticked.contains(&s.id) && !given.iter().any(|h| h.doc == s.id)) {
+        let Some(text) = proton_study::digest::text(book, source) else { continue };
+        if size(&given) + digests.len() + text.len() > WHOLE {
+            continue;
+        }
+        digests.push_str(&text);
+        if proton_study::digest::missing(book, &source.id).is_empty() {
+            digested.push(&source.id);
+        }
+    }
+    // And the short ones whole, as many as fit.
+    let rest: Vec<&str> = book.sources.sources.iter().filter(|s| ticked.contains(&s.id) && !given.iter().any(|h| h.doc == s.id)).map(|s| s.id.as_str()).collect();
+    for id in rest {
+        let of: Vec<Hit> = all.iter().filter(|h| h.doc == id).cloned().collect();
+        if proton_study::digest::long(&of) || size(&given) + size(&of) + digests.len() > WHOLE {
+            continue;
+        }
+        given.extend(of);
+    }
+    let mut prompt = match given.is_empty() {
         true => prompt,
         false => format!("{prompt}\n\n---\n\nGiven whole, each passage after its citation:\n\n{}", proton_library::quote(&given)),
     };
+    if !digests.is_empty() {
+        prompt.push_str(&format!("\n\n---\n\n{DIGESTS}\n\n{digests}"));
+    }
     let server = match asked.engine {
         Engine::Antigravity => None,
         _ => tutors.server(),
     };
     let Some(command) = server else {
-        return Err(format!("The sources ticked are too many to give {} whole; choose another engine, or tick fewer.", asked.engine.name()));
+        // Without the server, a notebook whose every source is given whole
+        // or digested whole can still be worked from.
+        let covered = ticked.iter().chain(&must).all(|id| given.iter().any(|h| &h.doc == id) || digested.contains(&id.as_str()));
+        if covered {
+            return Ok(Asking { instructions: studio::rules(true), prompt, mcp: Vec::new(), images: Vec::new() });
+        }
+        return Err(format!("The sources ticked are too many to give {} whole; choose another engine, tick fewer, or digest the long ones.", asked.engine.name()));
     };
     let mut args = vec!["--notebook".to_string(), book.dir().display().to_string()];
     for (label, path) in roots {
@@ -650,6 +699,13 @@ fn keep(asked: &Asked, read: Read, conversation: &dyn Conversation) -> Result<St
             let labels = labels.into_iter().filter(|(id, _)| book.sources.get(id).is_some()).collect();
             book.save_labels(&labels)?;
             return Ok("labels".into());
+        }
+        StudyMadeBody::Digest { sections } => {
+            let id = asked.options.source.as_deref().ok_or("a digest of no source")?;
+            let part = asked.options.part.clone().ok_or("a digest of no part")?;
+            let kept = proton_study::digest::DigestPart { from: part.from as usize, to: part.to as usize, hash: part.hash, sections, made: proton_study::now(), by, task: asked.id.clone() };
+            book.keep_digest_part(id, kept)?;
+            return Ok(id.to_string());
         }
         StudyMadeBody::Pages { pages } => {
             let id = asked.options.source.as_deref().ok_or("pages of no source")?;

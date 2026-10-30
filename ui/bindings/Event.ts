@@ -78,6 +78,7 @@ import type { StudyCitation } from "./StudyCitation";
 import type { StudyCodeOutcome } from "./StudyCodeOutcome";
 import type { StudyCodeSaved } from "./StudyCodeSaved";
 import type { StudyCounts } from "./StudyCounts";
+import type { StudyDigestView } from "./StudyDigestView";
 import type { StudyDrafted } from "./StudyDrafted";
 import type { StudyGraphicStyle } from "./StudyGraphicStyle";
 import type { StudyJob } from "./StudyJob";
@@ -293,7 +294,12 @@ said: string | null, view: StudyView,
 /**
  * Its guide, if it has one, and its summary's citations.
  */
-guide: StudySourceGuide | null, citations: Array<StudyCitation>, } | { "type": "studyChat", id: string, title: string, settings: StudyTutorSettings, turns: Array<StudyTurn>, live: StudyLive | null, busy: boolean, error: string | null, 
+guide: StudySourceGuide | null, citations: Array<StudyCitation>, 
+/**
+ * For a source too long to read whole: its digest so far, and the
+ * citations in it.
+ */
+digest: StudyDigestView | null, digest_citations: Array<StudyCitation>, } | { "type": "studyChat", id: string, title: string, settings: StudyTutorSettings, turns: Array<StudyTurn>, live: StudyLive | null, busy: boolean, error: string | null, 
 /**
  * How the tutor reaches the sources, once it has started: `tools`
  * or `passages`.

@@ -8,6 +8,10 @@
 //! changes what the next search can see without a new process; the sources'
 //! passages are read again whenever `sources.json` changes.
 //!
+//! `digest_source` hands back a long source's digest — what each of its
+//! sections says, where it begins — when the studio has made one, so a
+//! source too long to read whole can be seen whole, section by section.
+//!
 //! `view_pages` draws a PDF source's pages as pictures, for slides whose
 //! words were too few to read: it needs the file itself, found under the
 //! roots named with `--root Label=/path`, and refuses one in iCloud. The
@@ -151,6 +155,22 @@ pub fn tools() -> Value {
             }
         },
         {
+            "name": "digest_source",
+            "description": "See what a long source covers, section by section: each section's title, where it \
+                            begins, a summary citing it, and its key terms, as the notebook digested it. \
+                            notebook_sources says which sources have a digest. Use it to find where things \
+                            are in a source too long to read whole; read a passage itself for its details. It \
+                            hands back at most about 12,000 characters, and says which section to go on from.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "Its id: S07." },
+                    "from": { "type": "integer", "description": "The first section, from 1; defaults to the first." }
+                },
+                "required": ["source"]
+            }
+        },
+        {
             "name": "view_pages",
             "description": "See pages of a PDF source as pictures — for slides whose words were too few to read, \
                             or a diagram or an equation a page's text cannot show. At most 4 pages a call. Cite \
@@ -185,6 +205,10 @@ pub fn call(served: &mut Served, name: &str, args: &Value) -> Value {
             Ok(text) => rpc::tool_output(text, false),
             Err(why) => rpc::tool_output(why, true),
         },
+        "digest_source" => match digest(served, args) {
+            Ok(text) => rpc::tool_output(text, false),
+            Err(why) => rpc::tool_output(why, true),
+        },
         "view_pages" => match view(served, args) {
             Ok(content) => json!({ "content": content, "isError": false }),
             Err(why) => rpc::tool_output(why, true),
@@ -206,7 +230,13 @@ fn sources(served: &Served) -> String {
             0 => String::new(),
             _ => format!(" (pages {} have few words: view_pages shows them)", s.thin.iter().take(12).map(|p| p.to_string()).collect::<Vec<_>>().join(", ")),
         };
-        out.push_str(&format!("{}  {} — {}, {}{thin}\n", s.id, s.title, role(s.role), extent(s)));
+        let digested = match proton_study::digest::view(book, &s.id) {
+            Some(d) if d.done == d.parts => format!(" (too long to read whole: digest_source shows its {} sections)", d.sections.len()),
+            Some(d) if d.done > 0 => format!(" (too long to read whole: digest_source shows {} sections, of {} of its {} parts)", d.sections.len(), d.done, d.parts),
+            Some(_) => " (too long to read whole, and not digested)".to_string(),
+            None => String::new(),
+        };
+        out.push_str(&format!("{}  {} — {}, {}{thin}{digested}\n", s.id, s.title, role(s.role), extent(s)));
     }
     let others = book.sources.sources.len() - ticked.len();
     if others > 0 {
@@ -315,6 +345,44 @@ fn read(served: &Served, args: &Value) -> Result<String, String> {
                 out.push_str(&format!("\n(It goes on at second {n}.)"));
             }
         }
+    }
+    Ok(out)
+}
+
+/// A long source's digest, from a section on.
+fn digest(served: &Served, args: &Value) -> Result<String, String> {
+    let id = args.get("source").and_then(Value::as_str).ok_or("digest_source: `source` is required")?;
+    let source = served.usable(id)?;
+    let book = served.book.as_ref().ok_or("the notebook cannot be read")?;
+    let Some(view) = proton_study::digest::view(book, &source.id) else {
+        return Err(format!("{} is short enough to read whole: read_source reads it", source.id));
+    };
+    if view.sections.is_empty() {
+        return Err(format!("{} has not been digested: search_sources and read_source reach it", source.id));
+    }
+    let first = args.get("from").and_then(Value::as_u64).map_or(1, |n| n as usize).max(1);
+    if first > view.sections.len() {
+        return Err(format!("{}'s digest has {} sections", source.id, view.sections.len()));
+    }
+    let mut out = format!("The digest of {} — {}: sections {first}", source.id, source.title);
+    let mut body = String::new();
+    let mut last = first;
+    for (i, s) in view.sections.iter().enumerate().skip(first - 1) {
+        let at = if s.at.is_empty() { String::new() } else { format!(" [[{}]]", s.at) };
+        let terms = if s.terms.is_empty() { String::new() } else { format!("\nTerms: {}.", s.terms.join(", ")) };
+        let one = format!("{}. {}{at}\n{}{terms}\n\n", i + 1, s.title, s.summary);
+        if !body.is_empty() && body.len() + one.len() > MOST {
+            break;
+        }
+        body.push_str(&one);
+        last = i + 1;
+    }
+    out.push_str(&format!("–{last} of {}.\n\n{body}", view.sections.len()));
+    if last < view.sections.len() {
+        out.push_str(&format!("(It goes on at section {}.)", last + 1));
+    }
+    if view.done < view.parts {
+        out.push_str(&format!("\n{} of its {} parts are not digested yet: search_sources finds what is in them.", view.parts - view.done, view.parts));
     }
     Ok(out)
 }
@@ -456,6 +524,53 @@ mod tests {
         let refused = call(&mut served, "read_source", &json!({ "source": "S03" }));
         assert_eq!(refused["isError"], json!(true));
         assert!(text(&refused).contains("not ticked"));
+    }
+
+    #[test]
+    fn a_long_sources_digest_is_handed_back_section_by_section() {
+        let (dir, files) = notebook("digest");
+        let mut book = Book::read(&dir).unwrap();
+        let id = book.sources.take_id();
+        let chapters: String = (1..=40).map(|c| format!("# Chapter {c}\n{}\n", (1..=80).map(|n| format!("line {n} of chapter {c}, on search and its costs")).collect::<Vec<_>>().join("\n"))).collect();
+        snapshot::keep(&book, &id, &Body::Lines(chapters.clone())).unwrap();
+        book.sources.sources.push(Source {
+            id: id.clone(),
+            title: "Textbook.md".into(),
+            kind: "markdown".into(),
+            origin: Origin::Pasted,
+            role: Role::Reading,
+            size: 1,
+            mtime: 1,
+            sha256: String::new(),
+            units: Units::Lines,
+            count: chapters.lines().count(),
+            thin: Vec::new(),
+            status: SourceStatus::Ready,
+            added: 1,
+            labels: Vec::new(),
+        });
+        book.save_sources().unwrap();
+        book.select(&["S01".into(), id.clone()]).unwrap();
+        let parts = proton_study::digest::parts(&book, &id).expect("too long to read whole");
+        assert!(parts.len() >= 2, "{}", parts.len());
+        let sections = (1..=3)
+            .map(|c| proton_study::digest::StudyDigestSection { title: format!("Chapter {c}"), at: String::new(), summary: format!("Chapter {c} says what search costs [[{id} L1-2]]."), terms: vec!["cost".into()] })
+            .collect();
+        let part = proton_study::digest::DigestPart { from: parts[0].from, to: parts[0].to, hash: parts[0].hash.clone(), sections, made: 1, by: "test".into(), task: "J0001".into() };
+        book.keep_digest_part(&id, part).unwrap();
+
+        let mut served = Served::open(dir, vec![("Courses".into(), files)]);
+        let listed = text(&call(&mut served, "notebook_sources", &json!({})));
+        assert!(listed.contains(&format!("digest_source shows 3 sections, of 1 of its {} parts", parts.len())), "{listed}");
+        assert!(!listed.lines().find(|l| l.starts_with("S01")).unwrap().contains("digest"), "a short source has none: {listed}");
+        let digest = text(&call(&mut served, "digest_source", &json!({ "source": id })));
+        assert!(digest.starts_with(&format!("The digest of {id} — Textbook.md: sections 1–3 of 3.")), "{digest}");
+        assert!(digest.contains("2. Chapter 2\nChapter 2 says what search costs") && digest.contains("Terms: cost."), "{digest}");
+        assert!(digest.contains(&format!("{} of its {} parts are not digested yet", parts.len() - 1, parts.len())), "{digest}");
+        let past = call(&mut served, "digest_source", &json!({ "source": id, "from": 9 }));
+        assert!(past["isError"] == json!(true) && text(&past).contains("has 3 sections"));
+        let short = call(&mut served, "digest_source", &json!({ "source": "S01" }));
+        assert!(text(&short).contains("short enough to read whole"), "{}", text(&short));
     }
 
     #[test]

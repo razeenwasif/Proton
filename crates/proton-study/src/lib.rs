@@ -27,6 +27,7 @@ pub mod cite;
 pub mod clock;
 pub mod code;
 pub mod deck;
+pub mod digest;
 pub mod discover;
 pub mod exam;
 pub mod infographic;

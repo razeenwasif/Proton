@@ -1248,6 +1248,7 @@ impl Workspace {
             | Command::StudyAddUrls { .. }
             | Command::StudyTranscribe { .. }
             | Command::StudyMakeReadable { .. }
+            | Command::StudyMakeDigest { .. }
             | Command::StudyArtifacts
             | Command::StudyAddArtifacts { .. }
             | Command::StudyRemove { .. }

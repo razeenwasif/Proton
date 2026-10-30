@@ -1173,12 +1173,21 @@ in iCloud, then read eight to a call by an engine that can see them (Antigravity
 print mode cannot, so Claude Code reads for it), each page written out as
 Markdown with its TeX and what its diagrams show, and put in place of the few
 words the PDF held, said to be read from the picture (`proton-study::readable`).
+A source too long for one call to read whole — over 120,000 characters, a
+book — is **digested** on asking, told its words and calls first: cut into
+parts of at most 100,000 characters, each read by one call that writes what
+its sections say in a few cited sentences, where each begins and its key
+terms, at about a fortieth of its length; the parts are kept in
+`.notebook/digests/` with their words' hashes, so a part whose words change is
+digested again alone (`proton-study::digest`). The reader shows the digest
+above the source's words.
 
 **The tutor** answers from the sources ticked, on Claude Code, Codex, Gemini or
 Antigravity, as the notebook has it set (`proton-core::study::tutor`). The
 first three reach the sources through `proton-mcp --notebook`, which serves
 only those ticked, from the words the notebook kept — `notebook_sources`,
-`search_sources`, `read_source`, `view_pages`, `notebook_status` — and have
+`search_sources`, `read_source`, `digest_source` (a long source's digest,
+section by section), `view_pages`, `notebook_status` — and have
 nothing else: Claude Code with no built-in tools (`--tools ""`), Codex in a
 read-only sandbox that never asks, Gemini with no extensions and only Proton's
 server allowed, none with the person's own servers. Antigravity, which takes
@@ -1198,7 +1207,10 @@ briefings, FAQs, glossaries, timelines and reports of one's own asking, as
 Markdown; mind maps, tables of the columns asked for, the course's learning
 objectives and flashcards, as JSON held to a schema. A notebook of up to 120,000
 characters is given to the call whole, each passage after its citation; a larger
-one is reached through `proton-mcp`. Three calls run at once, two on any one
+one is reached through `proton-mcp`, given what fits of it: the past papers an
+exam is set from, the digests of its long sources, and its short ones whole.
+Antigravity, which takes no server, can work from a larger notebook only when
+every source in it is given whole or digested whole. Three calls run at once, two on any one
 engine; a call runs fifteen minutes at most; an answer that will not read is
 sent back once, saying why. TeX that JSON ate — `\frac` arriving as a form
 feed and `rac` — is mended (`proton-study::tex`). What was made is kept under

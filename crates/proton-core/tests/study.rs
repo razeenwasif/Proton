@@ -1142,6 +1142,116 @@ fn a_source_is_given_a_guide_and_every_source_its_topics_each_kept_beside_them()
 }
 
 #[test]
+fn a_source_too_long_to_read_whole_is_digested_part_by_part_and_calls_see_all_of_it() {
+    use proton_study::studio::{Make, Options};
+    let scratch = Scratch::new("digest");
+    let settings = scratch.knowledge_base();
+    let chapters: String = (1..=40).map(|c| format!("# Chapter {c}\n{}\n", (1..=80).map(|n| format!("line {n} of chapter {c}, on search and what it costs")).collect::<Vec<_>>().join("\n"))).collect();
+    scratch.write("kb/Vault/textbook.md", &chapters);
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let server = scratch.root.join("bin/proton-mcp");
+    let mut session = tutored(&scratch, &settings, Some(server.clone()), &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/textbook.md".into(), "Vault/notes.md".into()] });
+    until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if sources.len() == 2 && sources.iter().all(|s| s.status == SourceStatus::Ready) => Some(()),
+        _ => None,
+    });
+    let shown = |session: &mut Session, id: &str| match session.apply(Command::StudyShow { id: id.into(), at: None }).into_iter().next() {
+        Some(Event::StudySource { digest, digest_citations, .. }) => (digest, digest_citations),
+        other => panic!("{other:?}"),
+    };
+    let (digest, _) = shown(&mut session, "S01");
+    let digest = digest.expect("too long to read whole");
+    assert_eq!((digest.parts, digest.done), (2, 0));
+    assert!(digest.words > 25_000, "{}", digest.words);
+    assert!(shown(&mut session, "S02").0.is_none(), "a short source is read whole");
+    let refused = session.apply(Command::StudyMakeDigest { id: "S02".into() });
+    assert!(said(&refused).iter().any(|s| s.contains("short enough")), "{:?}", said(&refused));
+
+    // Each part one call, given that part alone.
+    // Chapter c is lines 81(c - 1) + 1 to 81c.
+    let lines = |c: usize| format!("S01 § Chapter {c} L{}-{}", 81 * (c - 1) + 1, 81 * c);
+    for c in [1, 40] {
+        log.lock().unwrap().answers.push_back(
+            serde_json::json!({ "sections": [
+                { "title": format!("Chapter {c}"), "at": lines(c), "summary": format!("Chapter {c} says what search costs, line by line [[{}]].", lines(c)), "terms": ["cost"] },
+                { "title": format!("Chapter {}", c + 1), "at": "S09 p. 1", "summary": "The next chapter goes on with what search costs.", "terms": [] }
+            ]})
+            .to_string(),
+        );
+    }
+    let events = session.apply(Command::StudyMakeDigest { id: "S01".into() });
+    let (jobs, _) = studio(&events).unwrap();
+    assert_eq!(jobs.iter().map(|j| (j.title.as_str(), j.about.as_deref())).collect::<Vec<_>>(), [("Digesting part 2 of 2 of textbook.md", Some("S01")), ("Digesting part 1 of 2 of textbook.md", Some("S01"))], "newest first");
+    let again = session.apply(Command::StudyMakeDigest { id: "S01".into() });
+    assert!(said(&again).iter().any(|s| s.contains("being digested already")), "{:?}", said(&again));
+    until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.state == "failed") => panic!("{jobs:?}"),
+        Event::StudyStudio { jobs, .. } if jobs.len() == 2 && jobs.iter().all(|j| j.state == "done") => Some(()),
+        _ => None,
+    });
+    {
+        let log = log.lock().unwrap();
+        let (_, _, how, _) = &log.started[0];
+        assert!(how.mcp.is_empty() && how.schema.is_some(), "a part is given whole");
+        let first = log.sent.iter().find(|s| s.contains("This is part 1 of 2")).unwrap();
+        assert!(first.contains("of the source S01 — textbook.md — its lines 1–") && first.contains("[[S01 § Chapter 1 L"), "{}", &first[..300]);
+        assert!(!first.contains("Chapter 40"), "the other part is not in it");
+    }
+    let (digest, citations) = shown(&mut session, "S01");
+    let digest = digest.unwrap();
+    assert_eq!((digest.parts, digest.done, digest.sections.len()), (2, 2, 4));
+    assert_eq!(digest.sections.iter().map(|s| s.at.as_str()).collect::<Vec<_>>(), [lines(1), String::new(), lines(40), String::new()], "where a section begins is of its part");
+    assert!(citations.iter().all(|c| c.resolved), "{citations:?}");
+    assert!(scratch.root.join("Notebooks/search/.notebook/digests/S01.json").is_file());
+    let done = session.apply(Command::StudyMakeDigest { id: "S01".into() });
+    assert!(said(&done).iter().any(|s| s.contains("is digested already")), "{:?}", said(&done));
+
+    // A call over the notebook is given the digest, and the short source
+    // whole, with the server to read the rest.
+    log.lock().unwrap().answers.push_back("# Briefing\n\nSearch costs what its chapters say [[S01 § Chapter 1 L1-81]], and BFS is complete [[S02 § Search L1-2]].".into());
+    session.apply(Command::StudyMake { kind: Make::Briefing, options: Options::default() });
+    until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.kind == Make::Briefing && j.state == "done") => Some(()),
+        _ => None,
+    });
+    {
+        let log = log.lock().unwrap();
+        let (_, _, how, _) = log.started.last().unwrap();
+        assert!(how.mcp.iter().any(|m| m.tools.iter().any(|t| t == "digest_source")), "{:?}", how.mcp);
+        assert!(how.instructions.contains("digest_source"));
+        let sent = log.sent.last().unwrap();
+        assert!(sent.contains("The long sources, digested") && sent.contains("## Digest of S01 — textbook.md") && sent.contains(&format!("### Chapter 40 [[{}]]", lines(40))), "{sent}");
+        assert!(sent.contains("Given whole") && sent.contains("[[S02 § Search L1-2]]\n"), "the short source whole");
+    }
+
+    // Antigravity, which has no server, works from them alone.
+    session.apply(Command::StudyTutor { settings: proton_study::tutor::TutorSettings { engine: "antigravity".into(), ..Default::default() } });
+    log.lock().unwrap().answers.push_back("# Briefing\n\nSearch costs what its chapters say [[S01 § Chapter 1 L1-81]].".into());
+    session.apply(Command::StudyMake { kind: Make::Faq, options: Options::default() });
+    until(&mut session, |e| match e {
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.kind == Make::Faq && j.state == "failed") => panic!("{jobs:?}"),
+        Event::StudyStudio { jobs, .. } if jobs.iter().any(|j| j.kind == Make::Faq && j.state == "done") => Some(()),
+        _ => None,
+    });
+    let (engine, _, how, _) = log.lock().unwrap().started.last().cloned().unwrap();
+    assert!(engine == Engine::Antigravity && how.mcp.is_empty() && how.instructions.contains("given to you below"));
+
+    // A part whose words change is digested again, alone.
+    let book = proton_study::Book::read(&scratch.root.join("Notebooks/search")).unwrap();
+    let mut changed = chapters.clone();
+    changed.push_str("one line more, at the end\n");
+    proton_study::snapshot::keep(&book, "S01", &proton_library::extract::Body::Lines(changed)).unwrap();
+    let missing = proton_study::digest::missing(&book, "S01");
+    assert_eq!(missing.iter().map(|p| p.n).collect::<Vec<_>>(), [2], "the first part is as it was");
+    session.shutdown();
+}
+
+#[test]
 fn a_decks_pages_with_few_words_are_drawn_and_read_from_their_pictures_and_put_in_its_words() {
     use proton_study::studio::Make;
     let scratch = Scratch::new("readable");

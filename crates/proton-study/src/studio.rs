@@ -31,6 +31,7 @@ use crate::circuits;
 use crate::logic;
 use crate::code;
 use crate::deck::{self, StudyCard};
+use crate::digest::{self, StudyDigestSection};
 use crate::exam;
 use crate::found::{self, StudyFound};
 use crate::guide;
@@ -93,6 +94,8 @@ pub enum Make {
     Labels,
     /// Pages with few words, read from their pictures.
     Readable,
+    /// A part of a source too long to read whole, digested.
+    Digest,
     /// A written answer marked: a call of the studio's, but not a thing it
     /// makes for the list.
     Marking,
@@ -134,6 +137,8 @@ pub enum Shape {
     Labels,
     /// Pages read, put in their source's words.
     Pages,
+    /// A part of a source digested, in `.notebook/digests/`.
+    Digest,
     /// A mark, in its quiz's attempts.
     Mark,
 }
@@ -168,6 +173,7 @@ impl Make {
             Make::SourceGuide => "Source guide",
             Make::Labels => "Topic labels",
             Make::Readable => "Pages read",
+            Make::Digest => "Digest",
             Make::Marking => "Marking",
         }
     }
@@ -190,6 +196,7 @@ impl Make {
             Make::SourceGuide => Shape::Guide,
             Make::Labels => Shape::Labels,
             Make::Readable => Shape::Pages,
+            Make::Digest => Shape::Digest,
             Make::Exam | Make::PastPaper => Shape::Paper,
             Make::Marking => Shape::Mark,
             _ => Shape::Prose,
@@ -225,6 +232,7 @@ impl Make {
             Make::SourceGuide => "sourceGuide",
             Make::Labels => "labels",
             Make::Readable => "readable",
+            Make::Digest => "digest",
             Make::Marking => "marking",
         }
     }
@@ -233,7 +241,7 @@ impl Make {
     /// web's, a source's words, the sources' beginnings — rather than the
     /// sources ticked.
     pub fn self_contained(self) -> bool {
-        self.web() || matches!(self, Make::SourceGuide | Make::Labels | Make::Readable)
+        self.web() || matches!(self, Make::SourceGuide | Make::Labels | Make::Readable | Make::Digest)
     }
 
     /// Whether it searches the web — and nothing else: no files, no notebook.
@@ -242,7 +250,7 @@ impl Make {
     }
 
     pub fn from_key(key: &str) -> Option<Make> {
-        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Coding, Make::Circuits, Make::Logic, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels, Make::Readable]
+        [Make::StudyGuide, Make::Briefing, Make::Faq, Make::Glossary, Make::Timeline, Make::Report, Make::MindMap, Make::Table, Make::Objectives, Make::Flashcards, Make::Quiz, Make::Practice, Make::Coding, Make::Circuits, Make::Logic, Make::Exam, Make::PastPaper, Make::Diagnostic, Make::Overview, Make::Audio, Make::Slides, Make::Infographic, Make::Discover, Make::DeepResearch, Make::SourceGuide, Make::Labels, Make::Readable, Make::Digest]
             .into_iter()
             .find(|m| m.key() == key)
     }
@@ -308,6 +316,10 @@ pub struct Options {
     /// The pages of `source` to read from their pictures.
     #[serde(default)]
     pub pages: Vec<u32>,
+    /// The part of `source` to digest, as it was when it was asked for.
+    #[serde(default)]
+    #[ts(skip)]
+    pub part: Option<digest::PartAsked>,
 }
 
 /// How many cards or questions to make.
@@ -376,7 +388,8 @@ pub fn rules(inline: bool) -> String {
     let reach = match inline {
         true => "The notebook's sources are given to you below, every passage beginning with its citation in double brackets. Work from them.",
         false => "Reach the notebook's sources with its tools: notebook_sources first, then search_sources and read_source — read what you need whole, \
-                  not only what a search finds — and view_pages for a slide whose words are few.",
+                  not only what a search finds — digest_source for what a source too long to read whole covers, and view_pages \
+                  for a slide whose words are few.",
     };
     format!(
         "{reach}\n\nRules:\n- Everything you write comes from the sources. Follow each claim with the citation of the passage it came from, copied \
@@ -451,7 +464,7 @@ pub fn prompt(make: Make, options: &Options, course: &str) -> String {
         ),
         // An exam's asking needs the notebook, and so does the web's, to
         // find what it has not: [`prompt_for`].
-        Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking | Make::Discover | Make::DeepResearch | Make::SourceGuide | Make::Labels | Make::Readable => String::new(),
+        Make::Exam | Make::PastPaper | Make::Diagnostic | Make::Marking | Make::Discover | Make::DeepResearch | Make::SourceGuide | Make::Labels | Make::Readable | Make::Digest => String::new(),
         Make::Flashcards => format!(
             "Make about {} flashcards of these sources, for a student of {course} learning them for the exam. {} Each card tests one idea — \
              a definition, a result and when it holds, a step of a method, a distinction, a formula, a mistake students make — and is \
@@ -527,6 +540,14 @@ pub fn prompt_for(book: &Book, make: Make, options: &Options) -> Result<String, 
                 return Err("say which pages to read".into());
             }
             Ok(readable::prompt(source, &asked))
+        }
+        Make::Digest => {
+            let id = options.source.as_deref().ok_or("say which source to digest")?;
+            let asked = options.part.as_ref().ok_or("say which part to digest")?;
+            let source = book.sources.get(id).filter(|s| s.status.has_words()).ok_or_else(|| format!("{id} has no words to digest"))?;
+            let parts = digest::parts(book, id).ok_or_else(|| format!("{id} is short enough to be read whole"))?;
+            let part = parts.iter().find(|p| p.hash == asked.hash).ok_or_else(|| format!("{id} has changed since it was asked for: digest it again"))?;
+            Ok(digest::prompt(source, part, parts.len()))
         }
         Make::Labels => {
             let sources: Vec<(String, String, String)> = book
@@ -636,6 +657,7 @@ pub fn schema(make: Make, options: &Options) -> Option<Value> {
         Shape::Guide => guide::schema(),
         Shape::Labels => guide::labels_schema(),
         Shape::Pages => readable::schema(),
+        Shape::Digest => digest::schema(),
         Shape::Mark => quiz::marking_schema(),
         Shape::Map => json!({
             "type": "object", "additionalProperties": false, "required": ["title", "nodes"],
@@ -787,6 +809,8 @@ pub enum StudyMadeBody {
     Labels { labels: std::collections::BTreeMap<String, Vec<String>> },
     /// Pages read from their pictures: each page's number and its words.
     Pages { pages: Vec<(u32, String)> },
+    /// A part of a source digested, before it is kept with the others.
+    Digest { sections: Vec<StudyDigestSection> },
     /// The deck and the quiz it was kept with, once it is kept.
     Overview {
         topics: Vec<StudyOverviewTopic>,
@@ -898,6 +922,10 @@ pub fn read(make: Make, options: &Options, answer: &str, structured: Option<Valu
             let asked: Vec<usize> = options.pages.iter().map(|&n| n as usize).collect();
             Ok(StudyMadeBody::Pages { pages: readable::read(&value, &asked)?.into_iter().map(|(n, text)| (n as u32, text)).collect() })
         }
+        Shape::Digest => {
+            let (id, part) = (options.source.as_deref().unwrap_or_default(), options.part.as_ref().ok_or("a digest of no part")?);
+            Ok(StudyMadeBody::Digest { sections: digest::read(&value, id, part.from as usize, part.to as usize)? })
+        }
         Shape::Audio => {
             let format = options.format.unwrap_or_default();
             let (title, segments, chapters) = audio::read(&value, format)?;
@@ -967,7 +995,7 @@ impl Book {
             Shape::Circuits => self.dir().join("studio/circuits"),
             Shape::Logic => self.dir().join("studio/logic"),
             Shape::Found => self.dir().join("studio/found"),
-            Shape::Guide | Shape::Labels | Shape::Pages => self.dir().join(".notebook"),
+            Shape::Guide | Shape::Labels | Shape::Pages | Shape::Digest => self.dir().join(".notebook"),
             Shape::Objectives => self.dir().to_path_buf(),
         }
     }
@@ -1018,7 +1046,7 @@ impl Book {
         if let StudyMadeBody::Slide { .. } = body {
             return Err("a slide is kept in its deck".into());
         }
-        if let StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } | StudyMadeBody::Pages { .. } = body {
+        if let StudyMadeBody::Guide { .. } | StudyMadeBody::Labels { .. } | StudyMadeBody::Pages { .. } | StudyMadeBody::Digest { .. } = body {
             return Err("a guide, or labels, are kept beside the sources".into());
         }
         if let StudyMadeBody::Audio { format, segments, chapters, .. } = body {
@@ -1085,7 +1113,7 @@ impl Book {
             Shape::Logic => ('V', "json"),
             Shape::Found => ('W', "json"),
             Shape::Objectives => ('O', "json"),
-            Shape::Guide | Shape::Labels | Shape::Pages => return Err("kept beside the sources".into()),
+            Shape::Guide | Shape::Labels | Shape::Pages | Shape::Digest => return Err("kept beside the sources".into()),
         };
         let header = Header { kind, title: title.to_string(), made, by: by.to_string(), task: task.to_string() };
         let id = match kind.shape() {
@@ -1223,7 +1251,7 @@ impl Book {
             },
             Shape::Circuits => StudyMadeBody::Circuits { title: header.title.clone(), problems: serde_json::from_value(value["problems"].clone()).ok()? },
             Shape::Logic => StudyMadeBody::Logic { title: header.title.clone(), problems: serde_json::from_value(value["problems"].clone()).ok()? },
-            Shape::Prose | Shape::Mark | Shape::Guide | Shape::Labels | Shape::Pages => return None,
+            Shape::Prose | Shape::Mark | Shape::Guide | Shape::Labels | Shape::Pages | Shape::Digest => return None,
         };
         Some((made_of(id, header), body))
     }

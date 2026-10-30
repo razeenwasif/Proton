@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// The notebook server's tools a tutor may call.
-pub const TOOLS: [&str; 5] = ["notebook_sources", "search_sources", "read_source", "view_pages", "notebook_status"];
+pub const TOOLS: [&str; 6] = ["notebook_sources", "search_sources", "read_source", "digest_source", "view_pages", "notebook_status"];
 
 /// The most passages a tutor without the tools is given, in characters.
 const PASSAGES: usize = 16_000;
@@ -270,6 +270,7 @@ fn step(tool: &Tool) -> StudyStep {
             };
             ("read", format!("Read {}{range}", field("source")))
         }
+        "digest_source" => ("read", format!("Read {}'s digest", field("source"))),
         "view_pages" => {
             let pages: Vec<String> = input.get("pages").and_then(|v| v.as_array()).map(|p| p.iter().map(|n| n.to_string()).collect()).unwrap_or_default();
             ("view", format!("Looked at {} page {}", field("source"), pages.join(", ")))

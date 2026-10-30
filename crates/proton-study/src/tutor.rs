@@ -190,8 +190,8 @@ pub fn instructions(notebook: &Notebook, settings: &TutorSettings, grounding: Gr
     };
     let reach = match grounding {
         Grounding::Tools => "- Call notebook_sources first to see what the notebook holds. Then search_sources — several times, in the words the sources \
-                              would use — and read_source around what you find, before you answer. A slide whose words are few can be seen with \
-                              view_pages.\n- Every claim you take from a source is followed by its citation, copied exactly as the tools give it, in \
+                              would use — and read_source around what you find, before you answer. What a source too long to read whole covers, section by section, \
+                              is in digest_source. A slide whose words are few can be seen with view_pages.\n- Every claim you take from a source is followed by its citation, copied exactly as the tools give it, in \
                               double brackets: [[S07 p. 12]], [[S03 § Search › Uniform cost L40-58]], [[S12 @ 3:12-3:40]]. Cite each passage \
                               you use, and never cite what you did not read.",
         Grounding::Passages => "- Each message comes with passages from the notebook's sources, found for it, each beginning with its citation in \
