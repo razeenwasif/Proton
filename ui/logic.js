@@ -118,9 +118,11 @@ export function createLogic(host) {
     const bad = new Set((state.file?.diagnostics ?? []).map((d) => d.line));
     // The line the answer is of, marked.
     const answered = state.answer && state.answer.kind !== "table" ? state.answer.line : 0;
+    // The lines of a conflict, when there is no model.
+    const clash = new Set(state.models?.conflict ? [...state.models.conflict.lines, ...state.models.conflict.kinds.map(([l]) => l)] : []);
     const n = text.split("\n").length;
     els.gutter.innerHTML = Array.from({ length: n }, (_, i) => {
-      const cls = [bad.has(i + 1) ? "bad" : "", i + 1 === answered ? "on" : ""].filter(Boolean).join(" ");
+      const cls = [bad.has(i + 1) ? "bad" : "", clash.has(i + 1) ? "clash" : "", i + 1 === answered ? "on" : ""].filter(Boolean).join(" ");
       return cls ? `<span class="${cls}">${i + 1}</span>` : String(i + 1);
     }).join("\n") + "\n ";
     follow();
@@ -261,7 +263,7 @@ export function createLogic(host) {
     if (m.error) return `<div class="lg-verdict bad">${icon("d-error")}Not searched</div><p class="lg-message">${esc(m.error)}</p>`;
     const took = m.elapsedMs < 1000 ? `${m.elapsedMs} ms` : `${(m.elapsedMs / 1000).toFixed(1)} s`;
     if (m.found === 0) {
-      return m.finished ? `<div class="lg-verdict bad">No model: the constraints cannot all hold.</div><p class="lg-faint">Searched in ${took}.</p>`
+      return m.finished ? `<div class="lg-verdict bad">No model: the constraints cannot all hold.</div>${conflictHtml(m)}<p class="lg-faint">Searched in ${took}.</p>`
         : `<div class="lg-verdict bad">No model found in ${took}</div><p class="lg-faint">${m.timedOut ? "The search ran out of time." : "The search was stopped."} There may still be one.</p>`;
     }
     const k = Math.min(state.shownModel, m.models.length - 1);
@@ -271,8 +273,21 @@ export function createLogic(host) {
       `<span>Model ${k + 1} of ${how}</span><button class="cc-quiet" data-logic-model="1" ${k >= m.models.length - 1 ? "disabled" : ""} aria-label="The next model">›</button>` +
       (m.counted || m.finished ? "" : `<span class="grow"></span><button class="cc-quiet" data-logic-count title="Search on through every model, for up to 20 s">Count them all</button>`) + `</div>`;
     const model = m.models[k];
+    const swapped = m.symmetry ? `<p class="lg-faint">Models that differ only in which unnamed element is which are shown once.${m.counted || m.finished ? "" : " Counting counts each."}</p>` : "";
     const sizes = model.sizes.length ? `<p class="lg-faint">Sizes chosen: ${model.sizes.map(([s, n]) => `${esc(s)} ${n}`).join(", ")}</p>` : "";
-    return verdict + nav + sizes + model.tables.map(tableOfValues).join("") + `<p class="lg-faint">Found in ${took}, ${m.choices.toLocaleString()} choices.</p>`;
+    return verdict + nav + swapped + sizes + model.tables.map(tableOfValues).join("") + `<p class="lg-faint">Found in ${took}, ${m.choices.toLocaleString()} choices.</p>`;
+  }
+
+  /** Why there is no model: the lines that cannot all hold, each with its
+   *  text, and a click away. @param {Models} m */
+  function conflictHtml(m) {
+    const c = m.conflict;
+    if (!c || (!c.lines.length && !c.kinds.length)) return "";
+    const lines = els.text.value.split("\n");
+    const row = (/** @type {number} */ line, /** @type {string} */ what) =>
+      `<button class="lg-diag" data-logic-goto="${line}"><b>line ${line}</b> <code>${esc(what)}</code></button>`;
+    return `<p class="lg-message">${c.minimal ? "These cannot all hold together; take any one away and there are models:" : "These cannot all hold together (the search ran short of time, so one of them may not be needed):"}</p>` +
+      `<div class="lg-conflict">${c.lines.map((l) => row(l, (lines[l - 1] ?? "").trim())).join("")}${c.kinds.map(([l, what]) => row(l, what)).join("")}</div>`;
   }
 
   /* ── the answer ───────────────────────────────────────────────────── */
@@ -482,6 +497,7 @@ export function createLogic(host) {
       state.models = e.models;
       if (!e.models && state.view === "models") state.view = "line";
       renderAnswer();
+      if (state.file) paint();
     },
     /** @param {{answer: Answer | null}} e */
     answer(e) {

@@ -184,7 +184,7 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     const asked = sent(before, 'logicSolve')[0];
     assert(asked?.generation === 5 && asked.count === false && asked.keep >= 1, `⌘⇧⏎ did not search: ${JSON.stringify(asked)}`);
     assert(ws().querySelector('[data-logic-view="models"]')?.getAttribute('aria-selected') === 'true', 'the panel did not turn to the models');
-    await win.pushEvents([{type: 'logicModels', models: {generation: 5, running: true, found: 0, finished: false, timedOut: false, counted: false, elapsedMs: 0, choices: 0, models: [], error: null}}]);
+    await win.pushEvents([{type: 'logicModels', models: {generation: 5, running: true, found: 0, finished: false, timedOut: false, counted: false, elapsedMs: 0, choices: 0, models: [], error: null, symmetry: false, conflict: null}}]);
     await settle();
     assert(answer().textContent.includes('Searching'), 'a search going is not said');
     before = win.commands.length;
@@ -193,18 +193,22 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     assert(sent(before, 'logicStop').length === 1, '⎋ did not stop the search');
     const table = (/** @type {string[]} */ row) => ({name: 'f', shape: 'row', rows: [], cols: ['a', 'b'], cells: [row]});
     await win.pushEvents([{type: 'logicModels', models: {generation: 5, running: false, found: 4, finished: false, timedOut: false, counted: false, elapsedMs: 3, choices: 7,
-      models: [{sizes: [], tables: [table(['a', 'a'])]}, {sizes: [], tables: [table(['a', 'b'])]}], error: null}}]);
+      models: [{sizes: [], tables: [table(['a', 'a'])]}, {sizes: [], tables: [table(['a', 'b'])]}], error: null, symmetry: true, conflict: null}}]);
     await settle();
     assert(answer().querySelector('.lg-nav')?.textContent.includes('Model 1 of'), 'the first model is not shown');
     assert([...answer().querySelectorAll('.lg-model-table td')].map((d) => d.textContent).join() === 'a,a', 'the model\'s table is not drawn');
+    assert(answer().textContent.includes('shown once'), 'symmetry broken is not said');
     answer().querySelector('[data-logic-model="1"]').click(); await settle();
     assert([...answer().querySelectorAll('.lg-model-table td')].map((d) => d.textContent).join() === 'a,b', '› did not show the next model');
     before = win.commands.length;
     answer().querySelector('[data-logic-count]').click(); await settle();
     assert(sent(before, 'logicSolve')[0]?.count === true, 'Count them all did not count');
-    await win.pushEvents([{type: 'logicModels', models: {generation: 5, running: false, found: 0, finished: true, timedOut: false, counted: true, elapsedMs: 1, choices: 2, models: [], error: null}}]);
+    await win.pushEvents([{type: 'logicModels', models: {generation: 5, running: false, found: 0, finished: true, timedOut: false, counted: true, elapsedMs: 1, choices: 2, models: [], error: null,
+      symmetry: false, conflict: {lines: [2], kinds: [[2, 'f is one-to-one']], minimal: true}}}]);
     await settle();
     assert(answer().textContent.includes('No model: the constraints cannot all hold'), 'no model is not said so');
+    assert(answer().querySelector('.lg-conflict')?.textContent.includes('f: p -> p') && answer().textContent.includes('f is one-to-one'), 'the conflicting lines are not listed with their text');
+    assert(ws().querySelector('.lg-gutter .clash')?.textContent === '2', 'the conflicting line is not marked');
     // The line's answer is a tab away.
     ws().querySelector('[data-logic-view="line"]').click(); await settle();
     assert(!answer().textContent.includes('No model'), 'the line\'s tab still shows the models');

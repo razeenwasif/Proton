@@ -296,6 +296,23 @@ to 20 s; the panel's Models tab shows them one at a time — a constant's
 value, a function of one argument as a row, of two as a grid, of more as a
 list — with how many there are, or "No model: the constraints cannot all
 hold". Symmetry between unnamed elements is not broken yet: it is L4's.
+L4 — symmetry, no model explained, and the rest of Logic4Fun's language.
+A sort given by a size, whose elements no constraint names, orders,
+counts from or steps through, has interchangeable elements: when finding
+models (not counting them, so counts stay exact), of the elements nothing
+set so far mentions only the first is tried — the least-number rule — so
+models differing only in which unnamed element is which are found once,
+and said so. With no model, each constraint and each one-to-one or onto is
+taken away in turn and kept only if without it there would be a model: the
+fewest that cannot all hold, listed with their text and marked in the
+gutter (minimal unless a search ran out of time). Logic4Fun's negated
+comparisons (`!<=`, `!>=`, `!<>`) are read; `X alias Y` gives X a second
+name, Y, as `natnum`'s `nat` is, and one naming a sort already declared is
+refused. Every puzzle of the solver's tests has as many models through
+Logic4Fun's text as in Proton's, and a file using the language at large —
+sizes from other sorts, cardinality ranges, aliases, EST, MIN and MAX, SUCC,
+NOT, XOR, IMP and IFF both ways, clause form with `;`, a predicate between
+its arguments, constants — has the models worked out by hand.
 
 | | What | Proved by |
 |---|---|---|
@@ -309,6 +326,25 @@ hold". Symmetry between unnamed elements is not broken yet: it is L4's.
 | **L7** | Sequent calculus and resolution: checked and found; clause form shown step by step | the same arguments as L5, by each system |
 | **L8** | The agent's tools, `@logic`, Notebook's logic practice | through `run_tool`, as the other tools are tested |
 | **L9** | Measured; docs; the status page | timing budgets |
+
+## Measured (L4)
+
+On this Mac, an M-series, release builds (`cargo test --release -p
+proton-logic --test l4 -- --nocapture`); the budgets are asserted there, and
+a debug build only says how long.
+
+| Search | Took | Choices | Budget |
+|---|---|---|---|
+| Eight queens, all 92 models | 16 ms | 662 | 1 s |
+| The five houses (Einstein's), every answer: one | under 1 ms | 37 | 1 s |
+| A Sudoku of 17 clues (the first of Gordon Royle's list) | 224 ms | 1,456 | 1 s |
+| A Sudoku from a third of its clues | 37 ms | 24 | — |
+
+In a debug build the 17-clue Sudoku takes 1.2 s. The Sudoku is written with
+`!=` between every pair of cells that share a row, a column or a box, so the
+search sees no "all different" of its own; giving it one, for sorts it can
+recognise, would make the hard ones quicker still, and waits until one is
+slow in earnest.
 
 ## Open
 

@@ -5014,6 +5014,7 @@ button.st-source-name:hover { color: var(--cc-accent); }
   font: inherit; text-align: right; white-space: pre; user-select: none; opacity: .7; }
 .lg-gutter .bad { color: var(--danger, #e55); opacity: 1; }
 .lg-gutter .on { color: var(--accent); opacity: 1; font-weight: 700; }
+.lg-gutter .clash { color: var(--warn, #eab308); opacity: 1; }
 .lg-area { position: relative; flex: 1 1 auto; min-width: 0; }
 .lg-hl, .lg-input { position: absolute; inset: 0; box-sizing: border-box; width: 100%; height: 100%; margin: 0; padding: 10px 12px; border: 0;
   font: inherit; letter-spacing: 0; font-variant-ligatures: none; tab-size: 2; white-space: pre; overflow-wrap: normal; word-break: normal; }
@@ -5081,3 +5082,4 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .lg-table td.none { color: var(--muted); opacity: .6; }
 .lg-table tbody th { position: static; text-align: right; color: var(--text); }
 .lg-verdict .lab-spin { width: 12px; height: 12px; }
+.lg-conflict { margin: 4px 0 10px; border: 1px solid var(--xl-line); border-radius: 6px; overflow: hidden; }
