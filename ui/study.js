@@ -769,6 +769,25 @@ export function createStudy(host) {
         clocked: p.clocked, table: p.table, note: p.statement });
       return;
     }
+    // A logic problem: an answer chosen, said right or not; or opened in
+    // Logic, in a folder named for the set — as the student left it, after
+    // the first time.
+    const logicSet = state.shown.kind === "made" && state.shown.made.body.shape === "logic" ? state.shown.made : null;
+    const chosen = at_("[data-study-logic-choose]");
+    if (chosen && logicSet && logicSet.body.shape === "logic") {
+      const p = logicSet.body.problems.find((q) => q.id === chosen.dataset.studyLogicChoose);
+      const said = p && els.stage.querySelector(`[data-study-logic-said="${CSS.escape(p.id)}"]`);
+      if (p && said) said.textContent = chosen.dataset.choice === p.answer ? "Right." : `Not ${chosen.dataset.choice} — open it in Logic to see why.`;
+      return;
+    }
+    const opening = at_("[data-study-logic-open]");
+    if (opening && logicSet && logicSet.body.shape === "logic") {
+      const p = logicSet.body.problems.find((q) => q.id === opening.dataset.studyLogicOpen);
+      if (!p) return;
+      host.dispatch({ type: "setMode", mode: "logic" });
+      host.dispatch({ type: "logicPractice", folder: logicSet.made.title, name: p.title, kind: p.file, text: p.starter });
+      return;
+    }
     // What was found on the web, added: the sources ticked, or the report.
     if (at_("[data-study-found-add]") && state.shown.kind === "made" && state.shown.made.body.shape === "found") {
       const have = webSources();

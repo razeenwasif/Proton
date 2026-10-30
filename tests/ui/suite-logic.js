@@ -306,6 +306,19 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     assert(answer().textContent.includes('No proof: no proof found in the time'), 'no proof found is not said');
   });
 
+  await test('Logic has the agent in its dock, shut until asked for, with @logic', async () => {
+    await win.pushEvents([file({generation: 4})]); await settle();
+    const dock = ws().querySelector('.xl-dock');
+    assert(dock?.querySelector('[data-agent-input]') && dock.querySelector('[data-mention="@logic"]'), 'there is no agent composer with @logic');
+    assert(!shown(dock), 'the dock is open before it is asked for');
+    const toggle = [...doc.querySelectorAll('[data-panel-toggle="right"]')].find((b) => b.getClientRects().length);
+    assert(toggle && !toggle.disabled, 'the dock cannot be shown');
+    toggle.click(); await settle();
+    assert(shown(dock) && shown(dock.querySelector('[data-agent-thread]')), 'the dock did not open');
+    toggle.click(); await settle();
+    assert(!shown(dock), 'the dock did not shut');
+  });
+
   await test('Closing a file with unsaved changes asks first, then goes home', async () => {
     await win.pushEvents([file({generation: 4, dirty: true})]); await settle();
     const confirm = win.confirm;

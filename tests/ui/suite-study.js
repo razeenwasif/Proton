@@ -535,7 +535,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
     const studio = ws().querySelector('[data-study-studio-body]');
-    assert(studio.querySelectorAll('.st-tile').length === 22, 'the tiles are not all there');
+    assert(studio.querySelectorAll('.st-tile').length === 23, 'the tiles are not all there');
     studio.querySelector('[data-study-tile="mindMap"]').click(); await settle();
     const form = studio.querySelector('[data-study-make-form="mindMap"]');
     form.querySelector('input').value = 'informed search';
@@ -1310,6 +1310,35 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(modes.some((c) => c.mode === 'circuit'), 'building did not go to Circuit');
     assert(practice?.project === 'Gates' && practice.circuit === 'XOR from NAND' && JSON.stringify(practice.inputs) === '[["A",1],["B",1]]' && practice.table.startsWith('A B Y') && practice.clocked === false,
       `building sent ${JSON.stringify(practice)}`);
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+  });
+  await test('Logic practice: asked for from its tile, a formula answered by choosing, each problem opened in Logic', async () => {
+    const logicMade = {id: 'V001', kind: 'logic', title: 'Validity', made: 1, by: 'Claude Code', task: 'J0013'};
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: [logicMade], languages: [], pythons: []}]); await settle();
+    ws().querySelector('[data-study-tile="logic"]').click(); await settle();
+    let before = win.commands.length;
+    ws().querySelector('[data-study-make-form="logic"]').requestSubmit(); await settle();
+    assert(sent(before, 'studyMake')[0]?.kind === 'logic', 'logic practice was not asked for');
+    const base = {statement: 'Is it [[S01 p. 3]]?', system: '', reference: '', solution: '', hints: ['Try a table.'], explanation: 'Every row is true.', difficulty: 'easy', topic: 'Validity', cites: ['S01 p. 3']};
+    const classify = {...base, id: 'f1', title: 'Weakening', kind: 'classify', formula: 'p -> (q -> p)', choices: ['tautology', 'contradiction', 'contingent'], answer: 'tautology',
+      file: 'logic', starter: '# Weakening\n? p -> (q -> p)\n'};
+    const prove = {...base, id: 'f2', title: 'Chain', kind: 'prove', formula: 'p -> q, q -> r |= p -> r', choices: [], answer: '', system: 'fitch',
+      reference: 'system fitch\npremises p -> q, q -> r\ngoal p -> r\n\n1  p -> q  premise\n', file: 'proof', starter: 'system fitch\npremises p -> q, q -> r\ngoal p -> r\n\n'};
+    await win.pushEvents([{type: 'studyMadeOpen', made: logicMade, citations: [cite(1, 'S01 p. 3')], body: {shape: 'logic', title: 'Validity', problems: [classify, prove]}}]); await settle();
+    const card = ws().querySelector('[data-study-logic="f1"]');
+    assert(card?.querySelector('h3')?.textContent === 'Weakening' && card.textContent.includes('Classify') && card.querySelector('pre')?.textContent === 'p -> (q -> p)', 'the problem is not shown with its formula');
+    card.querySelector('[data-choice="contingent"]').click(); await settle();
+    assert(card.querySelector('[data-study-logic-said]')?.textContent.startsWith('Not contingent'), 'a wrong choice was not said');
+    card.querySelector('[data-choice="tautology"]').click(); await settle();
+    assert(card.querySelector('[data-study-logic-said]')?.textContent === 'Right.', 'the right choice was not said');
+    const second = ws().querySelector('[data-study-logic="f2"]');
+    assert([...second.querySelectorAll('summary')].map((x) => x.textContent).join() === 'Hints,A proof Proton found', 'the hints and the proof are not behind their summaries');
+    before = win.commands.length;
+    second.querySelector('[data-study-logic-open="f2"]').click(); await settle();
+    const opened = sent(before, 'logicPractice')[0];
+    assert(sent(before, 'setMode').some((c) => c.mode === 'logic'), 'opening did not go to Logic');
+    assert(opened?.folder === 'Validity' && opened.name === 'Chain' && opened.kind === 'proof' && opened.text.startsWith('system fitch'), `opening sent ${JSON.stringify(opened)}`);
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 }

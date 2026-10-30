@@ -35,6 +35,8 @@ export function createLogicPreview(_deliver) {
   /** @type {null | {path: string, name: string, kind: string, text: string, saved: string, generation: number}} */
   let open = null;
   let generations = 0;
+  /** What a practice file holds, as left. @type {Record<string, string>} */
+  const practised = {};
   const home = () => ({ type: "logicHome", files });
   const fileEvent = () => ({ type: "logicFile", file: open ? { path: open.path, name: open.name, kind: open.kind, text: open.text, dirty: open.text !== open.saved,
     generation: open.generation, diagnostics: [], notes: [], checks: open.kind === "proof" && open.text === PROOF ? PROOF_CHECKS : [] } : null });
@@ -59,6 +61,8 @@ export function createLogicPreview(_deliver) {
             show(command.path, PROOF);
           } else if (command.path === "week1/theory.logic") {
             show(command.path, THEORY);
+          } else if (command.path in practised) {
+            show(command.path, practised[command.path]);
           } else {
             return [notice(`${command.path} is not here`)];
           }
@@ -73,11 +77,26 @@ export function createLogicPreview(_deliver) {
           show(path, ext === "proof" ? PROOF : command.kind === "theory" ? THEORY : WORKSHEET);
           return [home(), fileEvent(), { type: "logicAnswer", answer: null }];
         }
+        case "logicPractice": {
+          // A Notebook problem: its file in a folder named for its set,
+          // written the first time and opened as left after that.
+          const slug = (/** @type {string} */ t) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "") || "logic";
+          const name = slug(String(command.name));
+          const path = `${slug(String(command.folder))}/${name}.${command.kind}`;
+          if (!files.some((f) => f.path === path)) {
+            files.push({ path, name, kind: command.kind });
+            files.sort((a, b) => a.path.localeCompare(b.path));
+            practised[path] = String(command.text);
+          }
+          show(path, practised[path] ?? String(command.text));
+          return [home(), fileEvent(), { type: "logicAnswer", answer: null }];
+        }
         case "logicClose":
           open = null;
           return [home(), fileEvent(), { type: "logicAnswer", answer: null }];
         case "logicSave":
           if (open) open.saved = open.text;
+          if (open && open.path in practised) practised[open.path] = open.text;
           return [home(), fileEvent()];
         case "logicEdit":
           if (!open || open.generation !== command.generation || open.text === command.text) return [];

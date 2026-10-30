@@ -32,6 +32,7 @@ export const TILES = /** @type {[Kind, string, string, string][]} */ ([
   ["practice", "Practice problems", "bulb", "Problems to work through, with hints and worked solutions"],
   ["coding", "Coding practice", "code", "Problems to solve in code here, each run against its tests as you go"],
   ["circuits", "Circuit practice", "bolt", "Digital logic to build in Circuit, each checked by a test table its answer passes"],
+  ["logic", "Logic practice", "logic", "Formulas to classify, arguments to prove and puzzles to model in Logic, each checked by its engine"],
   ["overview", "Learning overview", "layers", "The course topic by topic: taught, mapped, carded and checked"],
   ["audio", "Audio overview", "audio", "Two hosts talking the sources through, spoken by Fish Audio"],
   ["slides", "Slide deck", "desktop", "A lecture's slides, with speaker notes, for PowerPoint"],
@@ -59,6 +60,7 @@ const AMOUNTS = /** @type {Record<string, [string, string][]>} */ ({
   practice: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
   coding: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
   circuits: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
+  logic: [["fewer", "Fewer — about 3"], ["standard", "About 5"], ["more", "More — about 8"]],
 });
 
 const STATES = /** @type {Record<string, string>} */ ({ waiting: "Waiting its turn", running: "Being made", repairing: "Being mended",
@@ -163,6 +165,25 @@ export function madeHtml(e, readOnly, found = { have: new Map(), unpicked: new S
       ${p.hints.length ? `<details><summary>Hints</summary><ol>${p.hints.map((h) => `<li>${answerHtml(h, citations)}</li>`).join("")}</ol></details>` : ""}
       <details><summary>A reference answer</summary><pre class="st-code">${esc(p.reference)}</pre><div class="md">${answerHtml(p.explanation, citations)}</div></details>
     </li>`).join("")}</ol>`;
+  } else if (body.shape === "logic") {
+    // Each problem: what to do, and for a formula its answers to choose
+    // from; opened in Logic to be worked; Proton's answer shown when asked for.
+    const kinds = /** @type {Record<string, string>} */ ({ classify: "Classify", prove: "Prove", encode: "Model the puzzle" });
+    const reveal = (/** @type {any} */ p) => p.kind === "classify" ? ["Proton's answer", `<p><b>${esc(p.answer)}</b></p>`]
+      : p.kind === "prove" ? ["A proof Proton found", `<pre class="st-code">${esc(p.reference)}</pre>`]
+      : ["A theory of it", `<pre class="st-code">${esc(p.reference)}</pre><p class="st-faint">${p.answer === "1" ? "Its one model:" : `${esc(p.answer)} models${Number(p.answer) > 3 ? ", the first three" : ""}:`}</p><pre class="st-code">${esc(p.solution)}</pre>`];
+    content = `<ol class="st-circuits" data-turn="made">${body.problems.map((p) => {
+      const [said, shown] = reveal(p);
+      return `<li class="st-circuit" data-study-logic="${esc(p.id)}">
+      <div class="st-circuit-head"><h3>${esc(p.title)}</h3><span class="st-faint">${esc(kinds[p.kind] ?? p.kind)} · ${esc(p.difficulty)}${p.topic ? ` · ${esc(p.topic)}` : ""}</span>${chips(p.cites)}</div>
+      <div class="md">${answerHtml(p.statement, citations)}</div>
+      ${p.formula ? `<pre class="st-code">${esc(p.formula)}</pre>` : ""}
+      ${p.kind === "classify" ? `<div class="st-circuit-tools">${p.choices.map((c) => `<button class="cc-quiet" data-study-logic-choose="${esc(p.id)}" data-choice="${esc(c)}">${esc(c)}</button>`).join("")}<span class="st-faint" data-study-logic-said="${esc(p.id)}"></span></div>` : ""}
+      <div class="st-circuit-tools">${readOnly ? "" : `<button class="cc-quiet" data-study-logic-open="${esc(p.id)}" title="${p.file === "proof" ? "A .proof file with its premises and goal, to write the proof in, each line checked" : "A Logic file of it, in a folder named for the set"}">${icon("logic")}Open in Logic</button>`}</div>
+      ${p.hints.length ? `<details><summary>Hints</summary><ol>${p.hints.map((h) => `<li>${answerHtml(h, citations)}</li>`).join("")}</ol></details>` : ""}
+      <details><summary>${said}</summary>${shown}<div class="md">${answerHtml(p.explanation, citations)}</div></details>
+    </li>`;
+    }).join("")}</ol>`;
   } else if (body.shape === "audio") {
     // An audio overview opens as one (study-audio.js); this is only its words.
     content = `<div class="st-transcript" data-turn="made">${body.segments.map((s) => `<p>${answerHtml(s.display, citations)}</p>`).join("")}</div>`;
