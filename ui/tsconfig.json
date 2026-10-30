@@ -38,6 +38,8 @@
     "literature.js",
     "lab.js",
     "lab3d.js",
+    "lab-molecule.js",
+    "molecule.js",
     "study.js",
     "study-kb.js",
     "study-chat.js",

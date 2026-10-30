@@ -3864,6 +3864,10 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .lab-frames { display: flex; align-items: center; gap: 8px; }
 .lab-frames input[type="range"] { flex: 1; accent-color: var(--cc-accent); }
 .lab-scene-note { font-size: 11px; }
+.lab-scene-head code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-mol-about { font-size: 11px; line-height: 1.35; }
+.lab-style { font: var(--z-2xs)/1.2 var(--zed); color: var(--cc-text); background: var(--cc-raise); border: 1px solid var(--cc-line-2); border-radius: 6px; padding: 2px 4px; }
+.lab-pick { margin: 0; padding: 6px 8px; border-radius: 6px; background: var(--cc-code); color: var(--text); font: var(--z-2xs)/1.45 var(--zed); white-space: pre-wrap; border-left: 2px solid #7dcfff; }
 .lab-auto { display: flex; align-items: flex-start; gap: 8px; color: var(--cc-muted); cursor: pointer; }
 .lab-auto input { margin: 3px 0 0; accent-color: var(--cc-accent); }
 

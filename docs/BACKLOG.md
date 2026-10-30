@@ -73,13 +73,6 @@ Research's milestones after Lean (P0–P7, `6c103a9`).
 
 ### Later builds
 
-- **Molecule and protein viewers.** Molecules from SMILES and XYZ — impostor
-  spheres and cylinders, element colours and radii, bond detection, picking —
-  building on the Lab's 3D scenes, which draw spheres and bonds already; and
-  protein structures from PDB and mmCIF, with cartoons. Open: vendoring Mol*
-  or NGL (a download, to be asked for with its size) or drawing them in
-  three.js; viewers that need workers or wasm go in a sandboxed frame under
-  the window's CSP.
 - **Manuscripts.** The paper drafted inside the investigation, every figure
   and number traced to the run, code and environment that produced it, with
   inline annotation to refine it. Open: LaTeX or Typst, and where it compiles.

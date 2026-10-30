@@ -63,8 +63,8 @@ export function triangles(faces, vertices) {
 
 /** @type {Promise<[Three, typeof import("./vendor/three/OrbitControls.js")]> | null} */
 let loading = null;
-/** three.js and its controls, imported once. */
-function three() {
+/** three.js and its controls, imported once: here and by the molecule view. */
+export function three() {
   loading ??= Promise.all([import("./vendor/three/three.module.js"), import("./vendor/three/OrbitControls.js")]);
   return loading;
 }

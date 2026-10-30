@@ -23,6 +23,86 @@ function brief(title, discipline, goal) {
   return `# ${title}\n\n**Discipline:** ${discipline}\n\n## Goal\n\n${goal}\n\n## Constraints\n\n_Anything the team must keep to: assumptions, methods, what is out of scope._\n`;
 }
 
+/** A small protein made up for the preview, as a PDB file: a helix, two
+ *  strands side by side, another helix, with its HELIX and SHEET records, a
+ *  sulfate bound beside it and three waters. */
+function previewFold() {
+  /** @type {{p: number[], ss: string, axis?: number[]}[]} */
+  const cas = [];
+  const helix = (/** @type {number[]} */ at, /** @type {number} */ dir, /** @type {number} */ n) => {
+    for (let k = 0; k < n; k++) {
+      const t = (k * 100 * Math.PI) / 180;
+      cas.push({ p: [at[0] + 2.3 * Math.cos(t), at[1] + 2.3 * Math.sin(t), at[2] + dir * 1.5 * k], ss: "H", axis: [0, 0, dir] });
+    }
+  };
+  const strand = (/** @type {number} */ x, /** @type {number} */ z, /** @type {number} */ dir, /** @type {number} */ n) => {
+    for (let k = 0; k < n; k++) cas.push({ p: [x + (k % 2 ? 0.9 : -0.9), 0, z + dir * 3.3 * k], ss: "E" });
+  };
+  /** A loop from the last α-carbon to `to`, bowed outward. @param {number[]} to */
+  const loop = (to) => {
+    const from = cas[cas.length - 1].p;
+    const n = Math.max(1, Math.ceil(Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]) / 3.75));
+    for (let k = 1; k < n; k++) {
+      const f = k / n;
+      cas.push({ p: from.map((v, i) => v + (to[i] - v) * f + (i === 1 ? Math.sin(f * Math.PI) * 2 : 0)), ss: "C" });
+    }
+  };
+  helix([0, 0, 0], 1, 16);
+  loop([9.1, 0, 26]);
+  const s1 = cas.length;
+  strand(10, 26, -1, 7);
+  loop([15.1, 0, 6.2]);
+  const s2 = cas.length;
+  strand(16, 6.2, 1, 7);
+  // Over the second helix's top, so the loop does not run into its side.
+  loop([23, 0, 31.5]);
+  cas.push({ p: [23, 0, 31.5], ss: "C" });
+  loop([24.3, 0, 28]);
+  const h2 = cas.length;
+  helix([22, 0, 28], -1, 14);
+  const NAMES = ["ALA", "LEU", "GLU", "LYS", "VAL", "SER", "GLY", "THR", "ILE", "ASP"];
+  const lines = [];
+  let serial = 1;
+  const atom = (/** @type {string} */ name, /** @type {string} */ res, /** @type {number} */ seq, /** @type {number[]} */ p, /** @type {string} */ el, het = false) =>
+    lines.push(`${(het ? "HETATM" : "ATOM").padEnd(6)}${String(serial++).padStart(5)} ${(name.length < 4 ? ` ${name}` : name).padEnd(4)} ${res.padStart(3)} ${het ? "B" : "A"}${String(seq).padStart(4)}    ` +
+      `${p.map((v) => v.toFixed(3).padStart(8)).join("")}  1.00 20.00          ${el.padStart(2)}`);
+  const sub = (/** @type {number[]} */ a, /** @type {number[]} */ b) => a.map((v, i) => v - b[i]);
+  const unit = (/** @type {number[]} */ v) => { const l = Math.hypot(...v) || 1; return v.map((x) => x / l); };
+  const along = (/** @type {number[]} */ p, /** @type {number[]} */ v, /** @type {number} */ f) => p.map((x, i) => x + v[i] * f);
+  cas.forEach((r, i) => {
+    const next = cas[i + 1]?.p ?? along(r.p, sub(r.p, cas[i - 1].p), 1);
+    const d = sub(next, r.p);
+    const dh = unit(d);
+    // Its C=O: along a helix's axis, across a strand by turns, else upward.
+    const want = r.axis ?? (r.ss === "E" ? [i % 2 ? -1 : 1, 0, 0] : [0, 1, 0]);
+    const dot = want.reduce((s, v, k) => s + v * dh[k], 0);
+    const o = unit(want.map((v, k) => v - dot * dh[k]));
+    const res = NAMES[i % NAMES.length];
+    const seq = i + 1;
+    if (i === 0) atom("N", res, seq, along(r.p, dh, -1.45), "N");
+    // Its N on the side away from its own O.
+    else atom("N", res, seq, along(along(cas[i - 1].p, sub(r.p, cas[i - 1].p), 0.67), o, -0.3), "N");
+    atom("CA", res, seq, r.p, "C");
+    const c = along(along(r.p, d, 0.33), o, 0.45);
+    atom("C", res, seq, c, "C");
+    atom("O", res, seq, along(c, o, 1.23), "O");
+  });
+  // A sulfate: sulfur at the middle of a tetrahedron of oxygens, 1.49 Å out.
+  const S = [6, 7, 12];
+  atom("S", "SO4", 101, S, "S", true);
+  [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]].forEach((v, k) => atom(`O${k + 1}`, "SO4", 101, along(S, unit(v), 1.49), "O", true));
+  [[-6, 2, 4], [-5, -4, 16], [30, 3, 10]].forEach((p, k) => atom("O", "HOH", 201 + k, p, "O", true));
+  const pad = (/** @type {number} */ n, /** @type {number} */ w) => String(n).padStart(w);
+  const resAt = (/** @type {number} */ i) => NAMES[i % NAMES.length];
+  const helixLine = (/** @type {number} */ n, /** @type {number} */ from, /** @type {number} */ to) =>
+    `HELIX  ${pad(n, 3)} ${pad(n, 3)} ${resAt(from)} A ${pad(from + 1, 4)}  ${resAt(to)} A ${pad(to + 1, 4)}  1`;
+  const sheetLine = (/** @type {number} */ n, /** @type {number} */ from, /** @type {number} */ to) =>
+    `SHEET  ${pad(n, 3)}   A 2 ${resAt(from)} A${pad(from + 1, 4)}  ${resAt(to)} A${pad(to + 1, 4)}  ${n === 1 ? " 0" : "-1"}`;
+  return ["HEADER    MADE UP FOR THE PREVIEW", "TITLE     A SMALL ALPHA/BETA FOLD",
+    helixLine(1, 0, 15), helixLine(2, h2, h2 + 13), sheetLine(1, s1, s1 + 6), sheetLine(2, s2, s2 + 6),
+    ...lines, "END", ""].join("\n");
+}
+
 function sky() {
   const hypotheses = [
     { id: "H001", title: "Rayleigh's λ⁻⁴ law, weighed by the solar spectrum", author: claude, round: 1, status: "active", parents: [],
@@ -263,6 +343,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
       { row: { id: "R001", experiment: "E001", hypothesis: "H001", state: "done", exit: 0, seconds: 2.4, started: now - 3600, sandbox: "seatbelt" },
         stdout: "scattered spectrum peaks at 405.2 nm", stdoutCut: false, stderr: "", stderrCut: false,
         metrics: { peak_nm: { value: 405.2, unit: "nm" } }, figures: ["figures/spectrum.png"], scenes: ["orbit.scene.json"],
+        molecules: ["caffeine.smi", "fold.pdb", "ozone.xyz"],
         record: { code: { sha256: "9f2c1e7a0b4d5e6f" }, python: "/Users/you/.proton/lab/envs/lab/bin/python",
           environment: { lock: { sha256: "4b1d3c2a9e8f7d6c" } }, approved: undefined, about: { approved: { by: "scientist", at: now - 3600 } }, limits: { seconds: 600 } } },
     ],
@@ -590,6 +671,17 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
       });
       return new TextEncoder().encode(JSON.stringify({ format: "proton.scene/1", title: "orbit", units: "AU", frames })).buffer;
     }
+    const text = (/** @type {string} */ t) => new TextEncoder().encode(t).buffer;
+    if (path === "caffeine.smi") return text("Cn1cnc2c1c(=O)n(C)c(=O)n2C caffeine\n");
+    if (path === "ozone.xyz") {
+      // Ozone bending, its angle 117° ± 8°, twenty-four frames a cycle.
+      return text(Array.from({ length: 24 }, (_, k) => {
+        const half = ((117 + 8 * Math.sin((k / 24) * Math.PI * 2)) / 2) * (Math.PI / 180);
+        const r = 1.278;
+        return `3\nozone bend ${k}\nO 0 0 0\nO ${(r * Math.sin(half)).toFixed(4)} ${(-r * Math.cos(half)).toFixed(4)} 0\nO ${(-r * Math.sin(half)).toFixed(4)} ${(-r * Math.cos(half)).toFixed(4)} 0\n`;
+      }).join(""));
+    }
+    if (path === "fold.pdb") return text(previewFold());
     throw new Error(`${key}: not a file a run left`);
   }
 
@@ -772,7 +864,7 @@ print(f"scattered spectrum peaks at {peak:.1f} nm")`;
         const list = (runs[open] ??= []);
         const id = `R${String(list.length + 1).padStart(3, "0")}`;
         const run = { row: { id, experiment: e.id, hypothesis: e.hypothesis, state: "running", exit: null, seconds: null, started: Math.floor(Date.now() / 1000), sandbox: "seatbelt" },
-          stdout: "", stdoutCut: false, stderr: "", stderrCut: false, metrics: {}, figures: [], scenes: [],
+          stdout: "", stdoutCut: false, stderr: "", stderrCut: false, metrics: {}, figures: [], scenes: [], molecules: [],
           record: { code: { sha256: "1a2b3c4d5e6f7a8b" }, python: "/Users/you/.proton/lab/envs/lab/bin/python", about: { approved: { by: "scientist", at: now } }, limits: { seconds: 600 } } };
         list.unshift(run);
         e.status = "running";

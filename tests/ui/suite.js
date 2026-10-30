@@ -2385,6 +2385,46 @@ await test('A run\'s pictures are drawn, and its 3D scene opens from it', async 
   work.querySelector('[data-lab-scene-close]').click(); await settle();
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
+await test('A run\'s molecules open from it: read by their ending, drawn in the styles they allow, a bad one told why', async () => {
+  await openSky(researchRound({status: 'idle'}));
+  const work = $('[data-lab-work]');
+  const enc = (t) => new TextEncoder().encode(t).buffer;
+  // Water stretching, two frames; a SMILES; a PDB with no atoms in it.
+  const water = (dx) => `3\nwater ${dx}\nO 0 0 0\nH ${0.96 + dx} 0 0\nH -0.24 0.93 0\n`;
+  win.labFiles = {'sky/R002/water.xyz': enc(water(0) + water(0.1)), 'sky/R002/ethanol.smi': enc('CCO ethanol\n'),
+    'sky/R002/empty.pdb': enc('REMARK nothing\n')};
+  const row = {id: 'R002', experiment: 'E001', hypothesis: 'H001', state: 'done', exit: 0, seconds: 1.2, started: 0, sandbox: 'seatbelt'};
+  await win.pushEvents([{type: 'researchLab', slug: 'sky', experiments: [], runs: [row], sandbox: 'seatbelt'},
+    {type: 'researchRun', slug: 'sky', detail: {row, stdout: '', stdoutCut: false, stderr: '', stderrCut: false, metrics: {},
+      figures: [], scenes: [], molecules: ['empty.pdb', 'ethanol.smi', 'water.xyz'], record: {}}}]);
+  const opener = work.querySelector('[data-lab-scene-open="water.xyz"]');
+  assert(opener?.textContent.includes('Show the molecule'), 'a molecule is not offered as one');
+  work.querySelector('[data-lab-scene-open="empty.pdb"]').click();
+  for (let i = 0; i < 20 && !work.querySelector('.lab-scene .lab-err'); i++) await settle();
+  const said = work.querySelector('.lab-scene .lab-err')?.textContent ?? '';
+  assert(said.includes('not a molecule the Lab can read') && said.includes('no ATOM or HETATM'), `a bad file is not told why: ${said}`);
+  work.querySelector('[data-lab-scene-close]').click(); await settle();
+  work.querySelector('[data-lab-scene-open="water.xyz"]').click();
+  for (let i = 0; i < 30 && !(work.querySelector('.lab-frames:not([hidden])') || work.querySelector('.lab-scene .lab-err')); i++) await settle();
+  if (work.querySelector('.lab-scene canvas.lab-canvas')) {
+    assert(work.querySelector('[data-lab-mol-about]')?.textContent === 'XYZ · 3 atoms · 2 frames', work.querySelector('[data-lab-mol-about]')?.textContent);
+    assert(work.querySelector('[data-lab-frame-n]').textContent === '1 / 2', 'a trajectory has no frames to step through');
+    const styles = [...work.querySelectorAll('[data-lab-style] option')].map((o) => o.value);
+    assert(styles.join() === 'ball,sticks,space', `water is offered as a cartoon, or not as a molecule: ${styles}`);
+    // Another style, drawn again where it is, with nothing thrown.
+    const select = work.querySelector('[data-lab-style]');
+    select.value = 'space'; select.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    work.querySelector('[data-lab-scene-close]').click(); await settle();
+    work.querySelector('[data-lab-scene-open="ethanol.smi"]').click();
+    for (let i = 0; i < 30 && !work.querySelector('[data-lab-mol-about]:not([hidden])'); i++) await settle();
+    assert(work.querySelector('[data-lab-mol-about]')?.textContent.startsWith('ethanol · SMILES · 9 atoms'), work.querySelector('[data-lab-mol-about]')?.textContent);
+  } else {
+    assert(work.querySelector('.lab-scene .lab-err')?.textContent.includes('no WebGL'), 'without WebGL the molecule does not say why');
+  }
+  assert(win.testErrors.length === 0, win.testErrors.join('; '));
+  work.querySelector('[data-lab-scene-close]').click(); await settle();
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
+});
 await test('Proposals run unasked only where a sandbox can hold them, and only when allowed', async () => {
   await openSky(researchRound({status: 'idle'}));
   const work = $('[data-lab-work]');

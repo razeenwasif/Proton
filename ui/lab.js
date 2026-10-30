@@ -11,6 +11,8 @@
 import { escapeHtml as esc, icon } from "./html.js";
 import { highlight } from "./highlight.js";
 import { mountScene } from "./lab3d.js";
+import { mountMolecule, STYLES } from "./lab-molecule.js";
+import { isMolecule, readMolecule } from "./molecule.js";
 
 /** @typedef {import("./bindings/LabEnv").LabEnv} Env */
 /** @typedef {import("./bindings/LabMaker").LabMaker} Maker */
@@ -219,12 +221,25 @@ export function createLab(host) {
     const metrics = Object.entries(d.metrics ?? {}).map(([k, v]) =>
       `<tr><td>${esc(k)}</td><td>${esc(String(/** @type {any} */ (v)?.value ?? ""))}</td><td class="lab-faint">${esc(/** @type {any} */ (v)?.unit ?? "")}</td></tr>`).join("");
     const figures = d.figures.map((f) => `<figure class="lab-figure"><img data-lab-figure="${esc(f)}" alt="${esc(f)}"><figcaption>${esc(f.replace(/^figures\//, ""))}</figcaption></figure>`).join("");
-    const scenesHtml = d.scenes.map((f) => state.scene === f
-      ? `<div class="lab-scene" data-lab-scene="${esc(f)}"><div class="lab-scene-head"><code>${esc(f)}</code><span class="grow"></span>` +
-        `<button class="cc-quiet" data-lab-scene-close>Close</button></div><canvas class="lab-canvas"></canvas>` +
+    // Scenes, then molecules: each opens in the same box, one at a time.
+    const scenesHtml = [...d.scenes, ...(d.molecules ?? [])].map((f) => {
+      const molecule = isMolecule(f);
+      if (state.scene !== f) {
+        return `<button class="lab-scene-open" data-lab-scene-open="${esc(f)}">${icon("cube")} <span>${esc(f)}</span>` +
+          `<span class="lab-faint">${molecule ? "Show the molecule" : "Show in 3D"}</span></button>`;
+      }
+      const how = molecule
+        ? "Drag to turn · the wheel to come nearer · click an atom, then another for how far apart · double-click to start again"
+        : "Drag to turn · the wheel to come nearer · double-click to start again";
+      return `<div class="lab-scene" data-lab-scene="${esc(f)}"><div class="lab-scene-head"><code>${esc(f)}</code><span class="grow"></span>` +
+        (molecule ? `<select class="lab-style" data-lab-style aria-label="Draw as" hidden></select>` : "") +
+        `<button class="cc-quiet" data-lab-scene-close>Close</button></div>` +
+        (molecule ? `<p class="lab-faint lab-mol-about" data-lab-mol-about hidden></p>` : "") +
+        `<canvas class="lab-canvas"></canvas>` +
         `<div class="lab-frames" hidden><button class="cc-quiet" data-lab-play>Play</button><input type="range" min="0" value="0" data-lab-frame aria-label="Frame"><span class="lab-faint" data-lab-frame-n></span></div>` +
-        `<p class="lab-faint lab-scene-note">Drag to turn · the wheel to come nearer · double-click to start again</p></div>`
-      : `<button class="lab-scene-open" data-lab-scene-open="${esc(f)}">${icon("cube")} <span>${esc(f)}</span><span class="lab-faint">Show in 3D</span></button>`).join("");
+        (molecule ? `<pre class="lab-pick" data-lab-pick hidden></pre>` : "") +
+        `<p class="lab-faint lab-scene-note">${how}</p></div>`;
+    }).join("");
     const short = (/** @type {string | undefined} */ h) => (h ? `<code title="${esc(h)}">${esc(h.slice(0, 12))}</code>` : "—");
     const approved = record?.about?.approved;
     return `<div class="lab-detail">
@@ -285,6 +300,7 @@ export function createLab(host) {
     const box = /** @type {HTMLElement | null} */ (work.querySelector("[data-lab-scene]"));
     if (!box || !state.scene) return;
     const key = keyOf(state.scene);
+    if (isMolecule(state.scene)) return showMolecule(box, key);
     let doc = scenes.get(key);
     if (!doc && host.readLab) {
       try {
@@ -311,6 +327,59 @@ export function createLab(host) {
       return;
     }
     mounted = view;
+    frameBar(box, view, canvas);
+  }
+
+  /** The open molecule, read and drawn: a file that is not what its ending
+   *  says is told so, with what is wrong. @param {HTMLElement} box @param {string} key */
+  async function showMolecule(box, key) {
+    let molecule = scenes.get(key);
+    let wrong = "";
+    if (!molecule && host.readLab) {
+      try {
+        molecule = readMolecule(key, new TextDecoder().decode(await host.readLab(key)));
+        scenes.set(key, molecule);
+      } catch (e) {
+        wrong = /** @type {Error} */ (e).message ?? String(e);
+      }
+    }
+    if (!box.isConnected) return;
+    const canvas = /** @type {HTMLCanvasElement} */ (box.querySelector("canvas"));
+    if (!molecule) {
+      canvas.replaceWith(Object.assign(document.createElement("p"), { className: "lab-err", textContent: `This is not a molecule the Lab can read${wrong ? `: ${wrong}` : "."}` }));
+      return;
+    }
+    const pick = /** @type {HTMLElement} */ (box.querySelector("[data-lab-pick]"));
+    const view = await mountMolecule(canvas, molecule, {
+      onPick: (text) => {
+        pick.hidden = !text;
+        pick.textContent = text ?? "";
+      },
+    });
+    if (!canvas.isConnected) {
+      view?.destroy();
+      return;
+    }
+    if (!view) {
+      canvas.replaceWith(Object.assign(document.createElement("p"), { className: "lab-err", textContent: "This window has no WebGL, so the molecule cannot be drawn." }));
+      return;
+    }
+    mounted = view;
+    const atoms = molecule.models[0].atoms.length;
+    const about = /** @type {HTMLElement} */ (box.querySelector("[data-lab-mol-about]"));
+    about.textContent = [molecule.title !== state.scene?.split("/").pop() ? molecule.title : "", molecule.kind,
+      atoms ? `${atoms.toLocaleString()} atoms` : "", molecule.models.length > 1 ? `${molecule.models.length} frames` : "", molecule.note ?? ""].filter(Boolean).join(" · ");
+    about.hidden = false;
+    const select = /** @type {HTMLSelectElement} */ (box.querySelector("[data-lab-style]"));
+    select.innerHTML = view.styles.map((k) => `<option value="${k}"${k === view.style ? " selected" : ""}>${esc(STYLES[k])}</option>`).join("");
+    select.hidden = view.styles.length < 2;
+    select.onchange = () => view.restyle(/** @type {any} */ (select.value));
+    frameBar(box, view, canvas);
+  }
+
+  /** The frames under a scene or a molecule: a slider, and Play.
+   *  @param {HTMLElement} box @param {{frames: number, show(f: number): void}} view @param {HTMLCanvasElement} canvas */
+  function frameBar(box, view, canvas) {
     const bar = /** @type {HTMLElement} */ (box.querySelector(".lab-frames"));
     const slider = /** @type {HTMLInputElement} */ (box.querySelector("[data-lab-frame]"));
     const count = /** @type {HTMLElement} */ (box.querySelector("[data-lab-frame-n]"));

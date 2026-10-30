@@ -12,7 +12,7 @@ in this document retain historical decisions and measurements.
 | Chat | Claude Code's own sessions, and Codex, Gemini and Antigravity conversations, with permissions, artifacts beside the chat, and council debates | Each engine is its own CLI, signed in by the person |
 | Codex | Text buffers, modal editing, search, splits, LSP/DAP, Git, terminal | Language servers, debuggers, and trace backends are external tools |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views; an agent whose edits are proposed on the cells; unsaved changes kept | Execution requires a Jupyter kernel; no SQL cells, charts or lineage yet |
-| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures and 3D scenes drawn in the Lab |
+| Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures, 3D scenes and molecules drawn in the Lab |
 | Notebook | Notebooks of your own sources with a cited tutor on four engines; study guides, flashcards on FSRS, quizzes marked by another family, exams from past papers, audio overviews, slides | The tutor and studio spend each engine's plan, audio Fish credit |
 | Excel | `Name.sheet/` workbooks, `.xlsx`, `.csv`, `.tsv`; Proton's own formula engine recalculating only what a change reaches; a grid drawn by the rows on screen; formats, frozen panes, sorting, filters, colour rules, charts; sheet tools for the agent; ranges to and from Data | `.xlsx` merged cells, conditional formats, filters, pictures, pivot tables and macros are not kept (said on opening); a million rows take about 4 s to open and 0.7–1 GB |
 | Logic | `.logic` worksheets and theories, `.proof` proofs and Logic4Fun's `.l4f`; Proton's own calculator, model finder and provers (`proton-logic`): truth tables, forms, K-maps, models found and counted, why there is none, semantic tableaux, natural deduction, the sequent calculus and resolution checked and found; logic tools for the agent; Notebook's logic practice | Natural deduction is found within a bound for first-order logic (29 of 37 Pelletier problems); no modal, intuitionistic or temporal logics; no equality reasoning in the provers |
@@ -2295,6 +2295,31 @@ a scene is opened: spheres, bonds and arrows sharing three geometries, points as
 one instanced mesh, lines and meshes, OrbitControls, and frames built the
 first time they are shown. It draws only on a change, so a scene left open
 costs nothing.
+
+**Molecules in the Lab.** A run's `.xyz`, `.pdb`, `.cif`, `.mol`, `.sdf` and
+`.smi` files (`proton_lab::run::MOLECULES`; the helper's `lab.xyz` and
+`lab.smiles` write the first and last) come to the window as
+`LabRunDetail.molecules`, and `read_lab` gives them as it gives a scene. Drawn
+with the three.js the scenes use, rather than Mol* or NGL, which would have
+been a download. `ui/molecule.js` is pure and unit-tested: the files by their
+columns or tables (the first of each atom's alternate places; `CONECT` for
+HETATMs; `MODEL`s, SDF records and trajectory frames as frames), bonds found
+by covalent radii on a grid where a file has none (120,000 atoms in about
+0.6 s), and a protein's helices and strands from its `HELIX`/`SHEET` or
+`_struct_conf`/`_struct_sheet_range` — or, without them, guessed from
+α-carbon spacing and said to be. SMILES is parsed, its unwritten hydrogens
+added, and laid out by a small force field: bond lengths from covalent radii,
+angles as 1–3 distances, flat fours where a flat atom or a double bond says so,
+and nothing nearer than it should be, first in four dimensions so rings can
+pass through each other, then in three; repeatable, no stereo, and said so.
+Each SMILES in a file is laid out when it is first shown. `ui/lab-molecule.js`
+draws atoms as impostors — a quad a sphere, the sphere found per pixel and
+written to the depth buffer — and bonds as one instanced cylinder, half each
+atom's colour, double and triple bonds side by side; a protein's cartoon is a
+tube along its α-carbons, a strand's averaged flat, flattened into a ribbon by
+each residue's C=O and into an arrow at a strand's end. A molecule is turned
+to face the camera with its widest spread. Clicking picks by casting the ray
+against the drawn spheres on the CPU; two picks give their distance.
 
 ---
 
