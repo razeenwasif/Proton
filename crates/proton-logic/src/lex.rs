@@ -31,6 +31,10 @@ pub enum Dialect {
 
 /// Symbols, longest first so `<->` is not read as `<` `-` `>`.
 const SYMBOLS: &[(&str, &str)] = &[
+    // Logic4Fun's negated comparisons: not less or equal is greater.
+    ("!<=", ">"),
+    ("!>=", "<"),
+    ("!<>", "="),
     ("<=>", "<->"),
     ("<->", "<->"),
     ("->", "->"),

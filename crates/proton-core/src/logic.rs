@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use proton_logic::ast::{Item, Question, SortKind, Theory};
 use proton_logic::eval::{self, Model};
-use proton_logic::solve::{self as finder, Outcome};
+use proton_logic::solve::{self as finder, Conflict, Outcome};
 use proton_logic::Checked;
 use proton_logic::calc::{self, What};
 use proton_logic::{check, print};
@@ -173,7 +173,29 @@ pub struct LogicModelsView {
     pub choices: u32,
     pub models: Vec<LogicModelView>,
     pub error: Option<String>,
+    /// Whether models differing only in which unnamed element is which were
+    /// shown once: then `found` is not every model, and counting is exact.
+    pub symmetry: bool,
+    /// When there is no model: the fewest lines that cannot all hold.
+    pub conflict: Option<LogicConflictView>,
 }
+
+/// Why there is no model: the constraints' lines, and the symbols' kinds,
+/// that cannot all hold together.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicConflictView {
+    pub lines: Vec<u32>,
+    /// Each kind: its declaration's line, and what it says, as
+    /// `roost is one-to-one`.
+    pub kinds: Vec<(u32, String)>,
+    /// Whether taking any one away is known to leave a model.
+    pub minimal: bool,
+}
+
+/// Time to find why there is no model, after finding there is none.
+const CONFLICT_TIME: Duration = Duration::from_secs(8);
 
 /// No more models than this are kept to be shown.
 pub const MOST_KEPT: u32 = 100;
@@ -186,7 +208,7 @@ const MOST_LIST: usize = 300;
 #[derive(Debug)]
 struct Solving {
     stop: Arc<AtomicBool>,
-    news: mpsc::Receiver<Result<Outcome, String>>,
+    news: mpsc::Receiver<Result<(Outcome, Option<Conflict>), String>>,
     checked: Box<Checked>,
     generation: u32,
     counted: bool,
@@ -238,7 +260,15 @@ impl Logics {
         };
         let s = self.solving.take().unwrap();
         self.models = Some(match got {
-            Ok(out) => models_view(&s.checked, &out, s.generation, s.counted),
+            Ok((out, why)) => {
+                let mut v = models_view(&s.checked, &out, s.generation, s.counted);
+                v.conflict = why.map(|c| LogicConflictView {
+                    lines: c.lines.iter().map(|l| *l as u32).collect(),
+                    kinds: c.kinds.into_iter().map(|(line, name, kind)| (line as u32, format!("{name} is {kind}"))).collect(),
+                    minimal: c.minimal,
+                });
+                v
+            }
             Err(why) => LogicModelsView { generation: s.generation, error: Some(why), ..Default::default() },
         });
         vec![self.models_event()]
@@ -273,7 +303,12 @@ impl Logics {
         let (c, flag) = (checked.clone(), stop.clone());
         let keep = keep.clamp(1, MOST_KEPT) as usize;
         std::thread::spawn(move || {
-            let _ = tell.send(finder::solve_or_stop(&c, keep, count, SOLVE_TIME, &flag));
+            // No model at all: why, as far as the time allows.
+            let got = finder::solve_or_stop(&c, keep, count, SOLVE_TIME, &flag).map(|out| {
+                let why = if out.found == 0 && out.finished { finder::conflict(&c, CONFLICT_TIME, &flag).ok() } else { None };
+                (out, why)
+            });
+            let _ = tell.send(got);
         });
         self.solving = Some(Solving { stop, news, checked: Box::new(checked), generation, counted: count });
         self.models = Some(LogicModelsView { generation, running: true, counted: count, ..Default::default() });
@@ -490,6 +525,8 @@ fn models_view(c: &Checked, out: &Outcome, generation: u32, counted: bool) -> Lo
         choices: out.choices.min(u32::MAX as u64) as u32,
         models: out.models.iter().map(|m| model_view(c, m)).collect(),
         error: None,
+        symmetry: out.symmetry,
+        conflict: None,
     }
 }
 
@@ -862,6 +899,23 @@ mod tests {
         // The next open file forgets the search.
         l.apply(&root, Command::LogicClose { discard: true });
         assert!(matches!(l.events(&root).pop(), Some(Event::LogicModels { models: None })));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn no_model_comes_with_the_lines_that_cannot_all_hold() {
+        let root = scratch("conflict");
+        std::fs::write(root.join("x.logic"), "n = 1..5\nx, y: n\nx > 3\ny > x\nx + y >= 2\ny < 3\n").unwrap();
+        let mut l = Logics::default();
+        let g = file(&l.apply(&root, Command::LogicOpen { path: "x.logic".into() })).unwrap().generation;
+        let m = solved(&mut l, &root, g, 5, false);
+        assert_eq!((m.found, m.finished), (0, true));
+        let why = m.conflict.expect("why there is no model");
+        assert_eq!((why.lines, why.kinds.len(), why.minimal), (vec![3, 4, 6], 0, true));
+        std::fs::write(root.join("p.logic"), "p = size 4\nh = size 3\nroost: p -> h  one-to-one\n").unwrap();
+        let g = file(&l.apply(&root, Command::LogicOpen { path: "p.logic".into() })).unwrap().generation;
+        let why = solved(&mut l, &root, g, 5, false).conflict.unwrap();
+        assert_eq!(why.kinds, vec![(3, "roost is one-to-one".to_string())]);
         let _ = std::fs::remove_dir_all(root);
     }
 

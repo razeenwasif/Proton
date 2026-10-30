@@ -52,6 +52,9 @@ pub struct Outcome {
     /// How many times the search chose a value.
     pub choices: u64,
     pub elapsed_ms: u64,
+    /// Whether models differing only in which unnamed element is which were
+    /// found once (when not counting): then `found` is not every model.
+    pub symmetry: bool,
 }
 
 /// A value that is not there: a partial function's, at an argument it has none.
@@ -87,9 +90,24 @@ struct Sym {
     first: usize,
     count: usize,
     props: Props,
+    /// For each argument and for the value: which interchangeable sort it
+    /// is of, if one.
+    arg_swap: Vec<Option<usize>>,
+    value_swap: Option<usize>,
 }
 
 impl Sym {
+    /// A cell's arguments' values.
+    fn args_of(&self, cell: usize) -> Vec<i64> {
+        let mut idx = cell - self.first;
+        let mut out = vec![0; self.args.len()];
+        for (k, d) in self.args.iter().enumerate().rev() {
+            out[k] = d[idx % d.len()];
+            idx /= d.len();
+        }
+        out
+    }
+
     /// The cell of these arguments' values, if they are in its domains.
     fn cell(&self, args: &[i64]) -> Option<usize> {
         let mut idx = 0usize;
@@ -498,6 +516,8 @@ struct Search<'a> {
     keep: usize,
     /// Whether to go on past the models kept, counting.
     count: bool,
+    /// The sizes of the interchangeable sorts, when symmetry is broken.
+    swaps: Vec<usize>,
     deadline: Instant,
     /// Set from outside to stop the search where it is.
     stop: &'a AtomicBool,
@@ -633,7 +653,20 @@ impl Search<'_> {
             self.found();
             return;
         };
-        let positions: Vec<usize> = (0..self.space.dom[cell].len()).filter(|p| self.space.dom[cell][*p]).collect();
+        let mut positions: Vec<usize> = (0..self.space.dom[cell].len()).filter(|p| self.space.dom[cell][*p]).collect();
+        // Of the values of an interchangeable sort that nothing set so far
+        // mentions, one is as good as another: only the first is tried.
+        if let Some(k) = self.space.syms[self.space.owner[cell]].value_swap.filter(|_| !self.swaps.is_empty()) {
+            let used = self.mentioned(k, cell);
+            let mut fresh = false;
+            positions.retain(|&p| {
+                let v = self.value_at(cell, p);
+                if v == NONE || used[v as usize] {
+                    return true;
+                }
+                !std::mem::replace(&mut fresh, true)
+            });
+        }
         for p in positions {
             if self.stopped {
                 return;
@@ -653,6 +686,44 @@ impl Search<'_> {
             }
             self.undo(mark);
         }
+    }
+
+    /// The elements of interchangeable sort `k` that the cells set so far,
+    /// and `cell`'s own arguments, mention.
+    fn mentioned(&self, k: usize, cell: usize) -> Vec<bool> {
+        let mut used = vec![false; self.swaps[k]];
+        let mut mark = |v: i64| {
+            if v >= 0 && (v as usize) < used.len() {
+                used[v as usize] = true;
+            }
+        };
+        let own = &self.space.syms[self.space.owner[cell]];
+        for (a, sw) in own.args_of(cell).into_iter().zip(&own.arg_swap) {
+            if *sw == Some(k) {
+                mark(a);
+            }
+        }
+        for s in &self.space.syms {
+            let reads_k = s.value_swap == Some(k) || s.arg_swap.contains(&Some(k));
+            if !reads_k {
+                continue;
+            }
+            for c in s.first..s.first + s.count {
+                let v = self.space.val[c];
+                if v == UNSET {
+                    continue;
+                }
+                if s.value_swap == Some(k) && v != NONE {
+                    mark(v);
+                }
+                for (a, sw) in s.args_of(c).into_iter().zip(&s.arg_swap) {
+                    if *sw == Some(k) {
+                        mark(a);
+                    }
+                }
+            }
+        }
+        used
     }
 
     /// Every cell set: a model, if every instance holds and every onto
@@ -692,6 +763,75 @@ impl Search<'_> {
             self.stopped = true;
         }
     }
+}
+
+/// The sorts whose elements no constraint tells apart: those given by a
+/// size, never named, and never put in order, counted from, or stepped
+/// through.
+pub fn interchangeable(c: &Checked) -> Vec<String> {
+    let mut out: Vec<String> = c.sig.sorts.iter().filter(|(_, k)| matches!(k, SortKind::Size(_) | SortKind::Sizes(..))).map(|(n, _)| n.clone()).collect();
+    if out.is_empty() {
+        return out;
+    }
+    fn ty(sig: &Sig, scope: &[(String, Ty)], e: &Expr) -> Option<Ty> {
+        match e {
+            Expr::Name(n) => scope.iter().rev().find(|(v, _)| v == n).map(|(_, t)| t.clone()).or_else(|| sig.symbols.get(n).map(|s| s.result.clone())),
+            Expr::App(f, args) => match f.as_str() {
+                "succ" | "pred" | "min" | "max" => args.first().and_then(|a| ty(sig, scope, a)),
+                f => sig.symbols.get(f).map(|s| s.result.clone()),
+            },
+            Expr::End { sort, .. } => Some(Ty::Sort(sort.clone())),
+            _ => None,
+        }
+    }
+    fn walk(sig: &Sig, scope: &mut Vec<(String, Ty)>, e: &Expr, ordered: &mut Vec<String>) {
+        let mut mark = |t: Option<Ty>| {
+            if let Some(Ty::Sort(s)) = t {
+                ordered.push(s);
+            }
+        };
+        match e {
+            Expr::End { sort, .. } => mark(Some(Ty::Sort(sort.clone()))),
+            Expr::Bin(op, a, b) => {
+                if !op.is_logical() && !matches!(op, Op::Eq | Op::Ne) {
+                    mark(ty(sig, scope, a));
+                    mark(ty(sig, scope, b));
+                }
+                walk(sig, scope, a, ordered);
+                walk(sig, scope, b, ordered);
+            }
+            Expr::Not(a) => walk(sig, scope, a, ordered),
+            Expr::Neg(a) => {
+                mark(ty(sig, scope, a));
+                walk(sig, scope, a, ordered);
+            }
+            Expr::App(f, args) => {
+                if matches!(f.as_str(), "succ" | "pred" | "min" | "max" | "abs") {
+                    for a in args {
+                        mark(ty(sig, scope, a));
+                    }
+                }
+                for a in args {
+                    walk(sig, scope, a, ordered);
+                }
+            }
+            Expr::Quant(_, binders, body) => {
+                let n = scope.len();
+                scope.extend(binders.iter().map(|b| (b.name.clone(), crate::eval::ty_named(b.sort.as_deref().unwrap_or("int")))));
+                walk(sig, scope, body, ordered);
+                scope.truncate(n);
+            }
+            _ => {}
+        }
+    }
+    let mut ordered = Vec::new();
+    for line in &c.theory.lines {
+        if let Some(Item::Constraint(e)) = &line.item {
+            walk(&c.sig, &mut Vec::new(), e, &mut ordered);
+        }
+    }
+    out.retain(|s| !ordered.contains(s));
+    out
 }
 
 fn arguments(args: &[Rc<Vec<i64>>]) -> Vec<Vec<i64>> {
@@ -742,6 +882,7 @@ pub fn solve_or_stop(c: &Checked, keep: usize, count: bool, time: Duration, stop
         let out = solve_sized(c, sizes, want, count, left, stop)?;
         total.found += out.found;
         total.choices += out.choices;
+        total.symmetry |= out.symmetry;
         total.models.extend(out.models);
         if !out.finished {
             total.finished = false;
@@ -755,6 +896,13 @@ pub fn solve_or_stop(c: &Checked, keep: usize, count: bool, time: Duration, stop
 
 fn solve_sized(c: &Checked, sizes: BTreeMap<String, u32>, keep: usize, count: bool, time: Duration, stop: &AtomicBool) -> Result<Outcome, String> {
     let model = Model { sizes: sizes.clone(), values: BTreeMap::new() };
+    // Symmetry is broken only when not counting: counts stay exact.
+    let swap_names: Vec<String> = if count { Vec::new() } else { interchangeable(c) };
+    let swap_of = |t: &Ty| match t {
+        Ty::Sort(s) => swap_names.iter().position(|n| n == s),
+        _ => None,
+    };
+    let swaps: Vec<usize> = swap_names.iter().map(|n| domain(&c.sig, &model, &Ty::Sort(n.clone())).len()).collect();
     let mut comp = Compiler { sig: &c.sig, model: &model, syms: Vec::new(), by_name: BTreeMap::new(), scope: Vec::new(), slots: 0 };
     // The cells: every symbol, and every proposition used undeclared.
     let mut first = 0usize;
@@ -774,7 +922,8 @@ fn solve_sized(c: &Checked, sizes: BTreeMap<String, u32>, keep: usize, count: bo
         if props.symmetric && props.one_to_one {
             return Err(format!("{name} cannot be both symmetric and one-to-one"));
         }
-        comp.syms.push(Sym { name, args: arg_doms, values: Rc::new(values), first, count, props });
+        let (arg_swap, value_swap) = (args.iter().map(&swap_of).collect(), swap_of(&result));
+        comp.syms.push(Sym { name, args: arg_doms, values: Rc::new(values), first, count, props, arg_swap, value_swap });
         first += count;
     }
     // The constraints, compiled, and each top `all` spread into instances.
@@ -877,6 +1026,7 @@ fn solve_sized(c: &Checked, sizes: BTreeMap<String, u32>, keep: usize, count: bo
         slots,
         keep,
         count,
+        swaps,
         deadline: Instant::now() + time,
         stop,
         out: Outcome::default(),
@@ -891,6 +1041,7 @@ fn solve_sized(c: &Checked, sizes: BTreeMap<String, u32>, keep: usize, count: bo
         search.search();
     }
     search.out.finished = !search.stopped;
+    search.out.symmetry = !search.swaps.is_empty();
     Ok(search.out)
 }
 
@@ -914,4 +1065,98 @@ impl Search<'_> {
         }
         self.propagate(queue)
     }
+}
+
+/* ── why there is no model ────────────────────────────────────────── */
+
+/// The fewest of a theory's constraints, and of its symbols' kinds, that
+/// already have no model together.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Conflict {
+    /// The constraints' lines.
+    pub lines: Vec<usize>,
+    /// Symbols' kinds: the declaration's line, the symbol, and the kind
+    /// (`one-to-one` or `onto`).
+    pub kinds: Vec<(usize, String, String)>,
+    /// Whether taking any one away is known to leave models: false when a
+    /// search ran out of time and something was kept in case.
+    pub minimal: bool,
+}
+
+/// A part of a theory that can be taken away.
+#[derive(Debug, Clone, PartialEq)]
+enum Part {
+    /// A constraint, by its place in the theory's lines.
+    Line(usize),
+    /// A symbol's kind: one-to-one (true) or onto.
+    Kind(String, bool),
+}
+
+/// The theory with only these parts.
+fn only(c: &Checked, parts: &[Part]) -> Checked {
+    let mut out = c.clone();
+    for (k, line) in out.theory.lines.iter_mut().enumerate() {
+        if matches!(line.item, Some(Item::Constraint(_))) && !parts.contains(&Part::Line(k)) {
+            line.item = None;
+        }
+    }
+    for (name, s) in out.sig.symbols.iter_mut() {
+        s.props.one_to_one &= parts.contains(&Part::Kind(name.clone(), true));
+        s.props.onto &= parts.contains(&Part::Kind(name.clone(), false));
+    }
+    out
+}
+
+/// Why a theory has no model: each constraint and kind taken away in turn,
+/// and kept only if without it there would be a model. `c` is known to
+/// have none; `time` is shared out over the searches.
+pub fn conflict(c: &Checked, time: Duration, stop: &AtomicBool) -> Result<Conflict, String> {
+    let mut parts: Vec<Part> = Vec::new();
+    for (k, line) in c.theory.lines.iter().enumerate() {
+        if matches!(line.item, Some(Item::Constraint(_))) {
+            parts.push(Part::Line(k));
+        }
+    }
+    for (name, s) in &c.sig.symbols {
+        if s.props.one_to_one {
+            parts.push(Part::Kind(name.clone(), true));
+        }
+        if s.props.onto {
+            parts.push(Part::Kind(name.clone(), false));
+        }
+    }
+    let deadline = Instant::now() + time;
+    let each = time / (parts.len().max(1) as u32);
+    let mut minimal = true;
+    let mut k = 0;
+    while k < parts.len() {
+        if stop.load(Ordering::Relaxed) {
+            minimal = false;
+            break;
+        }
+        let without: Vec<Part> = parts.iter().enumerate().filter(|(j, _)| *j != k).map(|(_, p)| p.clone()).collect();
+        let left = deadline.saturating_duration_since(Instant::now()).min(each.max(Duration::from_millis(200)));
+        let out = solve_or_stop(&only(c, &without), 1, false, left, stop)?;
+        if out.found == 0 && out.finished {
+            // Still none without it: it is not needed for the conflict.
+            parts = without;
+        } else {
+            if out.found == 0 {
+                minimal = false;
+            }
+            k += 1;
+        }
+    }
+    let at = |k: usize| c.theory.lines[k].at;
+    let decl_line = |name: &str| {
+        c.theory.lines.iter().find(|l| matches!(&l.item, Some(Item::Symbol(s)) if s.names.iter().any(|n| n == name))).map_or(0, |l| l.at)
+    };
+    Ok(Conflict {
+        lines: parts.iter().filter_map(|p| if let Part::Line(k) = p { Some(at(*k)) } else { None }).collect(),
+        kinds: parts
+            .iter()
+            .filter_map(|p| if let Part::Kind(n, one) = p { Some((decl_line(n), n.clone(), if *one { "one-to-one" } else { "onto" }.to_string())) } else { None })
+            .collect(),
+        minimal,
+    })
 }

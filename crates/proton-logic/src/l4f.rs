@@ -190,8 +190,12 @@ impl Reader {
                     }
                 }
                 Some("alias") => {
+                    // `X alias Y`: Y is another name for X, as `natnum` is `nat`.
                     self.i += 1;
                     let other = self.name("a sort")?;
+                    if self.sizes.contains_key(&other) || self.aliases.contains_key(&other) {
+                        return Err(diag(&at, format!("{other} is a sort already: `{name} alias {other}` gives {name} a second name, {other}")));
+                    }
                     self.aliases.insert(other, name.clone());
                 }
                 _ => break,
