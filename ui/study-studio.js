@@ -195,7 +195,7 @@ export function madeHtml(e, readOnly, found = { have: new Map(), unpicked: new S
   } else if (body.shape === "questions" || body.shape === "paper") {
     // A quiz opens as a quiz (study-quiz.js); this is only its questions, read.
     content = `<ol class="st-cards" data-turn="made">${body.questions.map((q) => `<li class="st-card-row"><div class="md">${answerHtml(q.prompt, citations)}</div></li>`).join("")}</ol>`;
-  } else if (body.shape === "guide" || body.shape === "labels" || body.shape === "pages") {
+  } else if (body.shape === "guide" || body.shape === "labels" || body.shape === "pages" || body.shape === "digest") {
     // Kept with the sources, and shown with them.
     content = "";
   } else {

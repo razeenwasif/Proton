@@ -393,6 +393,8 @@ export function createStudyPreview(deliver) {
 
   /** Sources' guides, by id, once asked for. @type {Record<string, any>} */
   const guides = {};
+  /** Each long source's digest so far: the notes stand in for a book. */
+  const digests = { S02: { parts: 3, done: 0, words: 61_500, sections: [] } };
 
   /** What the web gave, as Discover or Deep Research would. @param {boolean} research */
   function foundBody(research) {
@@ -546,6 +548,28 @@ export function createStudyPreview(deliver) {
           }, 1500);
           return [studioEvent()];
         }
+        case "studyMakeDigest": {
+          const digest = digests[command.id];
+          const source = (state.sources[state.open ?? ""] ?? []).find((x) => x.id === command.id);
+          if (!digest || !source) return [];
+          const ids = [];
+          for (let n = digest.done + 1; n <= digest.parts; n++) {
+            const id = `J${String(3 + studio.jobs.length).padStart(4, "0")}`;
+            ids.push(id);
+            studio.jobs.unshift({ id, kind: "digest", title: `Digesting part ${n} of ${digest.parts} of ${source.title}`, state: "running", why: null, made: null,
+              engine: "claude", started: Math.floor(Date.now() / 1000), about: source.id });
+          }
+          setTimeout(() => {
+            for (const job of studio.jobs) if (ids.includes(job.id)) Object.assign(job, { state: "done", made: source.id });
+            digest.done = digest.parts;
+            digest.sections = [
+              { title: "Uninformed search", at: "S02 § Search › Uniform cost L40-58", summary: "Breadth-first and uniform-cost search, and when each is optimal [[S02 § Search › Uniform cost L40-58]].", terms: ["BFS", "UCS"] },
+              { title: "Informed search", at: "", summary: "A* orders the frontier by $f(n) = g(n) + h(n)$, and is optimal with an admissible heuristic.", terms: ["A*", "admissible heuristic"] },
+            ];
+            deliver(studioEvent());
+          }, 1500);
+          return [studioEvent()];
+        }
         case "studyTranscribe": {
           const slug = state.open ?? "";
           const source = (state.sources[slug] ?? []).find((x) => x.id === command.id);
@@ -571,7 +595,8 @@ export function createStudyPreview(deliver) {
                 { from: 7, to: 14, text: "## Uniform cost\n\nExpands the node with the lowest $g(n)$ first.\n\n```python\nfrontier = [(0, start)]\n```" }] };
           return [{ type: "studySource", id: source.id, title: source.title, kind: source.kind, at: command.at ?? { from: 7, to: 9 },
             said: source.origin.root === "ANU" ? "Its file is in iCloud: these are its words as they were read." : null, view,
-            guide: guides[source.id] ?? null, citations: guides[source.id] ? [cites[0]] : [] }];
+            guide: guides[source.id] ?? null, citations: guides[source.id] ? [cites[0]] : [],
+            digest: digests[source.id] ?? null, digestCitations: digests[source.id]?.sections.length ? [cites[0]] : [] }];
         }
         case "studyShowNote": {
           const note = (state.notes[state.open ?? ""] ?? []).find((x) => x.id === command.id);

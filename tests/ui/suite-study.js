@@ -531,6 +531,48 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(sent(asked, 'studyAsk')[0]?.text === 'What does Search.md (S01) say about Breadth-first search?', `the topic was not asked: ${JSON.stringify(sent(asked, 'studyAsk'))}`);
   });
 
+  await test('A source too long to read whole is digested on asking, told the calls first, and shows its sections', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01', {kind: 'markdown', units: 'lines', title: 'Textbook.md'})]), {type: 'studyStudio', jobs: [], made: []}]); await settle();
+    const view = {shape: 'sections', sections: [{from: 1, to: 4, text: '# Search\n\nBFS is complete.'}]};
+    const source = (/** @type {any} */ digest) => ({type: 'studySource', id: 'S01', title: 'Textbook.md', kind: 'markdown', at: null, said: null, guide: null, citations: [], view,
+      digest, digestCitations: [cite(1, 'S01 § Search L1-2')]});
+    await win.pushEvents([source({parts: 3, done: 0, words: 61500, sections: []})]); await settle();
+    ws().querySelector('[data-study-digest="S01"]').click(); await settle();
+    const asking = ws().querySelector('.st-reader .st-ask');
+    assert(asking?.textContent.includes('61,500 words') && asking.textContent.includes('3 calls'), `the calls are not told first: ${asking?.textContent}`);
+    assert(!ws().querySelector('[data-study-digest]'), 'the button stayed while asking');
+    ws().querySelector('[data-study-digest-no]').click(); await settle();
+    assert(!ws().querySelector('.st-reader .st-ask'), 'Cancel did not take the asking away');
+    const before = win.commands.length;
+    ws().querySelector('[data-study-digest="S01"]').click(); await settle();
+    ws().querySelector('[data-study-digest-yes]').click(); await settle();
+    assert(sent(before, 'studyMakeDigest')[0]?.id === 'S01', 'the digest was not asked for');
+    const jobs = (/** @type {string} */ state) => ({type: 'studyStudio', made: [], jobs: [1, 2, 3].map((n) => ({id: `J00${n}0`, kind: 'digest', title: `Digesting part ${n} of 3 of Textbook.md`,
+      state, why: null, made: state === 'done' ? 'S01' : null, engine: 'claude', started: 2, about: 'S01'}))});
+    await win.pushEvents([jobs('running')]); await settle();
+    assert(ws().querySelector('.st-reader .st-banner')?.textContent.includes('Digesting — 0 of 3 parts'), 'it is not said to be digesting');
+    assert(!ws().querySelector('[data-study-digest]'), 'it can be asked for twice');
+    const shown = win.commands.length;
+    await win.pushEvents([jobs('done')]); await settle();
+    assert(sent(shown, 'studyShow')[0]?.id === 'S01', 'the source was not asked for again once digested');
+    await win.pushEvents([source({parts: 3, done: 3, words: 61500, sections: [
+      {title: 'Uninformed search', at: 'S01 § Search L1-2', summary: 'BFS is complete [[S01 § Search L1-2]].', terms: ['BFS']},
+      {title: 'Informed search', at: '', summary: 'A* is optimal with an admissible heuristic.', terms: []}]})]); await settle();
+    const digest = ws().querySelector('.st-digest');
+    assert(digest?.querySelector('summary')?.textContent.includes('2 sections'), `the digest is not shown: ${digest?.textContent}`);
+    assert(digest.querySelectorAll('.st-digest-sec').length === 2 && digest.querySelector('.st-digest-sec h3 .st-cite'), 'its sections, and where they begin, are not shown');
+    assert(!ws().querySelector('[data-study-digest]'), 'a source digested whole is offered a digest');
+    // Some of it digested: the rest is offered, and what it costs.
+    await win.pushEvents([source({parts: 3, done: 1, words: 61500, sections: [{title: 'Uninformed search', at: '', summary: 'BFS is complete, and optimal for unit costs.', terms: []}]})]); await settle();
+    const rest = ws().querySelector('[data-study-digest="S01"]');
+    assert(rest?.textContent.includes('Digest the rest'), 'the rest is not offered');
+    rest.click(); await settle();
+    assert(ws().querySelector('.st-reader .st-ask')?.textContent.includes('2 parts of it not digested yet are read in 2 calls'), ws().querySelector('.st-reader .st-ask')?.textContent);
+    assert(ws().querySelector('.st-digest summary')?.textContent.includes('1 of 3 parts'), 'how much is digested is not said');
+    ws().querySelector('[data-study-digest-no]').click(); await settle();
+  });
+
   await test('The studio makes from the sources: a tile asks for its options, and a table its columns', async () => {
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), {type: 'studyStudio', jobs: [], made: []}]); await settle();

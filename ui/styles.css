@@ -3950,6 +3950,11 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .st-guide .md { font: var(--z-sm)/1.55 var(--cc-font); color: var(--cc-text); }
 .st-guide-topics { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 4px; }
 .st-guide-questions { margin: 6px 0 0; padding-left: 18px; font: var(--z-xs)/1.5 var(--cc-font); }
+.st-digest { margin: 0 0 16px; padding: 10px 14px; border: 1px solid var(--cc-line); border-radius: 10px; background: var(--cc-raise); }
+.st-digest > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; font: var(--z-xs)/1.3 var(--cc-font); }
+.st-digest-sec { margin-top: 12px; }
+.st-digest-sec h3 { margin: 0 0 4px; font: 600 var(--z-sm)/1.35 var(--cc-font); color: var(--cc-text); }
+.st-digest-sec .md { font: var(--z-sm)/1.55 var(--cc-font); color: var(--cc-text); }
 .st-role { flex: 0 0 auto; max-width: 110px; padding: 1px 2px; border: 1px solid transparent; border-radius: 5px; background: transparent;
   color: var(--cc-faint); font: var(--z-2xs) var(--cc-font); }
 .st-line:hover .st-role, .st-role:focus { border-color: var(--cc-line-2); color: var(--cc-muted); }

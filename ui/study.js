@@ -32,7 +32,8 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {{notebooks: Summary[], open: string | null, folder: string | null}} ListEvent */
 /** @typedef {import("./bindings/StudySourceGuide").StudySourceGuide} Guide */
 /** @typedef {{id: string, title: string, kind: string, at: Place | null, said: string | null, view: View, guide: Guide | null,
- *   citations: import("./bindings/StudyCitation").StudyCitation[]}} SourceEvent */
+ *   citations: import("./bindings/StudyCitation").StudyCitation[], digest?: import("./bindings/StudyDigestView").StudyDigestView | null,
+ *   digestCitations?: import("./bindings/StudyCitation").StudyCitation[]}} SourceEvent */
 /** @typedef {{id: string, title: string, body: string, updated: number, source: string | null}} NoteEvent */
 /** @typedef {import("./study-studio.js").MadeEvent} MadeEvent */
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
@@ -142,7 +143,7 @@ export function createStudy(host) {
   /** @type {{list: Summary[], open: string | null, folder: string | null, said: boolean, notebook: NotebookEvent | null,
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web" | "artifacts" | "folder", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
-   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null,
+   *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null, digest: string | null,
    *   artifacts: ArtifactRow[] | null, picked: Set<string>}} */
   const state = {
     list: [], open: null, folder: null,
@@ -172,6 +173,7 @@ export function createStudy(host) {
     // A source whose pages with few words are to be read from their
     // pictures, being asked.
     readable: null,
+    digest: null,
     // The artifacts Proton keeps, once asked for, and those ticked to add.
     artifacts: null,
     picked: new Set(),
@@ -532,8 +534,9 @@ export function createStudy(host) {
         (g.questions.length ? `<ul class="st-guide-questions">${g.questions.map((q) => `<li><button class="st-link" data-study-ask-question="${esc(q)}">${esc(q)}</button></li>`).join("")}</ul>` : "") +
         `</section>`
       : guiding ? `<div class="st-banner"><span class="lab-spin"></span> Writing its guide…</div>` : "";
-    const ask = !g && !guiding && !readOnly() && row && hasWords(row)
-      ? `<button class="cc-quiet" data-study-guide="${esc(src.id)}" title="What it covers, its key topics, and questions to ask of it">${icon("spark")}Guide</button>` : "";
+    const ask = (!g && !guiding && !readOnly() && row && hasWords(row)
+      ? `<button class="cc-quiet" data-study-guide="${esc(src.id)}" title="What it covers, its key topics, and questions to ask of it">${icon("spark")}Guide</button>` : "") +
+      digestAskHtml(src);
     const web = origin?.from === "web" ? origin : null;
     const fetched = web?.fetched ? ` · fetched ${new Date(web.fetched * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}` : "";
     const page = web ? `<button class="cc-quiet" data-study-page="${esc(web.url)}" title="${esc(web.url)}">${icon("ext")}Open the page</button>` +
@@ -542,7 +545,44 @@ export function createStudy(host) {
         (readOnly() ? "" : `<button class="cc-quiet" data-study-refresh="${esc(src.id)}" title="Read its latest version again">Read again</button>`)
         : "";
     return `<div class="st-reader"><div class="st-reader-head"><button class="cc-quiet" data-study-back title="Back to the notebook">← Back</button>` +
-      `<div><h1>${esc(src.title)}</h1><span class="st-faint">${esc(src.id)} · ${esc(src.kind)}${esc(fetched)}</span></div>${ask}${page}</div>${said}${guide}<div class="st-read">${body}</div></div>`;
+      `<div><h1>${esc(src.title)}</h1><span class="st-faint">${esc(src.id)} · ${esc(src.kind)}${esc(fetched)}</span></div>${ask}${page}</div>${said}${guide}${digestHtml(src)}<div class="st-read">${body}</div></div>`;
+  }
+
+  /** The calls digesting a source, not ended yet. @param {string} id */
+  function digesting(id) {
+    return studio.jobs().filter((j) => j.kind === "digest" && j.about === id && j.state !== "done" && j.state !== "failed").length;
+  }
+
+  /** The asking to digest a source too long to read whole, or the rest of
+   *  it. @param {SourceEvent} src */
+  function digestAskHtml(src) {
+    const d = src.digest;
+    if (!d || d.done >= d.parts || readOnly() || digesting(src.id) || state.digest === src.id) return "";
+    const label = d.done ? "Digest the rest" : "Digest";
+    return `<button class="cc-quiet" data-study-digest="${esc(src.id)}" title="Too long for one call to read whole: what each of its sections says, read part by part">${icon("layers")}${label}</button>`;
+  }
+
+  /** A long source's digest: asked for first, said to be under way, and
+   *  its sections. @param {SourceEvent} src */
+  function digestHtml(src) {
+    const d = src.digest;
+    if (!d) return "";
+    const left = d.parts - d.done;
+    const ask = state.digest === src.id && left > 0
+      ? `<div class="st-ask">${icon("layers")}<span>Digest <b>${esc(src.title)}</b>? It is too long for one call to read whole — about ${esc(count(d.words, "word", "words"))}. ` +
+        `${d.done ? `The ${esc(count(left, "part", "parts"))} of it not digested yet ${left === 1 ? "is" : "are"}` : `It is`} read in ${esc(count(left, "call", "calls"))} on the tutor's engine, ` +
+        `each writing what its sections say, citing them; calls over the notebook are then given the digest, about a fortieth of its length.</span>` +
+        `<span class="rs-actions"><button class="cc-quiet" data-study-digest-no>Cancel</button><button class="cc-primary" data-study-digest-yes>Digest it</button></span></div>` : "";
+    const busy = digesting(src.id)
+      ? `<div class="st-banner"><span class="lab-spin"></span> Digesting — ${esc(String(d.done))} of ${esc(count(d.parts, "part", "parts"))} done…</div>` : "";
+    if (!d.sections.length) return ask + busy;
+    const cites = src.digestCitations ?? [];
+    const sections = d.sections.map((s) => `<section class="st-digest-sec"><h3>${esc(s.title)}${s.at ? ` ${answerHtml(`[[${s.at}]]`, cites).replace(/^<p>|<\/p>\s*$/g, "")}` : ""}</h3>` +
+      `<div class="md">${answerHtml(s.summary, cites)}</div>` +
+      (s.terms.length ? `<div class="st-guide-topics">${s.terms.map((t) => `<button class="st-chip" data-study-ask-topic="${esc(t)}" title="Ask the tutor what it says of this">${esc(t)}</button>`).join("")}</div>` : "") +
+      `</section>`).join("");
+    const of = d.done < d.parts ? ` · ${d.done} of ${count(d.parts, "part", "parts")}` : "";
+    return ask + busy + `<details class="st-digest"><summary><b>Digest</b><span class="st-faint">${esc(count(d.sections.length, "section", "sections"))}${esc(of)}</span></summary>${sections}</details>`;
   }
 
   /** Mark and scroll to where a source was opened. @param {SourceEvent} src */
@@ -979,6 +1019,21 @@ export function createStudy(host) {
       state.getting = null;
       return renderSources();
     }
+    const digest = at("[data-study-digest]");
+    if (digest) {
+      state.digest = digest.dataset.studyDigest ?? null;
+      return renderStage();
+    }
+    if (at("[data-study-digest-yes]")) {
+      const id = state.digest;
+      state.digest = null;
+      if (id) host.dispatch({ type: "studyMakeDigest", id });
+      return renderStage();
+    }
+    if (at("[data-study-digest-no]")) {
+      state.digest = null;
+      return renderStage();
+    }
     if (at("[data-study-readable-yes]")) {
       const id = state.readable;
       state.readable = null;
@@ -1221,13 +1276,13 @@ export function createStudy(host) {
       // More cards for the deck being looked at: drawn with them.
       if (state.shown.kind === "deck" && job.made && job.made === cards.openDeck()) host.dispatch({ type: "studyShowMade", id: job.made });
       // The guide of the source being read: shown with it.
-      if (job.kind === "sourceGuide" && state.shown.kind === "source" && state.shown.source.id === job.about) {
+      if ((job.kind === "sourceGuide" || job.kind === "digest") && state.shown.kind === "source" && state.shown.source.id === job.about) {
         host.dispatch({ type: "studyShow", id: job.about, at: state.shown.source.at });
       }
     }
     // A guide or labels under way show where they will be: drawn again
     // only when one of them changes, which keeps the reader where it is.
-    const now = event.jobs.filter((j) => j.kind === "sourceGuide" || j.kind === "labels" || j.kind === "readable").map((j) => `${j.id}:${j.state}`).join(",");
+    const now = event.jobs.filter((j) => j.kind === "sourceGuide" || j.kind === "labels" || j.kind === "readable" || j.kind === "digest").map((j) => `${j.id}:${j.state}`).join(",");
     if (now !== underway) {
       underway = now;
       if (state.shown.kind === "source") renderStage();
