@@ -77,6 +77,41 @@ pub fn parse(text: &str) -> Result<Theory, Diag> {
     Ok(theory)
 }
 
+/// One formula, alone: a proof's line, a header's premise.
+pub fn formula(text: &str) -> Result<Expr, Diag> {
+    let toks: Vec<Token> = lex(text, Dialect::Proton)
+        .map_err(|e| Diag { line: e.line, col: e.col, message: e.message })?
+        .into_iter()
+        .filter(|t| !matches!(t.tok, Tok::Newline | Tok::Comment(_)))
+        .collect();
+    if toks.is_empty() {
+        return Err(Diag { line: 1, col: 1, message: "a formula was expected".into() });
+    }
+    let mut p = Parser { toks: &toks, i: 0 };
+    let e = p.expr(0)?;
+    p.end()?;
+    Ok(e)
+}
+
+/// Formulas separated by commas, outside brackets: a header's premises.
+pub fn formulas(text: &str) -> Result<Vec<Expr>, Diag> {
+    let toks: Vec<Token> = lex(text, Dialect::Proton)
+        .map_err(|e| Diag { line: e.line, col: e.col, message: e.message })?
+        .into_iter()
+        .filter(|t| !matches!(t.tok, Tok::Newline | Tok::Comment(_)))
+        .collect();
+    if toks.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut p = Parser { toks: &toks, i: 0 };
+    let mut out = vec![p.expr(0)?];
+    while p.eat(",") {
+        out.push(p.expr(0)?);
+    }
+    p.end()?;
+    Ok(out)
+}
+
 /// A token after which the statement goes on to the next line.
 fn continues(t: &Tok) -> bool {
     matches!(t, Tok::Sym(s) if !matches!(*s, ")" | "}" | "."))

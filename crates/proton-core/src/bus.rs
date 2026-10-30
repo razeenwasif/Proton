@@ -799,7 +799,8 @@ pub enum Command {
         table: String,
         note: String,
     },
-    /// A Logic file made: `name.logic`, a `theory` or a `worksheet` to start.
+    /// A Logic file made: `name.logic`, a `theory` or a `worksheet` to
+    /// start; or `name.proof`, a `proof`.
     LogicNew {
         name: String,
         kind: String,
@@ -835,6 +836,13 @@ pub enum Command {
     },
     /// The search stopped where it is.
     LogicStop,
+    /// A natural-deduction proof found: of a `.proof` file's goal from its
+    /// premises, or of the argument at `line` of another file. The answer
+    /// for `line` comes back with it.
+    LogicProve {
+        generation: u32,
+        line: u32,
+    },
     /// A truth table's column — `0`, `1`, `x` — read back as formulas over
     /// the names given (spaces or commas between), or `p`, `q`, `r`.
     LogicFromTable {

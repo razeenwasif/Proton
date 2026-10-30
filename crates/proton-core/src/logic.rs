@@ -18,7 +18,7 @@ use proton_logic::eval::{self, Model};
 use proton_logic::solve::{self as finder, Conflict, Outcome};
 use proton_logic::Checked;
 use proton_logic::calc::{self, What};
-use proton_logic::{check, print};
+use proton_logic::{check, fitch, print};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -65,6 +65,9 @@ pub struct LogicFileView {
     pub diagnostics: Vec<LogicDiag>,
     /// What a Logic4Fun file says that Proton does not keep.
     pub notes: Vec<String>,
+    /// For a proof: each of its lines' line in the file, and whether it is
+    /// right.
+    pub checks: Vec<(u32, bool)>,
 }
 
 /// A column of a truth table: its heading and a `0` or `1` a row.
@@ -136,6 +139,29 @@ pub struct LogicAnswerView {
     pub counter: Option<LogicModelView>,
     /// For a propositional one: its open branch's literals.
     pub open: Vec<(String, bool)>,
+    /// For a line of a `.proof` file: its check, and the proof's.
+    pub proof: Option<LogicProofView>,
+    /// A natural-deduction proof found, as a `.proof` file's text; or why
+    /// none was.
+    pub deduction: Option<String>,
+    pub deduction_note: Option<String>,
+}
+
+/// A line of a proof checked, and the proof as a whole.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LogicProofView {
+    /// The line's number in the proof and its rule, by its first name; none
+    /// for the header or a line that could not be read.
+    pub n: Option<u32>,
+    pub rule: Option<String>,
+    /// Whether the line is right, and why — or what is wrong with it.
+    pub ok: bool,
+    pub message: String,
+    /// Every line right and the goal reached; and the proof in words.
+    pub complete: bool,
+    pub summary: String,
 }
 
 /// A branch of a tableau: its lines, and how it ends — closed by two lines,
@@ -444,10 +470,19 @@ impl Logics {
             }
             Command::LogicAsk { generation, line, more } => {
                 let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
-                let answer = answer_line(&open.text, open.kind == "l4f", line as usize, more);
+                let answer = if open.kind == "proof" { answer_proof(&open.text, line as usize) } else { answer_line(&open.text, open.kind == "l4f", line as usize, more) };
                 vec![Event::LogicAnswer { answer: Some(Box::new(LogicAnswerView { generation, ..answer })) }]
             }
             Command::LogicSolve { generation, keep, count } => self.solve(generation, keep, count),
+            Command::LogicProve { generation, line } => {
+                let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
+                let mut answer = if open.kind == "proof" { answer_proof(&open.text, line as usize) } else { answer_line(&open.text, open.kind == "l4f", line as usize, false) };
+                match argument_at(&open.text, &open.kind, line as usize).and_then(|(premises, goal)| fitch::find(&premises, &goal, FIND_TIME)) {
+                    Ok(text) => answer.deduction = Some(text),
+                    Err(why) => answer.deduction_note = Some(why),
+                }
+                vec![Event::LogicAnswer { answer: Some(Box::new(LogicAnswerView { generation, ..answer })) }]
+            }
             Command::LogicStop => {
                 if let Some(s) = &self.solving {
                     s.stop.store(true, Ordering::Relaxed);
@@ -485,12 +520,13 @@ impl Logics {
         if self.dirty() {
             return vec![notice("save or discard the open file's changes before making another".into(), NoticeLevel::Warn)];
         }
-        let start = match kind {
-            "worksheet" => WORKSHEET,
-            "theory" => THEORY,
-            other => return vec![notice(format!("“{other}” is not a kind of file to make: a theory or a worksheet"), NoticeLevel::Warn)],
+        let (start, ext) = match kind {
+            "worksheet" => (WORKSHEET, "logic"),
+            "theory" => (THEORY, "logic"),
+            "proof" => (PROOF, "proof"),
+            other => return vec![notice(format!("“{other}” is not a kind of file to make: a theory, a worksheet or a proof"), NoticeLevel::Warn)],
         };
-        let rel = format!("{}.logic", slug(name));
+        let rel = format!("{}.{ext}", slug(name));
         let file = match inside(root, &rel) {
             Ok(f) => f,
             Err(why) => return vec![notice(why, NoticeLevel::Warn)],
@@ -557,7 +593,7 @@ impl Logics {
     pub fn file_event(&self) -> Event {
         Event::LogicFile {
             file: self.open.as_ref().map(|o| {
-                let (diagnostics, notes) = diagnose(&o.text, o.kind == "l4f");
+                let (diagnostics, notes, checks) = diagnose(&o.text, &o.kind);
                 Box::new(LogicFileView {
                     path: o.shown_path.clone(),
                     name: o.name.clone(),
@@ -567,6 +603,7 @@ impl Logics {
                     generation: o.generation,
                     diagnostics,
                     notes,
+                    checks,
                 })
             }),
         }
@@ -591,6 +628,21 @@ of: person -> age  one-to-one
 of(Ann) > of(Bo)
 of(Cy) != 3
 ";
+
+const PROOF: &str = "\
+# A proof: its premises and goal, then its lines — each its number, a bar |
+# for each subproof it is in, the formula, its rule and the lines it uses.
+system fitch
+premises p -> q, q -> r
+goal p -> r
+
+1  p -> q        premise
+2  q -> r        premise
+3  | p           assume
+";
+
+/// How long a natural-deduction proof is searched for.
+const FIND_TIME: Duration = Duration::from_secs(3);
 
 /// A search's outcome as the window draws it.
 fn models_view(c: &Checked, out: &Outcome, generation: u32, counted: bool) -> LogicModelsView {
@@ -665,14 +717,67 @@ pub fn model_view(c: &Checked, m: &Model) -> LogicModelView {
     LogicModelView { sizes: m.sizes.iter().map(|(k, v)| (k.clone(), *v)).collect(), tables }
 }
 
-/// What is wrong with the file as a whole, and Logic4Fun's notes.
-fn diagnose(text: &str, l4f: bool) -> (Vec<LogicDiag>, Vec<String>) {
-    match proton_logic::read(text, l4f) {
-        Err(d) => (vec![LogicDiag { line: d.line as u32, col: d.col as u32, message: d.message }], Vec::new()),
+/// What is wrong with the file as a whole, Logic4Fun's notes, and a
+/// proof's lines checked.
+fn diagnose(text: &str, kind: &str) -> (Vec<LogicDiag>, Vec<String>, Vec<(u32, bool)>) {
+    let diag = |d: proton_logic::Diag| LogicDiag { line: d.line as u32, col: d.col as u32, message: d.message };
+    if kind == "proof" {
+        let f = fitch::read(text);
+        let c = fitch::check(&f);
+        let mut diags: Vec<LogicDiag> = f.unread.into_iter().map(diag).collect();
+        diags.extend(c.lines.iter().filter(|l| !l.ok).map(|l| LogicDiag { line: l.at as u32, col: 0, message: format!("{}: {}", l.n, l.message) }));
+        diags.sort_by_key(|d| d.line);
+        return (diags, Vec::new(), c.lines.iter().map(|l| (l.at as u32, l.ok)).collect());
+    }
+    match proton_logic::read(text, kind == "l4f") {
+        Err(d) => (vec![diag(d)], Vec::new(), Vec::new()),
         Ok((theory, notes)) => match check(&theory) {
-            Ok(_) => (Vec::new(), notes),
-            Err(ds) => (ds.into_iter().map(|d| LogicDiag { line: d.line as u32, col: d.col as u32, message: d.message }).collect(), notes),
+            Ok(_) => (Vec::new(), notes, Vec::new()),
+            Err(ds) => (ds.into_iter().map(diag).collect(), notes, Vec::new()),
         },
+    }
+}
+
+/// A line of a `.proof` file answered: its check, with the proof's; on the
+/// header or a line that is not one of the proof's, the proof's alone.
+pub fn answer_proof(text: &str, line: usize) -> LogicAnswerView {
+    let f = fitch::read(text);
+    let c = fitch::check(&f);
+    let whole = |ok: bool, message: String| LogicProofView { n: None, rule: None, ok, message, complete: c.complete, summary: c.summary.clone() };
+    let mut v = LogicAnswerView { line: line as u32, kind: "proof".into(), ..Default::default() };
+    if let Some(d) = f.unread.iter().find(|d| d.line == line) {
+        v.text = text.lines().nth(line - 1).unwrap_or("").trim().to_string();
+        v.proof = Some(whole(false, d.message.clone()));
+    } else if let Some(k) = c.lines.iter().position(|l| l.at == line) {
+        let (l, p) = (&c.lines[k], &f.lines[k]);
+        v.text = print::expr(&p.formula);
+        v.proof = Some(LogicProofView { n: Some(l.n as u32), rule: Some(fitch::rule_name(p.rule).to_string()), ok: l.ok, message: l.message.clone(), ..whole(l.ok, String::new()) });
+    } else {
+        v.line = 0;
+        let premises = f.premises.iter().map(print::expr).collect::<Vec<_>>().join(", ");
+        v.text = match &f.goal {
+            Some(g) if premises.is_empty() => format!("⊢ {}", print::expr(g)),
+            Some(g) => format!("{premises} ⊢ {}", print::expr(g)),
+            None => premises,
+        };
+        v.proof = Some(whole(c.complete, if f.goal.is_none() { "the header names no goal: goal A".into() } else { String::new() }));
+    }
+    v
+}
+
+/// The argument a natural-deduction proof is found for: a `.proof` file's
+/// header, or the question at `line` of another file.
+fn argument_at(text: &str, kind: &str, line: usize) -> Result<(Vec<proton_logic::Expr>, proton_logic::Expr), String> {
+    if kind == "proof" {
+        let f = fitch::read(text);
+        return f.goal.map(|g| (f.premises, g)).ok_or_else(|| "the header names no goal to prove: goal A".to_string());
+    }
+    let (theory, _) = proton_logic::read(text, kind == "l4f").map_err(|d| format!("line {}: {}", d.line, d.message))?;
+    let item = theory.lines.iter().rev().find(|l| l.at <= line && l.at > 0).and_then(|l| l.item.clone());
+    match item {
+        Some(Item::Question(Question::Entails(premises, goal))) => Ok((premises, goal)),
+        Some(Item::Question(Question::Formula(goal)) | Item::Constraint(goal)) => Ok((Vec::new(), goal)),
+        _ => Err("this line is not an argument or a formula".into()),
     }
 }
 
@@ -964,6 +1069,15 @@ mod tests {
         v.elapsed_ms = 1;
         println!("THEORY {}", serde_json::to_string(THEORY).unwrap());
         println!("MODELS {}", serde_json::to_string(&v).unwrap());
+        let mut proofs = serde_json::Map::new();
+        for line in 1..=PROOF.lines().count() {
+            proofs.insert(line.to_string(), serde_json::to_value(answer_proof(PROOF, line)).unwrap());
+        }
+        println!("PROOF {}", serde_json::to_string(PROOF).unwrap());
+        println!("PROOF_ANSWERS {}", serde_json::Value::Object(proofs));
+        println!("PROOF_CHECKS {}", serde_json::to_string(&diagnose(PROOF, "proof").2).unwrap());
+        let (premises, goal) = argument_at(PROOF, "proof", 1).unwrap();
+        println!("FOUND {}", serde_json::to_string(&fitch::find(&premises, &goal, FIND_TIME).unwrap()).unwrap());
     }
 
     /// Solved on its thread, and polled until it says it is done.
@@ -1139,7 +1253,7 @@ mod tests {
         let a = answer_line(text, false, 3, false);
         assert_eq!(a.kind, "theory");
         assert_eq!(answer_line(text, false, 4, false).kind, "error");
-        let (diags, _) = diagnose(text, false);
+        let (diags, _, _) = diagnose(text, "logic");
         assert_eq!(diags[0].line, 4);
     }
 
@@ -1164,6 +1278,40 @@ mod tests {
         let a = answer(&l.apply(&root, Command::LogicFromTable { names: String::new(), column: "011".into() }));
         assert_eq!(a.kind, "error");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_proof_is_made_checked_line_by_line_and_found() {
+        let root = scratch("proof");
+        let mut l = Logics::default();
+        let events = l.apply(&root, Command::LogicNew { name: "Syllogism".into(), kind: "proof".into() });
+        let f = file(&events).unwrap();
+        assert_eq!((f.path.as_str(), f.kind.as_str()), ("syllogism.proof", "proof"));
+        assert!(f.diagnostics.is_empty(), "{:?}", f.diagnostics);
+        // The starter's three lines, each right; the goal not reached yet.
+        assert_eq!(f.checks.iter().map(|c| c.1).collect::<Vec<_>>(), vec![true, true, true]);
+        let at = |text: &str, n: &str| text.lines().position(|l| l.starts_with(n)).unwrap() + 1;
+        let a = answer(&l.apply(&root, Command::LogicAsk { generation: f.generation, line: at(&f.text, "3 ") as u32, more: false }));
+        let p = a.proof.clone().unwrap();
+        assert_eq!((a.kind.as_str(), a.text.as_str(), p.n, p.rule.as_deref(), p.ok, p.complete), ("proof", "p", Some(3), Some("assume"), true, false));
+        assert!(p.summary.contains("not reached"), "{}", p.summary);
+        // A wrong line is a diagnostic, and its answer says what is wrong.
+        let text = format!("{}4  | r           →E 2, 3\n", f.text);
+        let f = file(&l.apply(&root, Command::LogicEdit { generation: f.generation, text: text.clone() })).unwrap();
+        assert_eq!(f.diagnostics.iter().map(|d| d.line as usize).collect::<Vec<_>>(), vec![at(&text, "4 ")]);
+        let a = answer(&l.apply(&root, Command::LogicAsk { generation: f.generation, line: at(&text, "4 ") as u32, more: false }));
+        assert!(!a.proof.as_ref().unwrap().ok && a.proof.unwrap().message.contains("→E needs"));
+        // On the header: the argument, and the proof found for it, checked.
+        let a = answer(&l.apply(&root, Command::LogicProve { generation: f.generation, line: 2 }));
+        assert_eq!((a.line, a.text.as_str()), (0, "p -> q, q -> r ⊢ p -> r"));
+        let found = a.deduction.expect("a proof");
+        let c = fitch::check(&fitch::read(&found));
+        assert!(c.complete, "{found}");
+        // From a worksheet's argument too; and none for one that does not hold.
+        let sheet = "? p, p -> q |= q\n? q, p -> q |= p\n";
+        assert!(fitch::check(&fitch::read(&argument_at(sheet, "logic", 1).and_then(|(p, g)| fitch::find(&p, &g, FIND_TIME)).unwrap())).complete);
+        assert!(argument_at(sheet, "logic", 2).and_then(|(p, g)| fitch::find(&p, &g, Duration::from_millis(300))).is_err());
+        assert!(l.apply(&root, Command::LogicSave).iter().any(|e| matches!(e, Event::LogicHome { files } if files.iter().any(|f| f.kind == "proof"))));
     }
 
     #[test]

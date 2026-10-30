@@ -2,6 +2,7 @@
 import type { LogicColumn } from "./LogicColumn";
 import type { LogicForm } from "./LogicForm";
 import type { LogicModelView } from "./LogicModelView";
+import type { LogicProofView } from "./LogicProofView";
 import type { LogicTabView } from "./LogicTabView";
 
 /**
@@ -70,4 +71,13 @@ counter: LogicModelView | null,
 /**
  * For a propositional one: its open branch's literals.
  */
-open: Array<[string, boolean]>, };
+open: Array<[string, boolean]>, 
+/**
+ * For a line of a `.proof` file: its check, and the proof's.
+ */
+proof: LogicProofView | null, 
+/**
+ * A natural-deduction proof found, as a `.proof` file's text; or why
+ * none was.
+ */
+deduction: string | null, deductionNote: string | null, };

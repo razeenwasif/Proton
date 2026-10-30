@@ -151,9 +151,9 @@ goal p -> r
 1  p -> q          premise
 2  q -> r          premise
 3  | p             assume
-4  | q             ->E 1, 3
-5  | r             ->E 2, 4
-6  p -> r          ->I 3-5
+4  | q             →E 1, 3
+5  | r             →E 2, 4
+6  p -> r          →I 3-5
 ```
 
 - **Semantic tableaux:** propositional, and first-order with free variables
@@ -339,6 +339,33 @@ line numbered with where it came from and each branch closed (× and the two
 lines) or open (○). Checked on modus ponens line by line, the textbook's
 propositional arguments, Barbara, both quantifier swaps, the drinker,
 Pelletier's 20 and 26, and countermodels checked by the evaluator.
+L6 — natural deduction, Fitch style (`fitch`). A `.proof` file's header
+names its premises and goal; each line after is read from the right — what
+it cites, then its rule, then the formula — so a line that cannot be read
+is said and the rest still checked. Rules are written by *forall x*'s names
+(`∧E`, `→I`, `¬E`, `IP`, `∀E`, `=E`…) and read by the others courses use —
+`->E`, `⊃E`, `MP`, `Simp`, `Conj`, `RAA` either way, `modus tollens`,
+`ex falso` — as the person said none. Each line is checked against its rule:
+what it cites must be before it and not inside a subproof that has ended; a
+subproof cited must have ended just there, in a subproof still open; a bar
+too many needs an assumption above it; `∀I` and `∃E` need a name nothing
+still assumed, nor the conclusion, mentions; `=E` puts equals for equals in
+some places or all. A mistake is said on its line in words (“→E needs q,
+the antecedent of 2: line 3 is p”), and a proof is complete when every line
+is right and the last, outside every subproof, is the goal. Proofs are found
+by a search back from the goal by its introduction rule and forward from
+what is had by the elimination rules — cases split on a disjunction or an
+existential, universals instantiated with the names about, indirect proof
+last — searched shallow first, so what it finds is short: De Morgan's
+`¬(p ∧ q) ⊢ ¬p ∨ ¬q` in 13 lines, `¬∀x P(x) ⊢ ∃x ¬P(x)` in 9, Peirce's law
+in 11, each in under a millisecond. What it finds is written as a `.proof`
+file and checked as any proof is, before it is shown. In the window a proof
+file's lines are coloured (numbers, bars, rules), marked right or wrong in
+the gutter, and the line at the caret answered with its rule's check and
+the proof's; Find a proof shows one under the header, and Write it in puts
+its lines in place of the file's, as typing would (⌘Z takes them back). A
+valid argument in a worksheet offers its natural-deduction proof too, to
+copy as a `.proof` file.
 
 | | What | Proved by |
 |---|---|---|
@@ -374,7 +401,6 @@ slow in earnest.
 
 ## Open
 
-- **Which rules Fitch uses.** Courses name the rules differently (`->E`,
-  `MP`, `⊃E`; `RAA` or `¬I`). Proton will read the common names for each and
-  write `forall x`'s (the open textbook) unless the person's course uses
-  others — the person to say which, before L6.
+- **Which rules Fitch uses.** Settled at L6: Proton writes *forall x*'s
+  names and reads the common others; a course with names of its own is a
+  line in `fitch::RULES`.

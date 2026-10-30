@@ -9,10 +9,12 @@
 //!   equivalence, and a formula for a truth table.
 //! - [`solve`]: the model finder: a theory's models, found and counted.
 //! - [`tableau`]: semantic tableaux: arguments proved, or refuted.
+//! - [`fitch`]: natural deduction: `.proof` files checked, proofs found.
 
 pub mod ast;
 pub mod calc;
 pub mod eval;
+pub mod fitch;
 pub mod l4f;
 pub mod lex;
 pub mod parse;

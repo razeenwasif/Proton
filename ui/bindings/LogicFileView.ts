@@ -8,4 +8,9 @@ export type LogicFileView = { path: string, name: string, kind: string, text: st
 /**
  * What a Logic4Fun file says that Proton does not keep.
  */
-notes: Array<string>, };
+notes: Array<string>, 
+/**
+ * For a proof: each of its lines' line in the file, and whether it is
+ * right.
+ */
+checks: Array<[number, boolean]>, };

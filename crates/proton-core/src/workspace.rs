@@ -1489,6 +1489,7 @@ impl Workspace {
             | Command::LogicAsk { .. }
             | Command::LogicSolve { .. }
             | Command::LogicStop
+            | Command::LogicProve { .. }
             | Command::LogicFromTable { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.logics.apply(&root, command);
