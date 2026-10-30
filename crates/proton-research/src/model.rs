@@ -295,6 +295,22 @@ pub struct Investigation {
     /// On for one made before there was Lean too: nothing leaves the machine.
     #[serde(default)]
     pub lean: LeanPolicy,
+    /// Where it was forked from, if it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked: Option<Forked>,
+}
+
+/// Where a fork came from: the investigation, by its folder and its title
+/// then, and the round it was taken after — none for as it stood.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "ResearchForked")]
+pub struct Forked {
+    pub from: String,
+    pub title: String,
+    pub round: Option<u32>,
+    /// Seconds since the epoch.
+    #[ts(type = "number")]
+    pub at: u64,
 }
 
 /// The format version of `investigation.json`.
@@ -318,6 +334,7 @@ impl Investigation {
             lab: LabPolicy::default(),
             literature: LiteraturePolicy::default(),
             lean: LeanPolicy::default(),
+            forked: None,
         }
     }
 

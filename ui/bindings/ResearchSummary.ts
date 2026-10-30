@@ -4,4 +4,8 @@ import type { ResearchDiscipline } from "./ResearchDiscipline";
 /**
  * An investigation in the list.
  */
-export type ResearchSummary = { slug: string, title: string, discipline: ResearchDiscipline, created: number, hypotheses: number, rounds: number, };
+export type ResearchSummary = { slug: string, title: string, discipline: ResearchDiscipline, created: number, hypotheses: number, rounds: number, 
+/**
+ * The title of what it was forked from, if it was.
+ */
+forkedFrom: string | null, };

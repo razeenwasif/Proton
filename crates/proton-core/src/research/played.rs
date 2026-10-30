@@ -807,6 +807,79 @@ fn the_scientist_tells_the_team_adds_a_hypothesis_and_it_is_played_with_theirs()
 }
 
 #[test]
+fn an_investigation_is_forked_after_a_round_or_as_it_stands_and_the_copy_says_where_it_came_from() {
+    let dir = root("fork");
+    let (factory, _) = Factory::new();
+    let mut research = begin(&dir, factory);
+    research.start_at(T0);
+    let (t, _) = play(&mut research, T0, 1);
+    let folder = Store::new(dir.join("research")).open(SLUG).unwrap();
+    assert_eq!(folder.round_ends(), [1], "the round's end was not kept");
+    let after_one: Vec<String> = folder.hypotheses().into_iter().map(|h| h.id).collect();
+    // Between rounds: something said, and the first hypothesis retired.
+    research.feedback("Only the zenith, from now on.");
+    research.set_status(&after_one[0], HypothesisStatus::Retired);
+    research.start_at(t + 10);
+    play(&mut research, t + 10, 1);
+    assert_eq!(folder.round_ends(), [1, 2]);
+    assert!(folder.hypotheses().iter().any(|h| h.round == 2), "the second round wrote nothing");
+
+    // After round 1: as it then was.
+    let events = research.fork(SLUG, Some(1), "Sky, polarisation first", "Look at polarisation before anything else.");
+    assert!(notices(&events).iter().any(|n| n == "Forked “Why is the sky blue?” after round 1 as “Sky, polarisation first”."), "{:?}", notices(&events));
+    let Some(Event::ResearchList { investigations, open, .. }) = events.iter().find(|e| matches!(e, Event::ResearchList { .. })) else { panic!("{events:?}") };
+    assert_eq!(open.as_deref(), Some("sky-polarisation-first"));
+    assert!(investigations.iter().any(|i| i.slug == "sky-polarisation-first" && i.forked_from.as_deref() == Some("Why is the sky blue?") && i.rounds == 1));
+    let board = events.iter().find_map(|e| match e {
+        Event::ResearchBoard { forked, brief, feedback, round_ends, .. } => Some((forked.clone(), brief.clone(), feedback.clone(), round_ends.clone())),
+        _ => None,
+    });
+    let (forked, brief, feedback, ends) = board.expect("the fork is drawn");
+    let forked = forked.expect("the fork does not say where it came from");
+    assert_eq!((forked.from.as_str(), forked.title.as_str(), forked.round), (SLUG, "Why is the sky blue?", Some(1)));
+    assert!(brief.starts_with("# Sky, polarisation first\n") && brief.contains("Explain the colour of the daytime sky.") && brief.contains("## Forked\n\nForked from *Why is the sky blue?* (`why-is-the-sky-blue`) after round 1"), "{brief}");
+    assert!(!feedback.contains("Only the zenith") && feedback.contains("## On forking, after round 1\n\nLook at polarisation before anything else."), "{feedback}");
+    assert_eq!(ends, [1]);
+    let fork = Store::new(dir.join("research")).open("sky-polarisation-first").unwrap();
+    let ids: Vec<String> = fork.hypotheses().into_iter().map(|h| h.id).collect();
+    assert_eq!(ids, after_one, "the fork has other hypotheses than round 1 left");
+    assert_eq!(fork.hypotheses()[0].status, HypothesisStatus::Active, "a status changed after the round is not the fork's");
+    assert!(fork.reviews().iter().all(|r| r.round == 1) && !fork.reviews().is_empty());
+    assert_eq!(fork.matches(), folder.matches().into_iter().filter(|m| m.round == 1).collect::<Vec<_>>());
+    assert_eq!(fork.overview(), folder.round_end(1).unwrap().overview);
+    assert!(!fork.dir().join("rounds/round-002.md").exists() && fork.dir().join("rounds/round-001.md").exists());
+    let tasks = std::fs::read_dir(fork.dir().join("tasks")).unwrap().count();
+    let first = std::fs::read_dir(folder.dir().join("tasks")).unwrap().flatten().filter(|e| {
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(e.path()).unwrap()).unwrap();
+        v["round"] == 1
+    });
+    assert_eq!(tasks, first.count());
+    assert!(!fork.state_path("round.json").exists() && !fork.state_path("transcripts").exists(), "the machine state came along");
+    // Its next round is round 2, and its numbers carry on from the copy's.
+    let events = research.start_at(t + 5000);
+    let next = events.iter().find_map(|e| match e {
+        Event::ResearchRound { round, slug, .. } if slug == "sky-polarisation-first" => Some(*round),
+        _ => None,
+    });
+    assert_eq!(next, Some(2));
+    play(&mut research, t + 5000, 1);
+
+    // As it stands: everything, the retired one retired.
+    let events = research.fork(SLUG, None, "Sky, again", "");
+    assert!(notices(&events).iter().any(|n| n == "Forked “Why is the sky blue?” as “Sky, again”."), "{:?}", notices(&events));
+    let again = Store::new(dir.join("research")).open("sky-again").unwrap();
+    assert_eq!(again.hypotheses().len(), folder.hypotheses().len());
+    assert_eq!(again.hypotheses()[0].status, HypothesisStatus::Retired);
+    assert!(again.feedback().contains("Only the zenith") && again.dir().join("rounds/round-002.md").exists());
+    assert_eq!(again.investigation().forked.as_ref().map(|f| f.round), Some(None));
+
+    // A round that left nothing to fork from, and a fork with no title.
+    assert!(notices(&research.fork(SLUG, Some(7), "Seven", "")).iter().any(|n| n.contains("Round 7 of Why is the sky blue? left nothing to fork from")));
+    assert!(notices(&research.fork(SLUG, None, "  ", "")).iter().any(|n| n == "A fork needs a title."));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn a_hypothesis_is_pinned_retired_and_brought_back() {
     let dir = root("status");
     let (factory, _) = Factory::new();

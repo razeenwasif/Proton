@@ -18,15 +18,37 @@
 //! runs/R005/           what running an experiment gave
 //! proofs/H004.lean     the leading hypothesis in Lean, as last checked, and
 //! proofs/H004.json     what that came to; proofs/H004/attempt-2/ each check
-//! rounds/round-002.md  what each round did
+//! rounds/round-002.md  what each round did, and round-002.json what it left:
+//!                      what is rewritten each round as it then was, to fork from
 //! tasks/T0031.json     every agent call, for provenance
 //! .investigation/      machine state: the lock, caches (not committed)
 //! ```
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 use crate::markdown;
-use crate::model::{next_id, Discipline, Experiment, Hypothesis, Investigation, Match, Paper, ProofRecord, Review};
+use crate::model::{next_id, Discipline, Experiment, ExperimentStatus, Forked, Hypothesis, HypothesisStatus, Investigation, Match, Paper, ProofRecord, Review};
+
+/// The files a round only ever adds to.
+const GROWING: [&str; 4] = ["VERDICT.md", "SANDBOX_LOG.md", "feedback.md", "tournament.jsonl"];
+
+/// What a round left at its end, kept beside its report so the
+/// investigation can be forked from there: what each round rewrites, as it
+/// then was, and how far what is only added to had grown.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoundEnd {
+    pub round: u32,
+    /// Seconds since the epoch.
+    pub at: u64,
+    pub statuses: BTreeMap<String, HypothesisStatus>,
+    /// Bytes, of each of [`GROWING`].
+    pub lengths: BTreeMap<String, u64>,
+    pub plan: String,
+    pub overview: String,
+}
 
 /// What an investigation keeps out of Git: its machine state, what runs
 /// write, and papers' PDFs — megabytes each, and other people's copyright.
@@ -104,12 +126,9 @@ impl Store {
         Folder::open(&self.root.join(slug))
     }
 
-    /// A new investigation, in a folder of its own named after its title.
-    pub fn create(&self, title: &str, goal: &str, discipline: Discipline, now: u64) -> Result<Folder, String> {
-        let title = title.trim();
-        if title.is_empty() {
-            return Err("An investigation needs a title.".into());
-        }
+    /// A folder for a new investigation, named after its title and not one
+    /// already here.
+    fn fresh(&self, title: &str) -> (String, PathBuf) {
         let base = slug(title);
         let mut name = base.clone();
         let mut n = 2;
@@ -118,6 +137,16 @@ impl Store {
             n += 1;
         }
         let dir = self.root.join(&name);
+        (name, dir)
+    }
+
+    /// A new investigation, in a folder of its own named after its title.
+    pub fn create(&self, title: &str, goal: &str, discipline: Discipline, now: u64) -> Result<Folder, String> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err("An investigation needs a title.".into());
+        }
+        let (name, dir) = self.fresh(title);
         let investigation = Investigation::new(title, discipline, now);
         let files: [(&str, String); 9] = [
             ("README.md", brief(title, goal, discipline)),
@@ -140,6 +169,190 @@ impl Store {
         folder.save(investigation)?;
         Ok(folder)
     }
+}
+
+impl Store {
+    /// A copy of an investigation to take another way: everything it had at
+    /// the end of `round` — or as it stands, given none — under a new title,
+    /// saying where it came from. Hypotheses, reviews, the tournament, the
+    /// experiments and their runs, the papers and their PDFs, the proofs, the
+    /// rounds' reports and the agents' calls come with it; its machine state
+    /// does not. Files are copied as the filesystem copies them, which on
+    /// APFS is a clone that costs nothing until one side changes.
+    pub fn fork(&self, from: &Folder, round: Option<u32>, title: &str, now: u64) -> Result<Folder, String> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err("A fork needs a title.".into());
+        }
+        let end = match round {
+            Some(r) => Some(from.round_end(r).ok_or_else(|| {
+                format!("Round {r} of {} left nothing to fork from: only rounds that ended once forking was possible did.", from.investigation.title)
+            })?),
+            None => None,
+        };
+        let within = |r: u32| end.as_ref().is_none_or(|e| r <= e.round);
+        let before = |t: u64| end.as_ref().is_none_or(|e| t <= e.at);
+        let src = from.dir();
+        let (name, dir) = self.fresh(title);
+        let made = (|| -> Result<(), String> {
+            for sub in ["hypotheses", "reviews", "experiments", "literature", "runs", "rounds", "tasks", "proofs", ".investigation"] {
+                std::fs::create_dir_all(dir.join(sub)).map_err(|e| format!("{}: {e}", dir.join(sub).display()))?;
+            }
+            for name in ["AGENTS.md", "CLAUDE.md", ".gitignore"] {
+                copy_file(&src.join(name), &dir.join(name))?;
+            }
+            let after = match &end {
+                Some(e) => format!("after round {}", e.round),
+                None => "as it stood".to_string(),
+            };
+            // Under its own title; the rest of the brief is the original's.
+            let brief = from.brief();
+            let heading = format!("# {}", from.investigation.title);
+            let brief = match brief.strip_prefix(&heading) {
+                Some(rest) => format!("# {title}{rest}"),
+                None => brief,
+            };
+            atomic_write(
+                &dir.join("README.md"),
+                format!(
+                    "{}
+
+## Forked
+
+Forked from *{}* (`{}`) {after}, to take another direction. What it found until then is here;                      what it does from now on is this investigation's own.
+",
+                    brief.trim_end(),
+                    from.investigation.title,
+                    from.slug
+                )
+                .as_bytes(),
+            )?;
+            for name in GROWING {
+                let mut bytes = std::fs::read(src.join(name)).unwrap_or_default();
+                if let Some(len) = end.as_ref().and_then(|e| e.lengths.get(name)) {
+                    bytes.truncate(*len as usize);
+                }
+                atomic_write(&dir.join(name), &bytes)?;
+            }
+            let (plan, overview) = match &end {
+                Some(e) => (e.plan.clone(), e.overview.clone()),
+                None => (from.plan(), from.overview()),
+            };
+            atomic_write(&dir.join("RESEARCH_PLAN.md"), plan.as_bytes())?;
+            atomic_write(&dir.join("overview.md"), overview.as_bytes())?;
+            let fork = Folder { dir: dir.clone(), slug: name.clone(), investigation: from.investigation.clone() };
+            for mut h in from.hypotheses().into_iter().filter(|h| within(h.round)) {
+                // Its standing as the round left it; one it does not name is as now.
+                match end.as_ref().and_then(|e| e.statuses.get(&h.id)) {
+                    Some(status) if *status != h.status => {
+                        h.status = *status;
+                        fork.write_hypothesis(&h)?;
+                    }
+                    _ => copy_file(&src.join("hypotheses").join(format!("{}.md", h.id)), &dir.join("hypotheses").join(format!("{}.md", h.id)))?,
+                }
+            }
+            for r in from.reviews().into_iter().filter(|r| within(r.round)) {
+                copy_file(&src.join("reviews").join(format!("{}.md", r.id)), &dir.join("reviews").join(format!("{}.md", r.id)))?;
+            }
+            // Runs before the round's end, and the experiments of its rounds:
+            // one whose run came later is waiting again, as it then was.
+            let mut runs = Vec::new();
+            for row in proton_lab_rows(&src.join("runs")).into_iter().filter(|(_, started)| before(*started)) {
+                copy_tree(&src.join("runs").join(&row.0), &dir.join("runs").join(&row.0))?;
+                runs.push(row.0);
+            }
+            for mut e in from.experiments().into_iter().filter(|e| within(e.round)) {
+                copy_tree(&src.join("experiments").join(&e.id), &dir.join("experiments").join(&e.id))?;
+                if e.run.as_ref().is_some_and(|r| !runs.contains(r)) {
+                    e.run = None;
+                    e.status = ExperimentStatus::Proposed;
+                    fork.write_experiment(&e)?;
+                }
+            }
+            for p in from.papers().into_iter().filter(|p| p.round.map_or(before(p.added), within)) {
+                for ext in ["md", "pdf"] {
+                    let file = src.join("literature").join(format!("{}.{ext}", p.id));
+                    if file.is_file() {
+                        copy_file(&file, &dir.join("literature").join(format!("{}.{ext}", p.id)))?;
+                    }
+                }
+            }
+            for proof in from.proofs().into_iter().filter(|p| within(p.round)) {
+                let h = &proof.hypothesis;
+                for ext in ["json", "lean"] {
+                    copy_file(&src.join("proofs").join(format!("{h}.{ext}")), &dir.join("proofs").join(format!("{h}.{ext}")))?;
+                }
+                if src.join("proofs").join(h).is_dir() {
+                    copy_tree(&src.join("proofs").join(h), &dir.join("proofs").join(h))?;
+                }
+            }
+            for entry in std::fs::read_dir(src.join("rounds")).map_err(|e| e.to_string())?.flatten() {
+                let file = entry.file_name().to_string_lossy().to_string();
+                let n = file.strip_prefix("round-").and_then(|r| r.split('.').next()).and_then(|r| r.parse::<u32>().ok());
+                if n.is_some_and(within) {
+                    copy_file(&entry.path(), &dir.join("rounds").join(&file))?;
+                }
+            }
+            if let Ok(entries) = std::fs::read_dir(src.join("tasks")) {
+                for entry in entries.flatten() {
+                    let record: serde_json::Value = std::fs::read_to_string(entry.path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+                    if record["round"].as_u64().is_none_or(|r| within(r as u32)) {
+                        copy_file(&entry.path(), &dir.join("tasks").join(entry.file_name()))?;
+                    }
+                }
+            }
+            let mut investigation = from.investigation.clone();
+            investigation.title = title.to_string();
+            investigation.created = now;
+            investigation.forked = Some(Forked { from: from.slug.clone(), title: from.investigation.title.clone(), round, at: now });
+            let mut fork = fork;
+            fork.save(investigation)
+        })();
+        match made {
+            Ok(()) => Folder::open(&dir),
+            Err(why) => {
+                // Half a fork is no fork.
+                let _ = std::fs::remove_dir_all(&dir);
+                Err(why)
+            }
+        }
+    }
+}
+
+/// A run's folder name and when it started, from its record.
+fn proton_lab_rows(runs: &Path) -> Vec<(String, u64)> {
+    let Ok(entries) = std::fs::read_dir(runs) else { return Vec::new() };
+    entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(e.path().join("run.json")).ok()?).ok()?;
+            Some((e.file_name().to_string_lossy().to_string(), record["started"].as_u64().unwrap_or(0)))
+        })
+        .collect()
+}
+
+/// A file copied, if it is there; a link is not followed.
+fn copy_file(from: &Path, to: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(from) {
+        Ok(meta) if meta.is_file() => std::fs::copy(from, to).map(|_| ()).map_err(|e| format!("{}: {e}", from.display())),
+        _ => Ok(()),
+    }
+}
+
+/// A folder copied whole, files and folders; links are left behind, so a
+/// copy never reaches outside what it copies.
+fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| format!("{}: {e}", to.display()))?;
+    for entry in std::fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))?.flatten() {
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
+            copy_tree(&entry.path(), &to.join(entry.file_name()))?;
+        } else if kind.is_file() {
+            copy_file(&entry.path(), &to.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
 }
 
 fn brief(title: &str, goal: &str, discipline: Discipline) -> String {
@@ -464,6 +677,37 @@ impl Folder {
         atomic_write(&self.dir.join("rounds").join(format!("round-{round:03}.md")), text.as_bytes())
     }
 
+    /// Keep what a round left, as it ends, to fork from later.
+    pub fn keep_round_end(&self, round: u32, at: u64) -> Result<(), String> {
+        let end = RoundEnd {
+            round,
+            at,
+            statuses: self.hypotheses().into_iter().map(|h| (h.id, h.status)).collect(),
+            lengths: GROWING
+                .iter()
+                .map(|name| (name.to_string(), std::fs::metadata(self.dir.join(name)).map(|m| m.len()).unwrap_or(0)))
+                .collect(),
+            plan: self.plan(),
+            overview: self.overview(),
+        };
+        let text = serde_json::to_string_pretty(&end).map_err(|e| e.to_string())? + "\n";
+        atomic_write(&self.dir.join("rounds").join(format!("round-{round:03}.json")), text.as_bytes())
+    }
+
+    /// What a round left at its end, if it was kept.
+    pub fn round_end(&self, round: u32) -> Option<RoundEnd> {
+        serde_json::from_str(&std::fs::read_to_string(self.dir.join("rounds").join(format!("round-{round:03}.json"))).ok()?).ok()
+    }
+
+    /// The rounds that can be forked from, in order.
+    pub fn round_ends(&self) -> Vec<u32> {
+        let mut rounds: Vec<u32> = std::fs::read_dir(self.dir.join("rounds"))
+            .map(|entries| entries.flatten().filter_map(|e| e.file_name().to_str()?.strip_prefix("round-")?.strip_suffix(".json")?.parse().ok()).collect())
+            .unwrap_or_default();
+        rounds.sort_unstable();
+        rounds
+    }
+
     /// An agent call's record: what it was asked, what it answered, who
     /// and when — the provenance every hypothesis and review points at.
     pub fn write_task(&self, id: &str, record: &serde_json::Value) -> Result<(), String> {
@@ -480,7 +724,7 @@ impl Folder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Author, HypothesisStatus, Seat};
+    use crate::model::{Author, Seat};
 
     fn root(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("proton-research-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
@@ -559,6 +803,71 @@ mod tests {
         // A hypothesis file broken by hand does not hide the others.
         std::fs::write(folder.dir().join("hypotheses").join("H009.md"), "no front matter").unwrap();
         assert_eq!(folder.hypotheses().len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_fork_after_a_round_has_what_the_round_left_and_no_more() {
+        let dir = root("fork");
+        let store = Store::new(&dir);
+        let folder = store.create("Sky", "Explain it.", Discipline::Physics, 1).unwrap();
+        let mut late = hypothesis("H002");
+        late.round = 2;
+        folder.write_hypothesis(&hypothesis("H001")).unwrap();
+        // The experiment of round 1, run after the round had ended.
+        let experiment = Experiment {
+            id: "E001".into(),
+            hypothesis: Some("H001".into()),
+            proposer: Author::new(Seat::Codex, "gpt-6.1-sol"),
+            round: 1,
+            status: ExperimentStatus::Done,
+            task: None,
+            run: Some("R001".into()),
+            purpose: "Measure it.".into(),
+            expectation: "Blue.".into(),
+            code: "print(1)\n".into(),
+        };
+        folder.write_experiment(&experiment).unwrap();
+        let paper = |id: &str, added: u64| Paper { id: id.into(), added, round: None, record: crate::model::Record { title: format!("Paper {id}"), ..Default::default() }, ..Default::default() };
+        folder.write_paper(&paper("P001", 300)).unwrap();
+        std::fs::write(folder.dir().join("literature/P001.pdf"), b"%PDF-1.4").unwrap();
+        folder.add_feedback("Before.", "Before round 1").unwrap();
+        folder.keep_round_end(1, 400).unwrap();
+
+        folder.write_hypothesis(&late).unwrap();
+        folder.add_feedback("After.", "Before round 2").unwrap();
+        folder.write_paper(&paper("P002", 600)).unwrap();
+        let run = folder.dir().join("runs/R001");
+        std::fs::create_dir_all(run.join("figures")).unwrap();
+        std::fs::write(run.join("run.json"), r#"{"id": "R001", "started": 500}"#).unwrap();
+        let mut ran = experiment.clone();
+        ran.status = ExperimentStatus::Done;
+        folder.write_experiment(&ran).unwrap();
+        std::fs::write(folder.dir().join(".investigation/round.json"), "{}").unwrap();
+
+        let fork = store.fork(&folder, Some(1), "Sky, again", 900).unwrap();
+        assert_eq!(fork.hypotheses().iter().map(|h| h.id.as_str()).collect::<Vec<_>>(), ["H001"]);
+        assert!(fork.feedback().contains("Before.") && !fork.feedback().contains("After."));
+        assert_eq!(fork.papers().iter().map(|p| (p.id.as_str(), p.has_pdf)).collect::<Vec<_>>(), [("P001", true)]);
+        // Its run came later: it waits to be run again.
+        assert!(!fork.dir().join("runs/R001").exists());
+        let e = &fork.experiments()[0];
+        assert_eq!((e.status, e.run.as_deref(), e.code.as_str()), (ExperimentStatus::Proposed, None, "print(1)\n"));
+        assert!(!fork.state_path("round.json").exists());
+        assert_eq!(fork.investigation().forked, Some(Forked { from: "sky".into(), title: "Sky".into(), round: Some(1), at: 900 }));
+        assert_eq!((fork.investigation().title.as_str(), fork.investigation().created), ("Sky, again", 900));
+
+        // As it stands, the run comes too — but a link in it is not followed.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.join("sky/README.md"), run.join("figures/brief.md")).unwrap();
+        let now = store.fork(&folder, None, "Sky, now", 950).unwrap();
+        assert!(now.dir().join("runs/R001/run.json").is_file() && now.dir().join("runs/R001/figures").is_dir());
+        assert!(!now.dir().join("runs/R001/figures/brief.md").exists());
+        assert_eq!(now.experiments()[0].status, ExperimentStatus::Done);
+        assert_eq!(now.hypotheses().len(), 2);
+        // A round that left nothing makes no folder.
+        assert!(store.fork(&folder, Some(3), "Sky, never", 1000).is_err());
+        assert!(!dir.join("sky-never").exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 

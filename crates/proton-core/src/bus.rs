@@ -13,7 +13,7 @@ use proton_research::supervisor::{RoundStatus, TaskRow as ResearchTask};
 use proton_research::view::{
     HypothesisDetail, HypothesisRow, LiteratureSourceRow, PaperDetail, PaperResult, PaperRow, SeatRow as ResearchSeatRow, Summary as ResearchSummary,
 };
-use proton_research::model::{HypothesisStatus, LiteratureSource, Seat as ResearchSeat};
+use proton_research::model::{Forked as ResearchForked, HypothesisStatus, LiteratureSource, Seat as ResearchSeat};
 use proton_research::Discipline as ResearchDiscipline;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -349,6 +349,16 @@ pub enum Command {
     /// Show one of the project's investigations.
     ResearchOpen {
         slug: String,
+    },
+    /// Copy an investigation to take another direction: all it had at the
+    /// end of `round`, or as it stands given none, under a new title; the
+    /// direction, if given, is the scientist's first word to the copy.
+    ResearchFork {
+        slug: String,
+        round: Option<u32>,
+        title: String,
+        #[serde(default)]
+        direction: String,
     },
     /// Show one hypothesis of the open investigation, or none.
     ResearchShow {
@@ -1882,6 +1892,10 @@ pub enum Event {
         /// What the scientist has told the team.
         feedback: String,
         hypotheses: Vec<HypothesisRow>,
+        /// Where it was forked from, if it was.
+        forked: Option<ResearchForked>,
+        /// The rounds it can be forked from, by their ends kept.
+        round_ends: Vec<u32>,
     },
     /// One hypothesis of the open investigation, whole; `None` for none.
     #[serde(rename_all = "camelCase")]

@@ -1194,7 +1194,8 @@ impl Driver {
                 Effect::Overview(text) => f.write_overview(&text),
                 Effect::Verdict(text) => f.add_verdict(&text),
                 Effect::SandboxLog(text) => f.add_sandbox_log(&text),
-                Effect::RoundReport { round, text } => f.write_round(round, &text),
+                // What the round left is kept beside its report, to fork from.
+                Effect::RoundReport { round, text } => f.write_round(round, &text).and_then(|()| f.keep_round_end(round, super::now())),
                 Effect::Proof(kept) => f.write_proof(&kept.record, &kept.lean),
             };
             match written {

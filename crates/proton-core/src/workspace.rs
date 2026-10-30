@@ -1300,6 +1300,7 @@ impl Workspace {
             | Command::StudySaveImage { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
             Command::ResearchNew { title, goal, discipline, literature } => self.research().create(&title, &goal, discipline, literature),
             Command::ResearchOpen { slug } => self.research().open(&slug),
+            Command::ResearchFork { slug, round, title, direction } => self.research().fork(&slug, round, &title, &direction),
             Command::ResearchShow { hypothesis } => self.research().show(hypothesis),
             Command::ResearchStart => self.research().start(),
             Command::ResearchPause => self.research().pause(),

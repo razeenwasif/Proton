@@ -787,6 +787,8 @@ impl Research {
                 sandbox: folder.sandbox_log(),
                 feedback: folder.feedback(),
                 hypotheses: board.rows(),
+                forked: i.forked.clone(),
+                round_ends: folder.round_ends(),
             },
             Event::ResearchHypothesis { slug: slug.clone(), detail: self.showing.as_deref().and_then(|id| board.detail(id)) },
         ];
@@ -843,6 +845,37 @@ impl Research {
             }
             Err(why) => vec![notice(why, NoticeLevel::Error)],
         }
+    }
+
+    /// Fork an investigation and open the fork. Forking as it stands waits
+    /// for a round under way; a round that has ended can be forked from at
+    /// any time.
+    pub fn fork(&mut self, slug: &str, round: Option<u32>, title: &str, direction: &str) -> Vec<Event> {
+        let from = match self.store.open(slug) {
+            Ok(folder) => folder,
+            Err(why) => return vec![notice(why, NoticeLevel::Error)],
+        };
+        if round.is_none() && self.driver(slug).is_some_and(|d| !matches!(d.status(), RoundStatus::Idle)) {
+            return vec![notice("A round is under way: fork from a round that has ended, or once this one has.".into(), NoticeLevel::Warn)];
+        }
+        let fork = match self.store.fork(&from, round, title, now()) {
+            Ok(fork) => fork,
+            Err(why) => return vec![notice(why, NoticeLevel::Error)],
+        };
+        if !direction.trim().is_empty() {
+            let when = match round {
+                Some(r) => format!("On forking, after round {r}"),
+                None => "On forking".to_string(),
+            };
+            if let Err(why) = fork.add_feedback(direction, &when) {
+                return vec![notice(format!("Forked, but the direction was not kept: {why}"), NoticeLevel::Warn)];
+            }
+        }
+        let slug = fork.slug().to_string();
+        let mut events = self.open(&slug);
+        let after = round.map(|r| format!(" after round {r}")).unwrap_or_default();
+        events.push(notice(format!("Forked “{}”{after} as “{}”.", from.investigation().title, fork.investigation().title), NoticeLevel::Info));
+        events
     }
 
     pub fn open(&mut self, slug: &str) -> Vec<Event> {

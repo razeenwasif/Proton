@@ -54,6 +54,7 @@ import type { PluginView } from "./PluginView";
 import type { ProposalView } from "./ProposalView";
 import type { RepoFile } from "./RepoFile";
 import type { ResearchDiscipline } from "./ResearchDiscipline";
+import type { ResearchForked } from "./ResearchForked";
 import type { ResearchSeatRow } from "./ResearchSeatRow";
 import type { ResearchSummary } from "./ResearchSummary";
 import type { ResearchTask } from "./ResearchTask";
@@ -261,7 +262,15 @@ folders: Array<ChatFolder>, active: string, busy: Array<string>, waiting: Array<
 /**
  * What the scientist has told the team.
  */
-feedback: string, hypotheses: Array<HypothesisRow>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "researchLab", slug: string, experiments: Array<ExperimentRow>, runs: Array<LabRun>, sandbox: LabSandbox, 
+feedback: string, hypotheses: Array<HypothesisRow>, 
+/**
+ * Where it was forked from, if it was.
+ */
+forked: ResearchForked | null, 
+/**
+ * The rounds it can be forked from, by their ends kept.
+ */
+roundEnds: Array<number>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "researchLab", slug: string, experiments: Array<ExperimentRow>, runs: Array<LabRun>, sandbox: LabSandbox, 
 /**
  * Whether what the agents propose runs, in the sandbox, without asking.
  */

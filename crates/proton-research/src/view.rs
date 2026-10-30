@@ -27,15 +27,28 @@ pub struct Summary {
     pub created: u64,
     pub hypotheses: u32,
     pub rounds: u32,
+    /// The title of what it was forked from, if it was.
+    pub forked_from: Option<String>,
 }
 
 pub fn summary(folder: &Folder) -> Summary {
-    let rounds = std::fs::read_dir(folder.dir().join("rounds")).map(|e| e.flatten().count() as u32).unwrap_or(0);
+    // A round's report, not what it left beside it to fork from.
+    let rounds = std::fs::read_dir(folder.dir().join("rounds"))
+        .map(|e| e.flatten().filter(|f| f.path().extension().is_some_and(|x| x == "md")).count() as u32)
+        .unwrap_or(0);
     let hypotheses = std::fs::read_dir(folder.dir().join("hypotheses"))
         .map(|e| e.flatten().filter(|f| f.path().extension().is_some_and(|x| x == "md")).count() as u32)
         .unwrap_or(0);
     let i = folder.investigation();
-    Summary { slug: folder.slug().to_string(), title: i.title.clone(), discipline: i.discipline, created: i.created, hypotheses, rounds }
+    Summary {
+        slug: folder.slug().to_string(),
+        title: i.title.clone(),
+        discipline: i.discipline,
+        created: i.created,
+        hypotheses,
+        rounds,
+        forked_from: i.forked.as_ref().map(|f| f.title.clone()),
+    }
 }
 
 /// A hypothesis on the leaderboard.
