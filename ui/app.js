@@ -3374,6 +3374,9 @@ function renderEvent(event) {
     case "logicAnswer":
       logic?.answer(event);
       break;
+    case "logicModels":
+      logic?.models(event);
+      break;
 
     case "circuitHome":
       circuit?.home(event);

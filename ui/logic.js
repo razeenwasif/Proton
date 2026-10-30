@@ -1,5 +1,6 @@
 /* Logic: a project's .logic, .proof and .l4f files, the one open as typed,
- * and what the statement at the cursor is (docs/LOGIC.md).
+ * and what the statement at the cursor is (docs/LOGIC.md); and a theory's
+ * models, found by the core's search on a thread and shown one at a time.
  *
  * The editor is a textarea under its own colouring, as Notebook's coding
  * practice has: what is typed is the browser's, undo and input methods too.
@@ -15,6 +16,8 @@ import { drawKmap } from "./kmap.js";
 /** @typedef {import("./bindings/LogicFound").LogicFound} Found */
 /** @typedef {import("./bindings/LogicFileView").LogicFileView} FileView */
 /** @typedef {import("./bindings/LogicAnswerView").LogicAnswerView} Answer */
+/** @typedef {import("./bindings/LogicModelsView").LogicModelsView} Models */
+/** @typedef {import("./bindings/LogicTableView").LogicTableView} Table */
 
 /** No more rows of a truth table than this are drawn. */
 const MOST_ROWS = 256;
@@ -87,6 +90,11 @@ export function createLogic(host) {
     typedAt: 0,
     /** The from-a-table form's last values, kept across answers. */
     names: "", column: "",
+    /** The last search, and which of its models is shown. @type {Models | null} */
+    models: null,
+    shownModel: 0,
+    /** Which the panel shows: the line's answer, or the theory's models. */
+    view: /** @type {"line" | "models"} */ ("line"),
   };
   let editTimer = 0, askTimer = 0;
 
@@ -188,7 +196,13 @@ export function createLogic(host) {
   els.text.addEventListener("keyup", moved);
   els.text.addEventListener("click", moved);
   els.text.addEventListener("keydown", (e) => {
-    if (e.metaKey && e.key === "Enter") {
+    if (e.metaKey && e.shiftKey && e.key === "Enter") {
+      e.preventDefault();
+      solve(false);
+    } else if (e.key === "Escape" && state.models?.running) {
+      e.preventDefault();
+      host.dispatch({ type: "logicStop" });
+    } else if (e.metaKey && e.key === "Enter") {
       e.preventDefault();
       send();
       ask(true);
@@ -209,6 +223,56 @@ export function createLogic(host) {
       els.text.setRangeText(t, els.text.selectionStart, els.text.selectionEnd, "end");
       els.text.dispatchEvent(new Event("input"));
     }
+  }
+
+  /** The theory's models searched for: the first hundred, or all counted.
+   *  @param {boolean} count */
+  function solve(count) {
+    const f = state.file;
+    if (!f) return;
+    send();
+    state.view = "models";
+    state.shownModel = 0;
+    renderAnswer();
+    host.dispatch({ type: "logicSolve", generation: f.generation, keep: 100, count });
+  }
+
+  /** A symbol's values, as a table. @param {Table} t */
+  function tableOfValues(t) {
+    if (t.shape === "value") return `<div class="lg-value"><code>${esc(t.name)}</code> = <b>${esc(t.cells[0][0])}</b></div>`;
+    const cell = (/** @type {string} */ v) => `<td class="${v === "true" ? "v1" : v === "—" ? "none" : ""}">${esc(v)}</td>`;
+    if (t.shape === "row") {
+      return `<div class="lg-model-table"><div class="lg-model-name"><code>${esc(t.name)}</code></div><div class="lg-table-wrap"><table class="lg-table">` +
+        `<thead><tr>${t.cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody><tr>${t.cells[0].map(cell).join("")}</tr></tbody></table></div></div>`;
+    }
+    if (t.shape === "grid") {
+      return `<div class="lg-model-table"><div class="lg-model-name"><code>${esc(t.name)}</code></div><div class="lg-table-wrap"><table class="lg-table">` +
+        `<thead><tr><th></th>${t.cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>` +
+        `<tbody>${t.rows.map((r, i) => `<tr><th>${esc(r)}</th>${t.cells[i].map(cell).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+    }
+    return `<div class="lg-model-table"><div class="lg-model-name"><code>${esc(t.name)}</code></div><div class="lg-table-wrap"><table class="lg-table"><tbody>` +
+      t.cells.map((line) => `<tr>${line.slice(0, -1).map((v) => `<td>${esc(v)}</td>`).join("")}<td class="sep"></td>${cell(line[line.length - 1])}</tr>`).join("") + `</tbody></table></div></div>`;
+  }
+
+  function modelsHtml() {
+    const m = state.models;
+    if (!m) return `<p class="lg-hint">A theory — sorts, what is named, and what is true of them — has its models found here: <kbd>⌘⇧↩</kbd>, or the search button above.</p>`;
+    if (m.running) return `<div class="lg-verdict"><span class="lab-spin"></span>Searching…</div><button class="cc-quiet" data-logic-stop>Stop  ⎋</button>`;
+    if (m.error) return `<div class="lg-verdict bad">${icon("d-error")}Not searched</div><p class="lg-message">${esc(m.error)}</p>`;
+    const took = m.elapsedMs < 1000 ? `${m.elapsedMs} ms` : `${(m.elapsedMs / 1000).toFixed(1)} s`;
+    if (m.found === 0) {
+      return m.finished ? `<div class="lg-verdict bad">No model: the constraints cannot all hold.</div><p class="lg-faint">Searched in ${took}.</p>`
+        : `<div class="lg-verdict bad">No model found in ${took}</div><p class="lg-faint">${m.timedOut ? "The search ran out of time." : "The search was stopped."} There may still be one.</p>`;
+    }
+    const k = Math.min(state.shownModel, m.models.length - 1);
+    const how = m.finished ? `${m.found.toLocaleString()} in all` : m.counted ? `${m.found.toLocaleString()} found before it ${m.timedOut ? "ran out of time" : "was stopped"}` : `the first ${m.models.length === 1 ? "" : m.models.length.toLocaleString() + " "}found`;
+    const verdict = m.finished && m.found === 1 ? `<div class="lg-verdict good">${icon("check")}One model: the answer is the only one</div>` : "";
+    const nav = `<div class="lg-nav"><button class="cc-quiet" data-logic-model="-1" ${k === 0 ? "disabled" : ""} aria-label="The model before">‹</button>` +
+      `<span>Model ${k + 1} of ${how}</span><button class="cc-quiet" data-logic-model="1" ${k >= m.models.length - 1 ? "disabled" : ""} aria-label="The next model">›</button>` +
+      (m.counted || m.finished ? "" : `<span class="grow"></span><button class="cc-quiet" data-logic-count title="Search on through every model, for up to 20 s">Count them all</button>`) + `</div>`;
+    const model = m.models[k];
+    const sizes = model.sizes.length ? `<p class="lg-faint">Sizes chosen: ${model.sizes.map(([s, n]) => `${esc(s)} ${n}`).join(", ")}</p>` : "";
+    return verdict + nav + sizes + model.tables.map(tableOfValues).join("") + `<p class="lg-faint">Found in ${took}, ${m.choices.toLocaleString()} choices.</p>`;
   }
 
   /* ── the answer ───────────────────────────────────────────────────── */
@@ -260,7 +324,8 @@ export function createLogic(host) {
     } else if (a.kind === "error") {
       body = head("bad", `${icon("d-error")}Line ${a.line}`) + `<p class="lg-message">${esc(a.message ?? "")}</p>`;
     } else if (a.kind === "declaration" || a.kind === "theory") {
-      body = `<p class="lg-said"><code>${esc(a.text)}</code></p><p class="lg-message">${esc(a.message ?? "")}</p>`;
+      body = `<p class="lg-said"><code>${esc(a.text)}</code></p><p class="lg-message">${esc(a.message ?? "")}</p>` +
+        `<button class="cc-quiet" data-logic-solve>Find the theory's models</button>`;
     } else if (a.kind === "formula") {
       const words = { tautology: "A tautology: true in every row", contradiction: "A contradiction: false in every row", contingent: "Contingent: true in some rows, false in others" }[a.status ?? ""] ?? "";
       const count = a.models != null ? ` · true in ${a.models.toLocaleString()} of ${Math.pow(2, a.atoms.length).toLocaleString()}` : "";
@@ -284,7 +349,13 @@ export function createLogic(host) {
     } else if (a.kind === "table") {
       body = `<p class="lg-said">The column <code>${esc(a.text)}</code> over ${a.atoms.map((x) => `<code>${esc(x)}</code>`).join(" ")}</p>` + formsHtml(a);
     }
-    els.answer.innerHTML = body + tableForm();
+    const tabs = `<nav class="lg-tabs" role="tablist"><button role="tab" data-logic-view="line" aria-selected="${state.view === "line"}">This line</button>` +
+      `<button role="tab" data-logic-view="models" aria-selected="${state.view === "models"}">Models${state.models && !state.models.running && !state.models.error ? ` <span class="lg-count">${state.models.found.toLocaleString()}</span>` : ""}</button></nav>`;
+    if (state.view === "models") {
+      els.answer.innerHTML = tabs + modelsHtml();
+      return;
+    }
+    els.answer.innerHTML = tabs + body + tableForm();
     const canvas = /** @type {HTMLCanvasElement | null} */ (els.answer.querySelector("[data-logic-kmap]"));
     if (canvas && a?.column) {
       const css = getComputedStyle(ws);
@@ -322,6 +393,19 @@ export function createLogic(host) {
       return void host.dispatch({ type: "logicClose", discard: true });
     }
     if (t.closest("[data-logic-more]")) return void ask(true, true);
+    if (t.closest("[data-logic-solve]")) return void solve(false);
+    if (t.closest("[data-logic-count]")) return void solve(true);
+    if (t.closest("[data-logic-stop]")) return void host.dispatch({ type: "logicStop" });
+    const view = /** @type {HTMLElement | null} */ (t.closest("[data-logic-view]"));
+    if (view) {
+      state.view = view.dataset.logicView === "models" ? "models" : "line";
+      return void renderAnswer();
+    }
+    const step = /** @type {HTMLElement | null} */ (t.closest("[data-logic-model]"));
+    if (step && state.models) {
+      state.shownModel = Math.max(0, Math.min(state.models.models.length - 1, state.shownModel + Number(step.dataset.logicModel)));
+      return void renderAnswer();
+    }
     const goto = /** @type {HTMLElement | null} */ (t.closest("[data-logic-goto]"));
     if (goto) {
       const line = Number(goto.dataset.logicGoto);
@@ -392,6 +476,13 @@ export function createLogic(host) {
         ask(true);
       }
     },
+    /** @param {{models: Models | null}} e */
+    models(e) {
+      if (e.models && state.file && e.models.generation !== state.file.generation) return;
+      state.models = e.models;
+      if (!e.models && state.view === "models") state.view = "line";
+      renderAnswer();
+    },
     /** @param {{answer: Answer | null}} e */
     answer(e) {
       // An answer for another file, or an older one, is not shown.
@@ -404,7 +495,7 @@ export function createLogic(host) {
       if (state.file) requestAnimationFrame(follow);
     },
     debug() {
-      return { file: state.file, answer: state.answer, asked: state.asked, text: els.text.value };
+      return { file: state.file, answer: state.answer, asked: state.asked, text: els.text.value, models: state.models, view: state.view, shownModel: state.shownModel };
     },
   };
 }

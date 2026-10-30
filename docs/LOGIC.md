@@ -274,6 +274,28 @@ which makes the formula's table a circuit — AND/OR, NAND or NOR — in a
 column of 0, 1 and x read back as formulas; and symbol buttons for ¬ ∧ ∨ →
 ↔ ⊕ ⊨ ∀ ∃. NAND and NOR forms no longer write a double negation for a
 term of one literal. Checked in the browser suite and in WebKit.
+L3 — the model finder (`solve`): each function's value at each argument,
+each predicate's truth, constant and proposition a cell; constraints
+compiled once, names resolved, and each `all` and `and` at the top spread
+into instances, those true from the start dropped; each instance worked out
+three ways (true, false, not known yet) with the cells set so far, a false
+one a dead end and one with a single cell open striking off that cell's
+values that would make it false; one-to-one kept as a whole, symmetric
+functions a cell a pair, onto checked of each model; the search setting the
+open cell with fewest values left, keeping the first models and, when asked,
+counting them all; sorts with a range of sizes searched smallest first; a
+stop, and a time limit. Every model it finds is checked by L0's evaluator,
+which shares nothing with it. Counted right: three friends' one answer,
+n queens (2, 10, 4, 92 — 92 from Logic4Fun's text too), Latin squares (12,
+576), the Petersen graph's 3-colourings (120), the pigeonhole principle
+(none), counting quantifiers, partial functions, onto, symmetric, and a
+derangement's smallest size; a 9×9 Sudoku from a third of its clues in
+37 ms (release). In the window: ⌘⇧↩ or the search button finds a theory's
+first hundred models on a thread, ⎋ stops it, "Count them all" counts for up
+to 20 s; the panel's Models tab shows them one at a time — a constant's
+value, a function of one argument as a row, of two as a grid, of more as a
+list — with how many there are, or "No model: the constraints cannot all
+hold". Symmetry between unnamed elements is not broken yet: it is L4's.
 
 | | What | Proved by |
 |---|---|---|

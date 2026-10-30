@@ -176,6 +176,40 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     assert(answer().querySelector('.lg-from form').elements.namedItem('column').value === '00010111', 'what was typed into the table was lost');
   });
 
+  await test('A theory\'s models are searched for, shown one at a time, counted, and stopped', async () => {
+    await win.pushEvents([file({generation: 5, text: 'p = a | b\nf: p -> p\n'})]); await settle();
+    let before = win.commands.length;
+    text().focus();
+    key('Enter', {metaKey: true, shiftKey: true}); await settle();
+    const asked = sent(before, 'logicSolve')[0];
+    assert(asked?.generation === 5 && asked.count === false && asked.keep >= 1, `⌘⇧⏎ did not search: ${JSON.stringify(asked)}`);
+    assert(ws().querySelector('[data-logic-view="models"]')?.getAttribute('aria-selected') === 'true', 'the panel did not turn to the models');
+    await win.pushEvents([{type: 'logicModels', models: {generation: 5, running: true, found: 0, finished: false, timedOut: false, counted: false, elapsedMs: 0, choices: 0, models: [], error: null}}]);
+    await settle();
+    assert(answer().textContent.includes('Searching'), 'a search going is not said');
+    before = win.commands.length;
+    text().focus();
+    key('Escape'); await settle();
+    assert(sent(before, 'logicStop').length === 1, '⎋ did not stop the search');
+    const table = (/** @type {string[]} */ row) => ({name: 'f', shape: 'row', rows: [], cols: ['a', 'b'], cells: [row]});
+    await win.pushEvents([{type: 'logicModels', models: {generation: 5, running: false, found: 4, finished: false, timedOut: false, counted: false, elapsedMs: 3, choices: 7,
+      models: [{sizes: [], tables: [table(['a', 'a'])]}, {sizes: [], tables: [table(['a', 'b'])]}], error: null}}]);
+    await settle();
+    assert(answer().querySelector('.lg-nav')?.textContent.includes('Model 1 of'), 'the first model is not shown');
+    assert([...answer().querySelectorAll('.lg-model-table td')].map((d) => d.textContent).join() === 'a,a', 'the model\'s table is not drawn');
+    answer().querySelector('[data-logic-model="1"]').click(); await settle();
+    assert([...answer().querySelectorAll('.lg-model-table td')].map((d) => d.textContent).join() === 'a,b', '› did not show the next model');
+    before = win.commands.length;
+    answer().querySelector('[data-logic-count]').click(); await settle();
+    assert(sent(before, 'logicSolve')[0]?.count === true, 'Count them all did not count');
+    await win.pushEvents([{type: 'logicModels', models: {generation: 5, running: false, found: 0, finished: true, timedOut: false, counted: true, elapsedMs: 1, choices: 2, models: [], error: null}}]);
+    await settle();
+    assert(answer().textContent.includes('No model: the constraints cannot all hold'), 'no model is not said so');
+    // The line's answer is a tab away.
+    ws().querySelector('[data-logic-view="line"]').click(); await settle();
+    assert(!answer().textContent.includes('No model'), 'the line\'s tab still shows the models');
+  });
+
   await test('Closing a file with unsaved changes asks first, then goes home', async () => {
     await win.pushEvents([file({generation: 4, dirty: true})]); await settle();
     const confirm = win.confirm;

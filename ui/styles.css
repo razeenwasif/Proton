@@ -5069,3 +5069,15 @@ button.st-source-name:hover { color: var(--cc-accent); }
   font: var(--z-2xs)/1 ui-monospace, "SF Mono", Menlo, monospace; }
 .lg-from button { height: 26px; padding: 0 12px; border: 1px solid var(--xl-line); border-radius: 5px; background: none; color: var(--text); cursor: pointer; }
 @media (max-width: 900px) { .lg-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 1px minmax(0, 1fr); } }
+.lg-tabs { display: flex; gap: 4px; margin: -4px 0 12px; }
+.lg-tabs [role=tab] { height: 24px; padding: 0 10px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: var(--z-xs)/1 var(--zed); cursor: pointer; }
+.lg-tabs [role=tab][aria-selected=true] { color: var(--text); background: var(--row-hover); }
+.lg-count { margin-left: 4px; color: var(--muted); font-size: var(--z-2xs); }
+.lg-nav { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; color: var(--text); font: var(--z-xs)/1.3 var(--zed); }
+.lg-nav .cc-quiet:disabled { opacity: .4; cursor: default; }
+.lg-value { margin: 6px 0; }
+.lg-model-table { margin: 10px 0; }
+.lg-model-name { margin-bottom: 2px; }
+.lg-table td.none { color: var(--muted); opacity: .6; }
+.lg-table tbody th { position: static; text-align: right; color: var(--text); }
+.lg-verdict .lab-spin { width: 12px; height: 12px; }
