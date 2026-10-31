@@ -132,6 +132,13 @@ pub fn handles(command: &Command) -> bool {
 }
 
 /// The open notebook, and whether this Proton may write it.
+/// A tutor answering in a notebook no longer open: left to finish, its turn
+/// kept in that notebook's chat when it does.
+struct Parked {
+    book: Book,
+    tutor: Tutor,
+}
+
 struct Open {
     book: Book,
     /// `None` while another Proton holds it: then it is read only.
@@ -205,6 +212,8 @@ pub struct Study {
     tutor: Option<Tutor>,
     /// `.tex` files a tutor wrote, being compiled.
     compiles: Vec<latex::Compile>,
+    /// Tutors still answering in notebooks left while they were.
+    parked: Vec<Parked>,
     /// What makes tutors: the engines, or a test's script.
     tutors: Box<dyn Tutors>,
     /// The studio's calls.
@@ -277,6 +286,7 @@ impl Default for Study {
             documents: Default::default(),
             tutor: None,
             compiles: Vec::new(),
+            parked: Vec::new(),
             tutors: Box::new(tutor::Live),
             jobs: jobs::Jobs::default(),
             review: None,
@@ -487,6 +497,7 @@ impl Study {
         }
         events.extend(self.take_answers());
         events.extend(self.poll_tutor());
+        events.extend(self.poll_parked());
         events.extend(self.poll_compiles());
         let roots = self.kb.labelled_roots();
         if self.jobs.poll(self.tutors.as_mut(), &roots) {
@@ -549,6 +560,10 @@ impl Study {
             tutor.stop();
         }
         self.tutor = None;
+        for parked in &mut self.parked {
+            parked.tutor.stop();
+        }
+        self.parked.clear();
         self.jobs.stop_all();
         for voicing in &self.voicing {
             voicing.cancel();
@@ -881,13 +896,18 @@ impl Study {
             book.notebook.opened = now;
             let _ = book.save();
         }
-        // Its latest chat, to carry on; or a new one.
-        if let Some(mut was) = self.tutor.take() {
-            was.stop();
-        }
-        self.tutor = Some(match book.chats().first().and_then(|c| book.chat(&c.id)) {
-            Some(chat) => Tutor::of(chat),
-            None => Tutor::new(&book),
+        // The tutor of the notebook left: still answering, it is left to
+        // finish there; otherwise let go.
+        self.park_tutor();
+        // Its own tutor, if one was left answering here; else its latest
+        // chat, to carry on; or a new one.
+        let parked = self.parked.iter().position(|p| p.book.dir() == book.dir()).map(|at| self.parked.remove(at).tutor);
+        self.tutor = Some(match parked {
+            Some(tutor) => tutor,
+            None => match book.chats().first().and_then(|c| book.chat(&c.id)) {
+                Some(chat) => Tutor::of(chat),
+                None => Tutor::new(&book),
+            },
         });
         self.review = None;
         self.quiz = None;
@@ -1698,10 +1718,7 @@ impl Study {
     /* ── the tutor ──────────────────────────────────────────────────── */
 
     fn close_notebook(&mut self) {
-        if let Some(tutor) = &mut self.tutor {
-            tutor.stop();
-        }
-        self.tutor = None;
+        self.park_tutor();
         self.review = None;
         self.quiz = None;
         self.sitting = None;
@@ -1891,6 +1908,73 @@ impl Study {
         let mut events = self.saved();
         events.insert(0, self.list_event());
         events.push(notice(said, NoticeLevel::Info));
+        events
+    }
+
+    /// Leave the open notebook's tutor: one answering goes on in the
+    /// background, to be kept in its notebook; one idle is let go.
+    fn park_tutor(&mut self) {
+        let Some(mut tutor) = self.tutor.take() else { return };
+        match (&self.open, tutor.busy()) {
+            (Some(open), true) if open.lock.is_some() => self.parked.push(Parked { book: open.book.clone(), tutor }),
+            _ => tutor.stop(),
+        }
+    }
+
+    /// Tutors answering in notebooks left: each turn that ends is kept in its
+    /// own notebook's chat, with the notes and files it wrote, and the tutor
+    /// let go — unless that notebook is open again, when it is its tutor.
+    fn poll_parked(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        let mut done = Vec::new();
+        for (at, parked) in self.parked.iter_mut().enumerate() {
+            let Some(Polled::Ended(failed, drafts)) = parked.tutor.poll(&parked.book) else { continue };
+            let title = parked.book.notebook.title.clone();
+            if let Some(why) = failed {
+                events.push(notice(format!("The chat in {title} could not be kept: {why}"), NoticeLevel::Error));
+            }
+            // What it wrote, kept there: notes new or again, and files.
+            let mut notes = Vec::new();
+            let mut files = Vec::new();
+            for draft in drafts {
+                let now = proton_study::now();
+                if let Some(name) = draft.file {
+                    match parked.book.write_file(&name, &draft.body) {
+                        Ok(_) => files.push(proton_study::tutor::StudyTurnFile { name, pdf: false }),
+                        Err(why) => events.push(notice(why, NoticeLevel::Error)),
+                    }
+                    continue;
+                }
+                let before = draft.id.as_deref().and_then(|id| parked.book.note(id));
+                let updated = before.is_some();
+                let note = match before {
+                    Some(mut note) => {
+                        note.title = draft.title;
+                        note.body = draft.body;
+                        note.updated = now;
+                        note
+                    }
+                    None => Note { id: parked.book.new_note_id(), title: draft.title, created: now, updated: now, from: Some(parked.tutor.chat.id.clone()), body: draft.body },
+                };
+                match parked.book.write_note(&note) {
+                    Ok(()) => notes.push(proton_study::tutor::StudyTurnNote { id: note.id, title: note.title, updated }),
+                    Err(why) => events.push(notice(why, NoticeLevel::Error)),
+                }
+            }
+            if !notes.is_empty() || !files.is_empty() {
+                if let Some(turn) = parked.tutor.chat.turns.last_mut() {
+                    turn.notes = notes;
+                    turn.files = files;
+                }
+                let _ = parked.book.write_chat(&parked.tutor.chat);
+            }
+            events.push(notice(format!("The tutor finished answering in {title}; it is kept in its chat."), NoticeLevel::Info));
+            done.push(at);
+        }
+        for at in done.into_iter().rev() {
+            let mut parked = self.parked.remove(at);
+            parked.tutor.stop();
+        }
         events
     }
 

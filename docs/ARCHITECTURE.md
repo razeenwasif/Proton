@@ -1222,6 +1222,15 @@ there, or struck through when it names nothing in the notebook. A chat is kept
 as `chats/C001.json`, its citations as resolved when given; picked up again, or
 when its engine changes, a new conversation is told what was said.
 
+**Leaving a notebook mid-answer.** A tutor still answering when its
+notebook is left — another opened, or it closed — is not stopped: it is
+parked (`Parked`, with a copy of that notebook's `Book`) and polled on the
+heartbeat, and when its turn ends the question and answer are kept in that
+notebook's chat, the notes and files it wrote with them, and it is let go.
+Opened again before then, the notebook takes its tutor back, still answering.
+An idle tutor is let go as before. Until this, leaving stopped it, and the
+question — kept only when its answer ends — was lost with it.
+
 **Notes the tutor writes.** Asked for something to keep — a cheatsheet, a
 summary, a formula sheet — the tutor writes it in its answer between
 four-backtick fences opened ````` ````note Its title ````` (`proton-study::tutor::notes_in`).

@@ -1015,6 +1015,53 @@ fn a_tex_file_the_tutor_writes_is_kept_in_files_and_compiled_only_when_asked() {
 }
 
 #[test]
+fn a_question_asked_before_switching_notebooks_is_answered_and_kept_in_its_own() {
+    let scratch = Scratch::new("tutor-switch");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, Some(scratch.root.join("bin/proton-mcp")), &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Systems".into() });
+    log.lock().unwrap().answers.push_back("Paging — maps pages to frames.\n\n````note Paging sheet\nPages to frames.\n````".into());
+    session.apply(Command::StudyAsk { text: "What is paging?".into() });
+    // Away to another notebook while it answers: nothing is stopped.
+    session.apply(Command::StudyNew { title: "Graphics".into() });
+    assert!(!log.lock().unwrap().interrupted, "the answer was stopped by leaving");
+    until(&mut session, |e| match e {
+        Event::Notice { text, .. } if text.contains("finished answering in Systems") => Some(()),
+        _ => None,
+    });
+    // Kept in its own notebook's chat, its note too.
+    let systems = proton_study::Book::read(&scratch.root.join("Notebooks/systems")).unwrap();
+    let kept = systems.chat("C001").expect("the chat was not kept");
+    assert_eq!(kept.turns.len(), 1);
+    assert_eq!(kept.turns[0].asked, "What is paging?");
+    assert_eq!(kept.turns[0].answer, "Paging — maps pages to frames.");
+    assert_eq!(kept.turns[0].notes.len(), 1);
+    assert!(systems.notes().iter().any(|n| n.title == "Paging sheet"));
+    // Back again: the chat is there.
+    let events = session.apply(Command::StudyOpen { slug: "systems".into() });
+    assert!(chat_turns(&events).is_some_and(|t| t.len() == 1), "{events:?}");
+
+    // Asked, away, and back before it ends: it is still answering there.
+    session.apply(Command::StudyAsk { text: "And the TLB?".into() });
+    session.apply(Command::StudyOpen { slug: "graphics".into() });
+    let events = session.apply(Command::StudyOpen { slug: "systems".into() });
+    assert!(matches!(chat(&events), Some((_, _, true, _))), "not still answering on coming back: {events:?}");
+    until(&mut session, |e| match e {
+        Event::StudyChat { turns, busy: false, .. } if turns.len() == 2 => Some(()),
+        _ => None,
+    });
+    session.shutdown();
+}
+
+fn chat_turns(events: &[Event]) -> Option<Vec<proton_study::tutor::StudyTurn>> {
+    chat(events).map(|(_, turns, _, _)| turns)
+}
+
+#[test]
 fn with_no_server_every_engine_is_given_passages() {
     let scratch = Scratch::new("tutor-passages");
     let settings = scratch.knowledge_base();
