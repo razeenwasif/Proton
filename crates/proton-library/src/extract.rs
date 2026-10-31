@@ -89,6 +89,8 @@ pub fn read(path: &Path, kind: Kind, pdfs: &Pdfs) -> Result<Body, Unread> {
         Kind::Notebook => Body::Lines(crate::formats::ipynb::text(&text(path)?).map_err(Unread::Failed)?),
         Kind::Captions => Body::Cues(captions::parse(&text(path)?)),
         Kind::Document => Body::Lines(crate::formats::office::document(path).map_err(Unread::Failed)?),
+        // A saved page as a fetched one is read: its article, as Markdown.
+        Kind::Html => Body::Lines(crate::formats::web::page(&text(path)?).markdown),
         Kind::Slides => Body::Pages(crate::formats::office::slides(path).map_err(Unread::Failed)?),
         Kind::Image => Body::Lines(crate::formats::office::picture(path).map_err(Unread::Failed)?),
         // An artifact is its page's article, its formulas TeX; one written
@@ -166,6 +168,26 @@ mod tests {
         assert_eq!(cite("lecture.vtt"), ["lecture.vtt @ 0:01-0:04"]);
         assert_eq!(cite("lab.ipynb"), ["lab.ipynb § Lab L1-2"]);
         assert_eq!(cite("slides.pdf"), ["slides.pdf § Informed search p. 1"]);
+    }
+
+    #[test]
+    fn a_saved_web_page_is_read_as_its_article() {
+        let base = dir("html");
+        std::fs::write(
+            base.join("lecture.html"),
+            "<html><head><title>Week 3</title><script>var x = 1;</script></head><body><nav>Home | Courses</nav>\
+             <article><h1>Virtual memory</h1><p>A page table maps virtual pages to physical frames, and the TLB caches its entries.</p></article>\
+             <footer>Copyright</footer></body></html>",
+        )
+        .unwrap();
+        let path = base.join("lecture.html");
+        assert_eq!(Kind::of(&path), Kind::Html);
+        assert!(Kind::Html.addable() && !Kind::Html.indexed(), "read when added, not in every search");
+        let body = read(&path, Kind::Html, &Pdfs::default()).unwrap();
+        let Body::Lines(text) = &body else { panic!("{body:?}") };
+        assert!(text.contains("Virtual memory") && text.contains("TLB caches its entries"), "{text}");
+        assert!(!text.contains("var x") && !text.contains("Home | Courses") && !text.contains("Copyright"), "{text}");
+        assert_eq!(Kind::from_name("html"), Kind::Html);
     }
 
     #[test]

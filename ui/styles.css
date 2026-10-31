@@ -4119,6 +4119,8 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .st-note-form .st-reader-head { align-items: center; margin: 0; }
 .st-note-form input[name="title"] { flex: 1 1 auto; min-width: 0; padding: 7px 10px; border: 1px solid var(--cc-line-2); border-radius: 7px; background: var(--bg);
   color: var(--cc-text); font: 600 var(--z-sm)/1.3 var(--cc-font); outline: none; }
+.st-file-form textarea { font: var(--z-xs)/1.55 var(--zed, monospace); tab-size: 2; white-space: pre; overflow-x: auto; }
+.st-file-name { font: 600 var(--z-sm)/1.3 var(--zed, monospace); color: var(--cc-text); }
 .st-note-form textarea { min-height: 320px; padding: 12px; border: 1px solid var(--cc-line-2); border-radius: 8px; background: var(--bg);
   color: var(--cc-text); font: var(--z-xs)/1.65 var(--zed); resize: vertical; outline: none; }
 .st-note-form input:focus, .st-note-form textarea:focus { border-color: var(--cc-accent); }

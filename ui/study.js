@@ -38,7 +38,9 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
 /** @typedef {import("./study-studio.js").MadeEvent} MadeEvent */
 /** @typedef {import("./study-studio.js").TaskEvent} TaskEvent */
 /** @typedef {import("./bindings/StudyArtifactRow").StudyArtifactRow} ArtifactRow */
+/** @typedef {{name: string, body: string, pdf: boolean}} FileEvent */
 /** @typedef {{kind: "chat"} | {kind: "overview"} | {kind: "progress"} | {kind: "source", source: SourceEvent} | {kind: "note", note: NoteEvent | null, preview: boolean}
+ *   | {kind: "file", file: FileEvent}
  *   | {kind: "artifact", source: SourceEvent, id: string, seq: number, file: string} | {kind: "voices"}
  *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}
  *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent} | {kind: "audio"} | {kind: "slides"}
@@ -600,6 +602,23 @@ export function createStudy(host) {
     marks[0]?.scrollIntoView({ block: "center" });
   }
 
+  /** A file the tutor wrote, to read and edit: a .tex compiles to a PDF
+   *  beside it, which opens in the viewer. @param {FileEvent} file */
+  function fileHtml(file) {
+    const ro = readOnly() ? " disabled" : "";
+    const tex = file.name.endsWith(".tex");
+    const pdf = file.name.replace(/\.tex$/, ".pdf");
+    return `<form class="st-card st-note-form st-file-form" data-study-file-form data-name="${esc(file.name)}" novalidate>
+        <div class="st-reader-head"><button type="button" class="cc-quiet" data-study-back>← Back</button>
+          <span class="st-file-name">${esc(file.name)}</span><span class="st-faint">in the notebook's files/</span></div>
+        <textarea name="body" rows="24" spellcheck="false"${ro}>${esc(file.body)}</textarea>
+        <div class="rs-actions st-note-actions"><span class="grow"></span>
+          ${tex && file.pdf ? `<button type="button" class="cc-quiet" data-study-file-open="${esc(pdf)}">Open PDF</button>` : ""}
+          ${tex && !readOnly() ? `<button type="button" class="cc-quiet" data-study-file-compile="${esc(file.name)}" title="Save, then compile it with pdflatex">${file.pdf ? "Compile again" : "Compile PDF"}</button>` : ""}
+          ${readOnly() ? "" : `<button type="submit" class="cc-primary">Save</button>`}</div>
+      </form>`;
+  }
+
   /** A note, to write. @param {NoteEvent | null} note @param {boolean} preview */
   function noteHtml(note, preview) {
     const ro = readOnly() ? " disabled" : "";
@@ -672,6 +691,12 @@ export function createStudy(host) {
         `<div><h1>${esc(shown.source.title)}</h1><span class="st-faint">${esc(shown.source.id)} · artifact, version ${shown.seq}</span></div></div>` +
         `<iframe class="st-artifact-frame" title="${esc(shown.source.title)}" src="${esc(src)}" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads" ` +
         `allow="fullscreen; picture-in-picture; autoplay" allowfullscreen referrerpolicy="no-referrer"></iframe></div>`;
+      return;
+    }
+    if (shown.kind === "file") {
+      // Drawn once a file: drawn again, it would take the caret from what is being typed.
+      if (els.stage.querySelector(`[data-study-file-form][data-name="${CSS.escape(shown.file.name)}"]`)) return;
+      els.stage.innerHTML = fileHtml(shown.file);
       return;
     }
     if (shown.kind === "note") {
@@ -888,6 +913,20 @@ export function createStudy(host) {
     if (show) return host.dispatch({ type: "studyShow", id: show.dataset.studyShow, at: null });
     const showNote = at("[data-study-show-note]");
     if (showNote) return host.dispatch({ type: "studyShowNote", id: showNote.dataset.studyShowNote });
+    // A tutor's file, open here: its PDF in the viewer, or compiled — what is
+    // typed saved first, so what compiles is what is on screen.
+    const fileForm = /** @type {HTMLFormElement | null} */ (t.closest("[data-study-file-form]"));
+    const openPdf = at("[data-study-file-open]");
+    if (openPdf && fileForm) return host.dispatch({ type: "studyFileOpen", name: openPdf.dataset.studyFileOpen });
+    const compileHere = at("[data-study-file-compile]");
+    if (compileHere && fileForm) {
+      const body = /** @type {HTMLTextAreaElement | null} */ (fileForm.querySelector("textarea"))?.value ?? "";
+      host.dispatch({ type: "studyFileSave", name: fileForm.dataset.name, body });
+      host.dispatch({ type: "studyFileCompile", name: compileHere.dataset.studyFileCompile });
+      compileHere.textContent = "Compiling…";
+      /** @type {HTMLButtonElement} */ (compileHere).disabled = true;
+      return;
+    }
     if (at("[data-study-back]")) {
       state.shown = { kind: state.back };
       els.stage.innerHTML = "";
@@ -1177,6 +1216,10 @@ export function createStudy(host) {
       state.editing = false;
       return;
     }
+    if (form.matches("[data-study-file-form]")) {
+      host.dispatch({ type: "studyFileSave", name: form.dataset.name, body: String(data.get("body") ?? "") });
+      return;
+    }
     if (form.matches("[data-study-note-form]")) {
       const id = form.dataset.id || null;
       const body = data.get("body") === null && state.shown.kind === "note" ? state.shown.note?.body ?? "" : field("body");
@@ -1441,6 +1484,16 @@ export function createStudy(host) {
     render();
   }
 
+  /** A file the tutor wrote, to read and edit. @param {FileEvent} event */
+  function file(event) {
+    // Saved: kept in place, its text as typed, its buttons as they now are.
+    const open = els.stage.querySelector(`[data-study-file-form][data-name="${CSS.escape(event.name)}"]`);
+    state.shown = { kind: "file", file: event };
+    if (open) open.remove();
+    els.stage.innerHTML = "";
+    render();
+  }
+
   /** A note, to read and write. @param {NoteEvent} event */
   function note(event) {
     state.shown = { kind: "note", note: event, preview: false };
@@ -1478,7 +1531,7 @@ export function createStudy(host) {
 
   render();
 
-  return { list, notebook, closed, source, note, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
+  return { list, notebook, closed, source, note, file, chat: chatEvent, chatLive, capabilities: chat.capabilities, studio: studioEvent, made, task,
     deck: deckEvent, reviewing: reviewingEvent, quiz: quizEvent, progress: progressEvent, learning: learningEvent,
     audio: audioEvent, voiceState: voiceStateEvent, voices: voicesEvent, voiceSample: sampleEvent, slides: slidesEvent, graphic: graphicEvent,
     coding: codingEvent, codeRan: codeRanEvent,

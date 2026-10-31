@@ -16,7 +16,7 @@ import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
 import { HAS_SHELL, applyBackdrop, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, readLab, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, wireWindowChrome, quitApp } from "./bridge.js";
-import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, zoomDocument } from "./document.js";
+import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, saveDocument, zoomDocument } from "./document.js";
 import { createOverlays } from "./overlays.js";
 import { createPanels } from "./panels.js";
 import { createDisplaySettings } from "./display-settings.js";
@@ -2418,6 +2418,10 @@ document.addEventListener("click", (e) => {
     fitDocument();
     return;
   }
+  if (e.target.closest("[data-doc-save]")) {
+    void saveDocument().then((said) => { if (said) flashMessage(said); });
+    return;
+  }
   const zoom = e.target.closest("[data-doc-zoom]");
   if (zoom) {
     zoomDocument(Number(zoom.dataset.docZoom));
@@ -3510,9 +3514,9 @@ function renderEvent(event) {
       study?.note(event);
       break;
 
-    // A file the tutor wrote that is not a PDF: in Codex's editor.
-    case "studyFileAt":
-      dispatchMany([{ type: "setMode", mode: "codex" }, { type: "openBuffer", path: event.path }]);
+    // A file the tutor wrote that is not a PDF: in Notebook, to read and edit.
+    case "studyFile":
+      study?.file(event);
       break;
 
     case "studyChat":

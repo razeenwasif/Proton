@@ -1240,7 +1240,18 @@ recorded on the turn (`StudyTurn.files`), and drawn with Open and, for a
 `.tex`, Compile PDF. Open shows it in Proton, not the desktop's app for it
 (here Quark, which took a PDF sent to it while running and showed nothing): a
 PDF in the document viewer, registered as a source's is so the shell may read
-it; anything else in Codex's editor (`Event::StudyFileAt`). Compiling is only ever
+it; anything else in Notebook, as an editor (`Event::StudyFile`, saved by
+`StudyFileSave`; Compile there saves first). A PDF compiled is made a source,
+ticked (`Origin::Made { file }`, resolved under `files/` wherever a source's
+file is looked for); compiled again, that same source is read again. The
+document viewer's Save a copy… asks the shell's `save_document_as`, which
+copies only a file the viewer was let read, to where macOS's save panel
+(`NSSavePanel`, through `objc2`'s `msg_send!`) says.
+
+A saved web page — `.html`, `.htm`, `.xhtml` — is a source too
+(`Kind::Html`): its article read as a fetched page's is
+(`formats::web::page`), when it is added, never in a search of the whole
+knowledge base. Compiling is only ever
 that button (`study::latex`): the machine's pdflatex — on the PATH, MacTeX's
 `/Library/TeX/texbin`, a TinyTeX of the person's or Quark's — run in `files/`
 with its working files in `files/.build/`, `-no-shell-escape`, no input, on a

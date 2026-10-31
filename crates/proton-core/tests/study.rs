@@ -945,7 +945,7 @@ fn a_tex_file_the_tutor_writes_is_kept_in_files_and_compiled_only_when_asked() {
     until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
     session.apply(Command::StudyNew { title: "Systems".into() });
     log.lock().unwrap().answers.push_back(
-        "A cheatsheet — compile it with the button.\n\n````file sheet.tex\n\\documentclass{article}\n\\begin{document}\nCallee-saved: $rbx$.\n\\end{document}\n````".into(),
+        "A cheatsheet — compile it with the button.\n\n````file sheet.tex\n\\documentclass{article}\n\\begin{document}\nCallee-saved registers are kept across calls: rbx, rbp and r12 to r15.\n\\end{document}\n````".into(),
     );
     session.apply(Command::StudyAsk { text: "Make a .tex cheatsheet and compile it".into() });
     let turns = until(&mut session, |e| match e {
@@ -973,6 +973,24 @@ fn a_tex_file_the_tutor_writes_is_kept_in_files_and_compiled_only_when_asked() {
         _ => None,
     });
     assert!(turns[0].files[0].pdf && files.join("sheet.pdf").is_file());
+    // The PDF is a source now, read and ticked for the tutor.
+    let pdf_sources = |sources: &[proton_study::view::StudySourceRow]| sources.iter().filter(|s| s.title == "sheet.pdf").cloned().collect::<Vec<_>>();
+    let read = until(&mut session, |e| match e {
+        Event::StudyNotebook { sources, .. } if pdf_sources(sources).first().is_some_and(|s| s.status != SourceStatus::Reading) => Some(pdf_sources(sources)),
+        _ => None,
+    });
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].status, SourceStatus::Ready, "{read:?}");
+    // Compiled again: the same source, read again — not a second one.
+    session.apply(Command::StudyFileCompile { name: "sheet.tex".into() });
+    let again = until(&mut session, |e| match e {
+        Event::Notice { text, .. } if text.contains("read again as compiled now") => Some(()),
+        Event::Notice { text, .. } if text.contains("did not compile") => panic!("{text}"),
+        _ => None,
+    });
+    let _ = again;
+    let book = proton_study::Book::read(&scratch.root.join("Notebooks/systems")).unwrap();
+    assert_eq!(book.sources.sources.iter().filter(|s| matches!(&s.origin, proton_study::Origin::Made { file } if file == "sheet.pdf")).count(), 1);
     let names: Vec<String> = std::fs::read_dir(&files).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
     assert!(!names.iter().any(|n| n.ends_with(".aux") || n.ends_with(".log")), "{names:?}");
     // Opened in Proton: the PDF in the document viewer, which may then read
@@ -985,7 +1003,11 @@ fn a_tex_file_the_tutor_writes_is_kept_in_files_and_compiled_only_when_asked() {
     assert!(shown.as_deref().is_some_and(|p| p.ends_with("files/sheet.pdf")), "{events:?}");
     assert!(session.document_file(shown.as_deref().unwrap()).is_some(), "the viewer may not read it");
     let events = session.apply(Command::StudyFileOpen { name: "sheet.tex".into() });
-    assert!(events.iter().any(|e| matches!(e, Event::StudyFileAt { path } if path.ends_with("files/sheet.tex"))), "{events:?}");
+    assert!(events.iter().any(|e| matches!(e, Event::StudyFile { name, body, pdf: true } if name == "sheet.tex" && body.contains("Callee-saved"))), "{events:?}");
+    // Edited in Notebook and saved.
+    let events = session.apply(Command::StudyFileSave { name: "sheet.tex".into(), body: "\\documentclass{article}\n% edited\n".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::StudyFile { body, .. } if body.contains("% edited"))), "{events:?}");
+    assert!(std::fs::read_to_string(files.join("sheet.tex")).unwrap().contains("% edited"));
     // A name that climbs out is refused.
     let events = session.apply(Command::StudyFileCompile { name: "../x.tex".into() });
     assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("not a file here"))), "{events:?}");

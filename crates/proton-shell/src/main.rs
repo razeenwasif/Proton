@@ -257,6 +257,81 @@ fn read_lab(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tau
     std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
 }
 
+/// Save a copy of the document on screen where the person chooses, through
+/// the system's save panel — only a file the viewer was let read, so the page
+/// cannot have the shell copy anything else. `None` when they cancel.
+#[tauri::command(async)]
+fn save_document_as(app: tauri::AppHandle, path: String, session: State<'_, Mutex<BridgeSession>>) -> Result<Option<String>, String> {
+    let file = match session.lock() {
+        Ok(it) => it.session.document_file(&path),
+        Err(poisoned) => poisoned.into_inner().session.document_file(&path),
+    };
+    let file = file.ok_or_else(|| format!("{path}: not a document Proton opened"))?;
+    let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("document.pdf").to_string();
+    // The panel is AppKit's, so it is shown on the main thread; this waits.
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(save_panel::choose(&name));
+    })
+    .map_err(|err| err.to_string())?;
+    let Some(to) = rx.recv().map_err(|err| err.to_string())? else { return Ok(None) };
+    std::fs::copy(&file, &to).map_err(|err| format!("{}: {err}", to.display()))?;
+    Ok(Some(to.display().to_string()))
+}
+
+/// The system's save panel, asked where a file should go.
+mod save_panel {
+    use std::path::PathBuf;
+
+    /// Where the person chose to save `name`, or `None` if they cancelled.
+    #[cfg(target_os = "macos")]
+    pub fn choose(name: &str) -> Option<PathBuf> {
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        let c = std::ffi::CString::new(name).ok()?;
+        unsafe {
+            let panel: *mut AnyObject = msg_send![class!(NSSavePanel), savePanel];
+            if panel.is_null() {
+                return None;
+            }
+            let ns: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()];
+            let _: () = msg_send![panel, setNameFieldStringValue: ns];
+            let _: () = msg_send![panel, setCanCreateDirectories: true];
+            // NSModalResponseOK is 1.
+            let answer: isize = msg_send![panel, runModal];
+            if answer != 1 {
+                return None;
+            }
+            let url: *mut AnyObject = msg_send![panel, URL];
+            if url.is_null() {
+                return None;
+            }
+            let path: *mut AnyObject = msg_send![url, path];
+            if path.is_null() {
+                return None;
+            }
+            let utf8: *const std::ffi::c_char = msg_send![path, UTF8String];
+            if utf8.is_null() {
+                return None;
+            }
+            Some(PathBuf::from(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned()))
+        }
+    }
+
+    /// Elsewhere, the Downloads folder, under a name not already taken.
+    #[cfg(not(target_os = "macos"))]
+    pub fn choose(name: &str) -> Option<PathBuf> {
+        let downloads = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(|h| PathBuf::from(h).join("Downloads"))?;
+        let mut to = downloads.join(name);
+        let mut n = 2;
+        while to.exists() {
+            to = downloads.join(format!("{n} {name}"));
+            n += 1;
+        }
+        Some(to)
+    }
+}
+
 /// ⌘V in the editor: the clipboard's text, read here because a page is given
 /// it only when something editable has the focus, and the editor is drawn.
 #[tauri::command]
@@ -526,6 +601,7 @@ fn main() {
             set_opaque,
             read_document,
             read_lab,
+            save_document_as,
             paste_text,
             copy_text,
             quit

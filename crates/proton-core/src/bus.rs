@@ -1070,6 +1070,11 @@ pub enum Command {
     StudyFileCompile {
         name: String,
     },
+    /// Write a file a tutor wrote, as edited in Notebook.
+    StudyFileSave {
+        name: String,
+        body: String,
+    },
     /// Stop the answer being given.
     StudyStopAnswer,
     /// Begin a new chat with the tutor.
@@ -2232,9 +2237,12 @@ pub enum Event {
         id: String,
         live: crate::study::tutor::StudyLive,
     },
-    /// A file a tutor wrote, to open in Codex's editor: where it is.
-    StudyFileAt {
-        path: String,
+    /// A file a tutor wrote, to read and edit in Notebook: its words, and
+    /// whether a PDF has been compiled from it.
+    StudyFile {
+        name: String,
+        body: String,
+        pdf: bool,
     },
     /// A note, to read and edit.
     StudyNote {

@@ -42,7 +42,7 @@ pub fn guess(name: &str, kind: Kind) -> Role {
     match kind {
         Kind::Markdown | Kind::Text => Role::Notes,
         Kind::Captions | Kind::Video | Kind::Audio => Role::Recording,
-        Kind::Pdf | Kind::Document | Kind::Tex => Role::Reading,
+        Kind::Pdf | Kind::Document | Kind::Html | Kind::Tex => Role::Reading,
         Kind::Slides => Role::Slides,
         _ => Role::Other,
     }

@@ -56,6 +56,21 @@ export async function readDocument(path) {
   return body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(body);
 }
 
+/** Save a copy of a document the viewer shows, where the person chooses:
+ *  the system's save panel in the app — the path it went to, or null when
+ *  cancelled — and a download in the design preview.
+ *  @param {string} path @param {string} name @returns {Promise<string | null>} */
+export async function saveDocumentAs(path, name) {
+  if (!tauri) {
+    const bytes = await readDocument(path);
+    const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })), download: name });
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    return name;
+  }
+  return tauri.core.invoke("save_document_as", { path });
+}
+
 /** A file a Lab run left, as bytes: `<investigation>/<run>/<path>`.
  *  @param {string} key */
 export async function readLab(key) {

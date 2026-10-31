@@ -457,12 +457,24 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     before = win.commands.length;
     ws().querySelector('[data-study-file-open="sheet.pdf"]').click(); await settle();
     assert(sent(before, 'studyFileOpen')[0]?.name === 'sheet.pdf', 'the PDF did not open');
-    // Told where a .tex is, the window opens it in Codex's editor.
+    // A .tex opens here, to read and edit: saved, and compiled after saving.
+    await win.pushEvents([{type: 'studyFile', name: 'sheet.tex', body: '\\documentclass{article}\n', pdf: true}]); await settle();
+    const form = ws().querySelector('[data-study-file-form][data-name="sheet.tex"]');
+    assert(form && form.querySelector('textarea').value === '\\documentclass{article}\n', form?.outerHTML);
+    form.querySelector('textarea').value = '\\documentclass{article}\n% mine\n';
     before = win.commands.length;
-    await win.pushEvents([{type: 'studyFileAt', path: '/Users/r/Notebooks/sys/files/sheet.tex'}]); await settle();
-    const opened = win.commands.slice(before);
-    assert(opened.some((c) => c.type === 'openBuffer' && c.path === '/Users/r/Notebooks/sys/files/sheet.tex'), JSON.stringify(opened));
-    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    form.querySelector('[data-study-file-compile]').click(); await settle();
+    const both = win.commands.slice(before).map((c) => c.type);
+    assert(both.join() === 'studyFileSave,studyFileCompile', both.join());
+    assert(win.commands.slice(before)[0].body.includes('% mine'), 'what was typed was not saved first');
+    before = win.commands.length;
+    form.querySelector('[data-study-file-open="sheet.pdf"]').click(); await settle();
+    assert(sent(before, 'studyFileOpen')[0]?.name === 'sheet.pdf', 'its PDF did not open from it');
+    before = win.commands.length;
+    form.querySelector('[type="submit"]').click(); await settle();
+    assert(sent(before, 'studyFileSave')[0]?.name === 'sheet.tex', 'Save sent nothing');
+    // Back to where it was opened from.
+    form.querySelector('[data-study-back]').click(); await settle();
   });
 
   await test('The tutor\'s answers draw their citations as chips: over one, its passage; clicked, the source at that place', async () => {

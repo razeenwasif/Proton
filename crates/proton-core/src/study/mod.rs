@@ -90,6 +90,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyAsk { .. }
             | Command::StudyFileOpen { .. }
             | Command::StudyFileCompile { .. }
+            | Command::StudyFileSave { .. }
             | Command::StudyStopAnswer
             | Command::StudyChatNew
             | Command::StudyChatOpen { .. }
@@ -619,6 +620,7 @@ impl Study {
             Command::StudyAsk { text } => self.ask(&text),
             Command::StudyFileOpen { name } => self.open_file(&name),
             Command::StudyFileCompile { name } => self.compile(&name),
+            Command::StudyFileSave { name, body } => self.save_file(&name, &body),
             Command::StudyStopAnswer => {
                 if let Some(tutor) = &mut self.tutor {
                     tutor.interrupt();
@@ -1449,6 +1451,7 @@ impl Study {
         let file = match &source.origin {
             Origin::File { root, rel } => self.kb.file(root, rel),
             Origin::Web { .. } => open.book.web_pdf(id),
+            Origin::Made { file } => Some(open.book.files_dir().join(file)),
             _ => None,
         };
         let Some(file) = file.filter(|f| std::fs::symlink_metadata(f).is_ok_and(|m| m.is_file() && !dataless::is_dataless(&m))) else {
@@ -1636,6 +1639,7 @@ impl Study {
             };
             match &source.origin {
                 Origin::File { root, rel } => self.kb.file(root, rel).map(|path| (path, Kind::from_name(&source.kind), None)),
+                Origin::Made { file } => Some((open.book.files_dir().join(file), Kind::from_name(&source.kind), None)),
                 Origin::Folder { .. } => match folder_at(&self.kb, &source.origin) {
                     Some((dir, _)) if !dir.is_dir() => return vec![notice(format!("{}'s folder is gone: {}", source.title, folder::tilde(&dir)), NoticeLevel::Warn)],
                     found => found.map(|(dir, scope)| (dir, Kind::Folder, Some(scope))),
@@ -1742,9 +1746,9 @@ impl Study {
     }
 
     /// Show a file the tutor wrote, in Proton: a PDF in the document viewer,
-    /// as a source's is; anything else in Codex's editor. Not handed to the
-    /// desktop — the app it would go to (Quark, here) may take a file sent
-    /// while it is running and show nothing.
+    /// as a source's is; anything else in Notebook, to read and edit. Not
+    /// handed to the desktop — the app it would go to (Quark, here) may take
+    /// a file sent while it is running and show nothing.
     fn open_file(&mut self, name: &str) -> Vec<Event> {
         let Some(open) = &self.open else { return Vec::new() };
         let Some(name) = proton_study::tutor::file_name(name) else {
@@ -1758,7 +1762,28 @@ impl Study {
             self.documents.insert(path.clone());
             return vec![Event::Document { path: path.display().to_string(), name, kind: crate::bus::ViewerKind::Pdf, page: None }];
         }
-        vec![Event::StudyFileAt { path: path.display().to_string() }]
+        let body = match std::fs::read_to_string(&path) {
+            Ok(body) => body,
+            Err(why) => return vec![notice(format!("{name}: {why}"), NoticeLevel::Warn)],
+        };
+        let pdf = name.ends_with(".tex") && open.book.files_dir().join(format!("{}.pdf", name.trim_end_matches(".tex"))).is_file();
+        vec![Event::StudyFile { name, body, pdf }]
+    }
+
+    /// Write a file the tutor wrote, as edited in Notebook.
+    fn save_file(&mut self, name: &str, body: &str) -> Vec<Event> {
+        let written = match self.writable() {
+            Ok(book) => book.write_file(name, body),
+            Err(events) => return events,
+        };
+        match written {
+            Ok(_) => {
+                let mut events = vec![notice(format!("Saved {name}."), NoticeLevel::Info)];
+                events.extend(self.open_file(name));
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Error)],
+        }
     }
 
     /// Compile a `.tex` the tutor wrote, asked for with its button.
@@ -1810,10 +1835,62 @@ impl Study {
                         }
                     }
                     events.extend(self.chat_event());
+                    events.extend(self.keep_made_pdf(&pdf));
                 }
                 Err(why) => events.push(notice(format!("{name} did not compile — {why}"), NoticeLevel::Error)),
             }
         }
+        events
+    }
+
+    /// A PDF compiled into `files/`, made a source of the notebook and
+    /// ticked, so the tutor reads it — or, compiled again, its source read
+    /// again: one source a file, however often it is remade.
+    fn keep_made_pdf(&mut self, pdf: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let path = open.book.files_dir().join(pdf);
+        let Ok(meta) = std::fs::metadata(&path) else { return Vec::new() };
+        let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+        let existing = open.book.sources.sources.iter().find(|s| matches!(&s.origin, Origin::Made { file } if file == pdf)).map(|s| s.id.clone());
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        let (id, said) = match existing {
+            Some(id) => {
+                if let Some(source) = book.sources.get_mut(&id) {
+                    source.status = SourceStatus::Reading;
+                    source.size = meta.len();
+                    source.mtime = mtime;
+                }
+                (id.clone(), format!("{pdf} is {id} already: read again as compiled now."))
+            }
+            None => {
+                let id = book.sources.take_id();
+                book.sources.sources.push(Source {
+                    id: id.clone(),
+                    title: pdf.to_string(),
+                    kind: Kind::Pdf.name().to_string(),
+                    origin: Origin::Made { file: pdf.to_string() },
+                    role: role::guess(pdf, Kind::Pdf),
+                    size: meta.len(),
+                    mtime,
+                    sha256: String::new(),
+                    units: units_of(Kind::Pdf),
+                    count: 0,
+                    thin: Vec::new(),
+                    status: SourceStatus::Reading,
+                    added: proton_study::now(),
+                    labels: Vec::new(),
+                });
+                let _ = book.tick(&id);
+                (id.clone(), format!("{pdf} is a source now, {id}, ticked for the tutor."))
+            }
+        };
+        self.start_reading(vec![Item { id, path, kind: Kind::Pdf, download: false, scope: None }]);
+        let mut events = self.saved();
+        events.insert(0, self.list_event());
+        events.push(notice(said, NoticeLevel::Info));
         events
     }
 
@@ -2246,6 +2323,7 @@ impl Study {
         let file = match &source.origin {
             Origin::File { root, rel } => self.kb.file(root, rel),
             Origin::Web { .. } => open.book.web_pdf(id),
+            Origin::Made { file } => Some(open.book.files_dir().join(file)),
             _ => None,
         };
         let meta = file.as_ref().and_then(|f| std::fs::symlink_metadata(f).ok());
@@ -2268,7 +2346,7 @@ impl Study {
             };
             return vec![notice(format!("{}: {why}", source.title), NoticeLevel::Info)];
         };
-        let gone = matches!(source.origin, Origin::File { .. }) && meta.is_none();
+        let gone = matches!(source.origin, Origin::File { .. } | Origin::Made { .. }) && meta.is_none();
         let what = if matches!(source.origin, Origin::Folder { .. }) { "folder" } else { "file" };
         let said = match (&source.status, in_cloud) {
             _ if gone => Some("Its file is gone: these are its words as they were read.".to_string()),
@@ -2279,7 +2357,7 @@ impl Study {
         };
         let view = match body {
             Body::Lines(text) => match Kind::from_name(&source.kind) {
-                Kind::Markdown | Kind::Notebook | Kind::Document | Kind::Web | Kind::Artifact => StudyView::Sections { sections: proton_study::view::sections(&text) },
+                Kind::Markdown | Kind::Notebook | Kind::Document | Kind::Html | Kind::Web | Kind::Artifact => StudyView::Sections { sections: proton_study::view::sections(&text) },
                 _ => StudyView::Lines { text },
             },
             Body::Pages(pages) => StudyView::Pages { pages },
@@ -2481,12 +2559,19 @@ impl Study {
     fn check_files(&mut self) {
         let Some(open) = &mut self.open else { return };
         let mut changed = false;
+        let files = open.book.files_dir();
         for source in &mut open.book.sources.sources {
             if !source.status.has_words() {
                 continue;
             }
             let now = match &source.origin {
-                Origin::File { root, rel } => match self.kb.file(root, rel).and_then(|p| std::fs::symlink_metadata(p).ok()) {
+                Origin::File { .. } | Origin::Made { .. } => match match &source.origin {
+                    Origin::Made { file } => Some(files.join(file)),
+                    Origin::File { root, rel } => self.kb.file(root, rel),
+                    _ => None,
+                }
+                .and_then(|p| std::fs::symlink_metadata(p).ok())
+                {
                     None => SourceStatus::Missing,
                     Some(meta) => {
                         let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());

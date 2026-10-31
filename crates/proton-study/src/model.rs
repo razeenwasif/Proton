@@ -77,6 +77,9 @@ pub enum Origin {
     /// An artifact Claude published, as Proton keeps it: its id, the
     /// version read, and its page in that version's folder.
     Artifact { id: String, seq: u32, file: String },
+    /// A file in the notebook's own `files/` — a PDF compiled from a `.tex`
+    /// the tutor wrote — by its name there.
+    Made { file: String },
     /// A folder read as one source — a lab, its README, code and Makefiles
     /// together: one of the knowledge base, by its root's label and its path
     /// under it, or any other by its path, `~` for home.

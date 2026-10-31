@@ -3,4 +3,4 @@
 /**
  * Where a source came from.
  */
-export type StudyOrigin = { "from": "file", root: string, rel: string, } | { "from": "pasted" } | { "from": "note", note: string, } | { "from": "web", url: string, fetched: number, } | { "from": "artifact", id: string, seq: number, file: string, } | { "from": "folder", root: string | null, path: string, };
+export type StudyOrigin = { "from": "file", root: string, rel: string, } | { "from": "pasted" } | { "from": "note", note: string, } | { "from": "web", url: string, fetched: number, } | { "from": "artifact", id: string, seq: number, file: string, } | { "from": "made", file: string, } | { "from": "folder", root: string | null, path: string, };

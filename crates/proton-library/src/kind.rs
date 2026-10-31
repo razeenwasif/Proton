@@ -17,6 +17,8 @@ pub enum Kind {
     Table,
     /// Word, OpenDocument, RTF, EPUB: read through pandoc.
     Document,
+    /// A web page saved as a file: its article, read as a fetched page is.
+    Html,
     Slides,
     Image,
     Audio,
@@ -47,6 +49,7 @@ impl Kind {
             "srt" | "vtt" => Kind::Captions,
             "csv" | "tsv" => Kind::Table,
             "docx" | "doc" | "odt" | "rtf" | "epub" | "pages" => Kind::Document,
+            "html" | "htm" | "xhtml" => Kind::Html,
             "pptx" | "ppt" | "key" | "odp" => Kind::Slides,
             "png" | "jpg" | "jpeg" | "gif" | "heic" | "webp" | "tif" | "tiff" | "bmp" | "svg" => Kind::Image,
             "mp3" | "m4a" | "wav" | "aac" | "flac" | "ogg" | "opus" => Kind::Audio,
@@ -73,7 +76,7 @@ impl Kind {
     /// search of the whole knowledge base, where reading thousands would
     /// take hours.
     pub fn converted(self) -> bool {
-        matches!(self, Kind::Document | Kind::Slides | Kind::Image)
+        matches!(self, Kind::Document | Kind::Html | Kind::Slides | Kind::Image)
     }
 
     /// Whether it is a recording: added as one, and read only when it is
@@ -107,6 +110,8 @@ impl Kind {
             Kind::Notebook => 32 << 20,
             Kind::Captions => 4 << 20,
             Kind::Document => 128 << 20,
+            // A page saved with its pictures inlined.
+            Kind::Html => 64 << 20,
             Kind::Slides => 512 << 20,
             Kind::Image => 32 << 20,
             // Only a recording's sound is sent to be heard, and it is never
@@ -135,6 +140,7 @@ impl Kind {
             Kind::Captions => "captions",
             Kind::Table => "table",
             Kind::Document => "document",
+            Kind::Html => "html",
             Kind::Slides => "slides",
             Kind::Image => "image",
             Kind::Audio => "audio",
@@ -149,7 +155,7 @@ impl Kind {
 }
 
 /// Every kind, for reading one back by name.
-const ALL: [Kind; 17] = [
+const ALL: [Kind; 18] = [
     Kind::Markdown,
     Kind::Text,
     Kind::Pdf,
@@ -158,6 +164,7 @@ const ALL: [Kind; 17] = [
     Kind::Captions,
     Kind::Table,
     Kind::Document,
+    Kind::Html,
     Kind::Slides,
     Kind::Image,
     Kind::Audio,

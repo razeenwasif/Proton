@@ -1369,6 +1369,7 @@ impl Workspace {
             | Command::StudyAsk { .. }
             | Command::StudyFileOpen { .. }
             | Command::StudyFileCompile { .. }
+            | Command::StudyFileSave { .. }
             | Command::StudyStopAnswer
             | Command::StudyChatNew
             | Command::StudyChatOpen { .. }

@@ -8,7 +8,7 @@
  * is drawn in, and the keys it takes.
  */
 
-import { readDocument } from "./bridge.js";
+import { readDocument, saveDocumentAs } from "./bridge.js";
 import { createPdfView } from "./pdf-view.js";
 
 const panel = () => /** @type {HTMLElement | null} */ (document.getElementById("doc-viewer"));
@@ -23,6 +23,9 @@ let shown = false;
 
 /** Which open is the current one, so one superseded while it reads stops. */
 let generation = 0;
+
+/** The document on screen: its path and name, to save a copy of. */
+let current = /** @type {{path: string, name: string} | null} */ (null);
 
 function theView() {
   if (view) return view;
@@ -60,6 +63,7 @@ export async function openDocument(event) {
   // Nothing underneath keeps the keyboard: a notebook cell or a field left
   // focused there would otherwise be typed into, unseen.
   /** @type {HTMLElement | null} */ (document.activeElement)?.blur?.();
+  current = { path: event.path, name: event.name };
   const name = label("name");
   if (name) name.textContent = event.name;
   const at = label("at");
@@ -74,6 +78,19 @@ export async function openDocument(event) {
   }
   if (mine !== generation) return;
   await pdf.show(bytes, { page: event.page });
+}
+
+/** Save a copy of the document on screen; what happened, in words, or null
+ *  if nothing did. */
+export async function saveDocument() {
+  if (!current) return null;
+  const file = current.name.toLowerCase().endsWith(".pdf") ? current.name : `${current.name}.pdf`;
+  try {
+    const to = await saveDocumentAs(current.path, file);
+    return to ? `Saved a copy as ${to}` : null;
+  } catch (err) {
+    return `Could not save a copy: ${String(err)}`;
+  }
 }
 
 export function closeDocument() {

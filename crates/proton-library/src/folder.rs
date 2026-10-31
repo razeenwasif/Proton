@@ -208,7 +208,7 @@ fn words(found: &Found, pdfs: &Pdfs) -> Result<String, String> {
     let kind = Kind::of(&found.path);
     let body = match kind {
         Kind::Markdown | Kind::Text | Kind::Code | Kind::Tex | Kind::Table | Kind::Notebook | Kind::Pdf | Kind::Captions => extract::read(&found.path, kind, pdfs),
-        Kind::Document => return Err("a document: add it on its own to read it".into()),
+        Kind::Document | Kind::Html => return Err("a document: add it on its own to read it".into()),
         Kind::Slides => return Err("slides: add them on their own to read them".into()),
         Kind::Image => return Err("a picture".into()),
         Kind::Audio | Kind::Video => return Err("a recording: add it on its own to transcribe it".into()),
