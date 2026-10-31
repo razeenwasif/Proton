@@ -570,6 +570,48 @@ fn a_command_declined_never_runs_and_the_model_is_told() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+#[test]
+fn a_question_asked_in_codex_carries_the_open_file_once_until_it_changes() {
+    let _guard = exclusive();
+    let root = std::env::temp_dir().join(format!("proton-agent-open-file-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/queue.h"), "int queue_init(void);\nint queue_push(int x);\n").unwrap();
+    let (url, seen) = api(vec![answers(), answers(), answers()]);
+    std::env::set_var("ANTHROPIC_BASE_URL", &url);
+    std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key");
+    let mut ws = Workspace::rooted(&root);
+    ws.apply(Command::SetSetting { key: "agent.openFile".into(), value: serde_json::json!(true) });
+    ws.apply(Command::SetMode { mode: proton_core::ModeId::Codex });
+    ws.apply(Command::OpenBuffer { path: "src/queue.h".into() });
+
+    ws.apply(Command::Ask { text: "why is there a red line here?".into() });
+    settle(&mut ws);
+    let first = seen.recv().unwrap();
+    assert!(first.contains("# The file open in the editor") && first.contains("`src/queue.h` (all 2 lines)") && first.contains("int queue_push(int x);"), "{first}");
+    // The words typed are what the transcript shows.
+    let you = ws.agent().transcript().iter().find(|e| e.speaker == proton_core::agent::Speaker::You).unwrap().text.clone();
+    assert!(you.starts_with("why is there a red line here?"));
+
+    // Asked again, unchanged: said to be still open, not sent again.
+    ws.apply(Command::Ask { text: "and now?".into() });
+    settle(&mut ws);
+    let second = seen.recv().unwrap();
+    assert!(second.contains("`src/queue.h` is still open, unchanged since it was shown above"), "{second}");
+    assert_eq!(second.matches("int queue_push(int x);").count(), 1, "the file was sent twice");
+
+    // Turned off, nothing is added.
+    ws.apply(Command::SetSetting { key: "agent.openFile".into(), value: serde_json::json!(false) });
+    ws.apply(Command::Ask { text: "plain".into() });
+    settle(&mut ws);
+    let third = seen.recv().unwrap();
+    // The two earlier questions' files are in the history; this one adds none.
+    assert_eq!(third.matches("The file open in the editor").count(), 2, "{third}");
+    // These tests share one settings file: left as it was found.
+    ws.apply(Command::SetSetting { key: "agent.openFile".into(), value: serde_json::json!(true) });
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 fn tasks(events: &[Event]) -> Vec<proton_core::tasks::Task> {
     events
         .iter()

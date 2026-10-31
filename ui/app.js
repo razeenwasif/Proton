@@ -107,8 +107,26 @@ function setting(key) {
   return key.split(".").reduce((node, part) => node?.[part], lastSettings);
 }
 
+/** The file open in Codex, as the agent's composer names it. */
+let openFileName = null;
+
+/** The chip saying which file goes with a question asked in Codex — or
+ *  that none does, struck through, when that is switched off. */
+function renderOpenFileChip() {
+  const on = setting("agent.openFile") !== false;
+  for (const chip of $$("[data-open-file-chip]")) {
+    chip.hidden = !openFileName;
+    chip.textContent = openFileName ?? "";
+    chip.classList.toggle("off", !on);
+    chip.title = on
+      ? `${openFileName} goes with each question, so the agent sees what you see. Click to stop sending it.`
+      : `${openFileName} is not sent with questions. Click to send the file open with each one.`;
+  }
+}
+
 function renderSettings(event) {
   lastSettings = event.values ?? {};
+  renderOpenFileChip();
 
   const where = $("[data-settings-path]");
   if (where) where.textContent = event.path || "";
@@ -277,6 +295,10 @@ document.addEventListener("click", (e) => {
   // stop narrowing. An empty selection is "no restriction".
   if (e.target.closest?.("[data-library-all]") || e.target.closest?.("[data-scope-chip]")) {
     dispatch({ type: "setLibraryScope", sources: [] });
+    return;
+  }
+  if (e.target.closest?.("[data-open-file-chip]")) {
+    dispatch({ type: "setSetting", key: "agent.openFile", value: setting("agent.openFile") === false });
     return;
   }
   if (e.target.closest?.("[data-library-refresh]")) {
@@ -3295,6 +3317,9 @@ function renderEvent(event) {
       if (path) path.title = active?.path ?? "";
       const extension = active?.name.match(/\.([^.]+)$/)?.[1];
       $("#sl-filetype").textContent = extension ?? "";
+      // Only a file on disk goes with a question; an unnamed buffer does not.
+      openFileName = active?.path ? active.name : null;
+      renderOpenFileChip();
       break;
     }
 

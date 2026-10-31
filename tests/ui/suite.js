@@ -1459,6 +1459,25 @@ await test('Antigravity is a provider, with its own models and its own tools nam
   assert(models[0] === 'gemini-4-argon-high' && models.includes('gemini-3.8-flash-high') && $('[data-model-pick]').value === 'gemini-4-argon-high', `wrong models: ${models}`);
   assert([...doc.querySelectorAll('#codex-dock .tool b')].some(b => b.textContent === 'Read file'), 'its tool row is unnamed');
 });
+await test('The file open in Codex is named in the composer as going with each question, and the chip switches that off and on', async () => {
+  await showAgentDock();
+  await win.pushEvents([{type: 'buffers', names: [{name: 'queue.h', path: 'src/queue.h', modified: false}], active: 0}]);
+  const chip = $('#codex-dock [data-open-file-chip]');
+  assert(chip && !chip.hidden && chip.textContent === 'queue.h' && !chip.classList.contains('off'), `chip: ${chip?.outerHTML}`);
+  let before = win.commands.length;
+  chip.click(); await settle();
+  const off = win.commands.slice(before).find((c) => c.type === 'setSetting' && c.key === 'agent.openFile');
+  assert(off?.value === false, JSON.stringify(off));
+  await win.dispatch({type: 'setSetting', key: 'agent.openFile', value: false}); await settle();
+  assert(chip.classList.contains('off') && chip.title.includes('not sent'), chip.title);
+  before = win.commands.length;
+  chip.click(); await settle();
+  assert(win.commands.slice(before).find((c) => c.type === 'setSetting' && c.key === 'agent.openFile')?.value === true, 'not switched back on');
+  await win.dispatch({type: 'setSetting', key: 'agent.openFile', value: true}); await settle();
+  // An unnamed buffer goes with nothing, and says nothing.
+  await win.pushEvents([{type: 'buffers', names: [{name: '[No Name]', path: null, modified: false}], active: 0}]);
+  assert(chip.hidden, 'a buffer with no file is named as going with the question');
+});
 await test('A file the agent wrote has an Undo, and a command it proposes runs only from Run', async () => {
   await showAgentDock();
   await win.pushEvents([{type: 'agent', provider: 'claude', model: 'claude-opus-5-5', credential: '', activity: 'working', inputTokens: 0, outputTokens: 0, cachedTokens: 0,

@@ -1906,6 +1906,9 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
 /* The composer's reminder that the library is narrowed. Not a decoration:
    a scope that says so nowhere is one you forget you set. */
 .scope-chip { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.file-chip { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); cursor: pointer; }
+.file-chip::before { content: "📄 "; }
+.file-chip.off { color: var(--ink-4); text-decoration: line-through; border-color: transparent; }
 
 /* A library row: the citation, and the passage under it. Two lines because
    both halves are prose and both are long — a filename fits beside its

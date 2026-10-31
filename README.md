@@ -299,7 +299,8 @@ puts it back as it was — if nothing has changed it since. With "Let the agent
 write files" off, its edits are staged as a diff, hunk by hunk, for you to
 accept; a file with unsaved changes of yours, or outside the project, is always
 staged. A command it wants to run — a build, a test, an install — waits on its
-row for you to Run or Skip, and what it printed goes back to it. It shows its tool calls with results and timings, and what it
+row for you to Run or Skip, and what it printed goes back to it. Asked in Codex, a question carries the file you have open — once, then only
+when it has changed — named by a chip you can click to stop it. It shows its tool calls with results and timings, and what it
 says about your notes carries a citation you can open. Its answers are
 markdown: code comes in blocks coloured the way the editor colours that
 language, with a button to copy it, and TeX (`$…$`, `\(…\)`, `$$…$$`, `\[…\]`)

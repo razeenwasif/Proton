@@ -167,6 +167,9 @@ pub struct Workspace {
     last_written: Option<Written>,
     /// Commands the agent proposed: waiting to be run, or running.
     proposed: Vec<Proposed>,
+    /// The file last shown to the agent with a question asked in Codex, and
+    /// a hash of what it said then: shown again only when it has changed.
+    shown_file: Option<(PathBuf, u64)>,
     /// The file the open conversation lives in. `None` until it has a
     /// question in it — a conversation with nothing said is not worth a file.
     chat_path: Option<PathBuf>,
@@ -1256,6 +1259,7 @@ impl Workspace {
                 self.agent.clear();
                 self.waiting.clear();
                 self.drop_commands();
+                self.shown_file = None;
                 self.chat_path = None;
                 vec![self.agent_event(), self.chats_event()]
             }
@@ -1265,6 +1269,7 @@ impl Workspace {
                 match crate::chats::read(&full) {
                     Ok(chat) => {
                         self.agent.restore(chat.messages);
+                        self.shown_file = None;
                         self.chat_path = Some(full);
                         vec![self.agent_event(), self.chats_event()]
                     }
@@ -4034,7 +4039,12 @@ impl Workspace {
         if text.trim().is_empty() {
             return Vec::new();
         }
-        let text = &self.with_context(text);
+        let mut text = self.with_context(text);
+        // Asked in Codex, the question comes with the file open there.
+        if self.mode == ModeId::Codex && self.settings.bool("agent.openFile", true) {
+            text.push_str(&self.open_file_context());
+        }
+        let text = &text;
         let busy = self.agent.is_busy();
         self.tasks.push(text, busy);
         if busy {
@@ -4369,6 +4379,48 @@ impl Workspace {
             });
         }
         out
+    }
+
+    /// The file open in Codex's editor, for a question asked there: whole,
+    /// or around the cursor when it is long; unsaved work as it is on screen,
+    /// and said to be; once only while it stays the same — after that, a
+    /// line saying it is still open, and where the cursor is.
+    fn open_file_context(&mut self) -> String {
+        /// The most of a file shown whole, in characters.
+        const WHOLE: usize = 60_000;
+        /// Lines either side of the cursor shown of a longer one.
+        const AROUND: usize = 300;
+        let buffer = self.editor.buffer();
+        let Some(path) = buffer.path().map(Path::to_path_buf) else { return String::new() };
+        let text = buffer.contents();
+        let line = buffer.position(buffer.cursor.offset).line + 1;
+        // Relative to the project, by either spelling of it: a buffer keeps
+        // the real path, and the project may have been opened through a link.
+        let real = self.root().canonicalize().unwrap_or_else(|_| self.root().to_path_buf());
+        let shown = path.strip_prefix(self.root()).or_else(|_| path.strip_prefix(&real)).unwrap_or(&path).display().to_string();
+        let unsaved = if buffer.is_modified() { ", with unsaved changes — this is the text on screen, not on disk" } else { "" };
+        let hash = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut h);
+            h.finish()
+        };
+        if self.shown_file.as_ref().is_some_and(|(p, h)| *p == path && *h == hash) {
+            return format!("\n\n# The file open in the editor\n`{shown}` is still open, unchanged since it was shown above; the cursor is on line {line}.");
+        }
+        self.shown_file = Some((path.clone(), hash));
+        let lang = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let lines: Vec<&str> = text.lines().collect();
+        let (body, which) = match text.len() <= WHOLE {
+            true => (text.clone(), format!("all {} lines", lines.len())),
+            false => {
+                let from = line.saturating_sub(AROUND + 1);
+                let to = (line + AROUND).min(lines.len());
+                let numbered: Vec<String> = lines[from..to].iter().enumerate().map(|(i, l)| format!("{:>5}  {l}", from + i + 1)).collect();
+                (numbered.join("\n"), format!("lines {}-{to} of {}, around the cursor — read_file has the rest", from + 1, lines.len()))
+            }
+        };
+        format!("\n\n# The file open in the editor\n`{shown}` ({which}{unsaved}); the cursor is on line {line}.\n\n```{lang}\n{}\n```", body.trim_end_matches('\n'))
     }
 
     /// The text selected in the focused editor.

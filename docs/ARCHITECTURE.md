@@ -2006,6 +2006,17 @@ way. A cancelled or cleared conversation stops what it started. Antigravity
 cannot stop mid-turn to ask, so its own commands stay refused and it is told to
 give them to the person instead.
 
+**The file open, with every question asked in Codex.** `agent.openFile`, on
+unless turned off — from Settings or the chip in Codex's composer, which names
+the file. The file in the editor follows the question under its own heading
+(`open_file_context`): its path from the project, the line the cursor is on,
+and its text — what is on screen, unsaved changes said to be — whole up to
+60,000 characters, else 300 numbered lines either side of the cursor with
+`read_file` named for the rest. Asked again with the same text, it is not
+sent again: a line says it is still open, unchanged, and where the cursor is;
+a new conversation, or one reopened, shows it afresh. Only a file on disk, and
+only for a question asked in Codex — the other modes have their own mentions.
+
 **The review it stages.** A staged change reaches neither the buffer nor the
 disk until somebody accepts it.
 

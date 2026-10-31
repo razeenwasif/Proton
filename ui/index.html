@@ -459,6 +459,7 @@
                 <span class="select" data-mention="@selection" title="Send the selected text with the question">@selection</span>
                 <span class="select" data-mention="@dataframe" title="Send the selected cell's table with the question">@dataframe</span>
                 <span class="select scope-chip" data-scope-chip hidden></span>
+                <span class="select file-chip" data-open-file-chip role="button" tabindex="0" hidden></span>
                 <span class="grow"></span>
                 <span class="chip" data-agent-provider title="Which service is answering — change it in Settings > AI &amp; models"></span>
                 <select class="model-pick" data-model-pick title="Which model answers. Blank uses the provider's default."></select>
@@ -1368,6 +1369,7 @@
           <h4>Writing files</h4>
           <p>On, the agent creates and changes files in the project as it works, and each change can be undone from its row in the agent pane. Off, Claude, Gemini and Codex stage their changes for you to review in the editor, and Antigravity only reads. Either way nothing is written outside the project, and a file with unsaved changes of yours is staged rather than written.</p>
           <label class="st-toggle"><input type="checkbox" data-set-bool="agent.writeFiles" checked> Let the agent write files</label>
+          <label class="st-toggle"><input type="checkbox" data-set-bool="agent.openFile" checked> Send the file open in Codex with each question</label>
           <p>Antigravity works with its own tools, and files it changes are re-read when it finishes. It cannot stop to ask before running a command, so it gives you the command to run instead.</p>
         </div>
       </div>

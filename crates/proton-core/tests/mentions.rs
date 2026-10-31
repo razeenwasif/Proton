@@ -219,7 +219,9 @@ fn an_email_address_does_not_attach_a_file() {
 
     let out = sent(&space);
     assert!(!out.contains("Nothing is selected"), "{out}");
-    assert!(!out.contains("fn one()"), "{out}");
+    // No selection section: the file open goes with every question asked
+    // in Codex, but that is its own heading, not the mention's.
+    assert!(!out.contains("# @selection"), "{out}");
 }
 
 #[test]
