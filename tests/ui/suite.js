@@ -1495,6 +1495,29 @@ await test('A question shows what was typed with what went along as chips, and a
   assert(sentNow.some((c) => c.type === 'openBuffer' && c.path === '/Users/r/Github/Research/TinyML/Review.tex'), JSON.stringify(sentNow));
   assert(sentNow.some((c) => c.type === 'placeCursor' && c.line === 11), JSON.stringify(sentNow));
 });
+await test('Many tool calls fold into one line that counts them, with a command to answer kept out of the fold', async () => {
+  await showAgentDock();
+  const read = (n, failed) => ({id: `R${n}`, name: 'view_file', detail: `Path=/Users/r/f${n}.tex`, result: failed ? 'file does not exist' : '', state: failed ? 'failed' : 'done', undo: false, asks: false});
+  const calls = [...Array.from({length: 10}, (_, n) => read(n, n !== 5)),
+    {id: 'C9', name: 'run_command', detail: 'make', result: 'waiting for you to run it or not', state: 'running', undo: false, asks: true}];
+  const push = (text) => win.pushEvents([{type: 'agent', provider: 'antigravity', model: 'gemini-4-argon-high', credential: '', activity: 'working', inputTokens: 0, outputTokens: 0, cachedTokens: 0,
+    transcript: [{speaker: 'you', text: 'read it', thinking: '', streaming: false, calls: [], attached: []},
+      {speaker: 'proton', text, thinking: '', streaming: true, calls, attached: []}]}]);
+  await push('Reading');
+  await nextFrame();
+  const dock = $('#codex-dock');
+  const fold = dock.querySelector('.tool-fold');
+  assert(fold && !fold.open, 'ten calls were not folded');
+  assert(fold.querySelector('summary').textContent.includes('Read file ×10') && fold.querySelector('.fold-failed')?.textContent === '9 failed', fold.querySelector('summary').textContent);
+  assert(fold.querySelectorAll('.tool').length === 10, 'the rows are not inside the fold');
+  assert(dock.querySelector('.tool-ask') && !fold.querySelector('.tool-ask'), 'the command to answer was folded away');
+  // Opened, it stays open as the answer goes on.
+  fold.open = true; fold.dispatchEvent(new win.Event('toggle')); await settle();
+  await push('Reading more');
+  await nextFrame();
+  assert(dock.querySelector('.tool-fold')?.open, 'a redraw closed the fold');
+  dock.querySelector('.tool-fold').open = false; dock.querySelector('.tool-fold').dispatchEvent(new win.Event('toggle'));
+});
 await test('A file the agent wrote has an Undo, and a command it proposes runs only from Run', async () => {
   await showAgentDock();
   await win.pushEvents([{type: 'agent', provider: 'claude', model: 'claude-opus-5-5', credential: '', activity: 'working', inputTokens: 0, outputTokens: 0, cachedTokens: 0,

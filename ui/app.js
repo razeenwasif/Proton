@@ -342,6 +342,14 @@ document.addEventListener("click", (e) => {
   if (cite) dispatch({ type: "openCitation", cite: cite.dataset.cite });
 });
 
+// A tool fold opened stays open as the answer streams under it.
+document.addEventListener("toggle", (e) => {
+  const fold = e.target?.closest?.("[data-tool-fold]");
+  if (!fold) return;
+  if (fold.open) openFolds.add(fold.dataset.toolFold);
+  else openFolds.delete(fold.dataset.toolFold);
+}, true);
+
 // In an answer or a notebook's prose, a code block's button copies the code,
 // and a link opens in the browser rather than in the editor's own window.
 // (Chat's answers have the same two, handled in claude.js.)
@@ -4451,6 +4459,36 @@ function paintThread(thread, transcript, keys) {
   threadDrawn.set(thread, { keys, rows });
 }
 
+/** Tool folds the reader opened, by their first call, so a redraw while an
+ *  answer streams does not close one under them. */
+const openFolds = new Set();
+
+/** An answer's tool calls: a few as rows, more folded into one line that
+ *  counts them — what each did, how many failed — and opens to the rows.
+ *  A row waiting on you (Run or Skip) or offering Undo stays out of the
+ *  fold: something you have to answer is not to be hidden. */
+function callsHtml(calls) {
+  const FEW = 3;
+  if (calls.length <= FEW) return calls.map(toolHtml).join("");
+  const loud = calls.filter((c) => c.asks || c.undo);
+  const quiet = calls.filter((c) => !c.asks && !c.undo);
+  if (quiet.length <= FEW) return calls.map(toolHtml).join("");
+  const counts = new Map();
+  for (const c of quiet) {
+    const name = TOOL_LABEL[c.name] ?? c.name;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const what = [...counts].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name)).join(", ");
+  const failed = quiet.filter((c) => c.state === "failed").length;
+  const running = quiet.some((c) => CALL_STATE[c.state] === "spin");
+  const key = quiet[0].id;
+  const summary = `<svg class="i${running ? " spin" : ""}"><use href="#i-${running ? "k-other" : "check"}"/></svg>` +
+    `<span>${escapeHtml(what)}</span>` +
+    (failed ? `<span class="fold-failed">${failed} failed</span>` : "");
+  return `<details class="tool-fold" data-tool-fold="${escapeHtml(key)}"${openFolds.has(key) ? " open" : ""}>` +
+    `<summary>${summary}</summary>${quiet.map(toolHtml).join("")}</details>` + loud.map(toolHtml).join("");
+}
+
 function entryHtml(entry) {
   const you = entry.speaker === "you";
   const who = you
@@ -4462,7 +4500,7 @@ function entryHtml(entry) {
   const thinking = entry.thinking
     ? `<details class="thought"><summary><svg class="i"><use href="#i-bulb"/></svg>Thinking</summary>${answerHtml(entry.thinking, entry.streaming && !entry.text)}</details>`
     : "";
-  const calls = entry.calls.map(toolHtml).join("");
+  const calls = callsHtml(entry.calls);
   // A caret while the text is still arriving, so an empty answer that is on
   // its way does not look like an empty answer that arrived.
   const caret = entry.streaming ? `<span class="cursor"></span>` : "";

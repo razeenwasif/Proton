@@ -854,6 +854,15 @@ kbd {
   font: 11.5px var(--mono); color: var(--ink-3);
 }
 .tool b { color: var(--info); font-weight: 500; }
+.tool-fold { margin: 5px 0; }
+.tool-fold > summary { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: rgba(0, 0, 0, 0.18); box-shadow: var(--spec); font: 11.5px var(--mono); color: var(--ink-3); cursor: pointer; list-style: none; }
+.tool-fold > summary::-webkit-details-marker { display: none; }
+.tool-fold > summary::after { content: "▸"; margin-left: auto; color: var(--ink-4); }
+.tool-fold[open] > summary::after { content: "▾"; }
+.tool-fold > summary > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--info); }
+.tool-fold > summary .i { width: 12px; height: 12px; flex: none; opacity: .85; }
+.fold-failed { flex: none; color: var(--err); }
+.tool-fold > .tool { margin-left: 10px; }
 .tool .t { margin-left: auto; font-size: 10px; color: var(--ink-4); }
 .tool-undo { flex: none; padding: 1px 8px; border: 1px solid var(--line, rgba(255,255,255,0.12)); border-radius: 6px; background: none; color: var(--ink-2, inherit); font: 10.5px var(--mono); cursor: pointer; }
 .tool-undo:hover { color: var(--info); border-color: var(--info); }
