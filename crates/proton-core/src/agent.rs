@@ -70,6 +70,10 @@ pub struct Entry {
     pub calls: Vec<ToolCall>,
     /// The turn is still arriving.
     pub streaming: bool,
+    /// What went with a question besides its words — the file open, a
+    /// mention's context — by name: sent to the model, drawn as chips.
+    #[serde(default)]
+    pub attached: Vec<String>,
 }
 
 impl Entry {
@@ -80,8 +84,41 @@ impl Entry {
             thinking: String::new(),
             calls: Vec::new(),
             streaming: false,
+            attached: Vec::new(),
         }
     }
+}
+
+/// The headings context is appended under, after a question's words: the
+/// file open, and each mention's.
+const CONTEXT: [&str; 6] = ["The file open in the editor", "@selection", "@dataframe", "@sheet", "@circuit", "@logic"];
+
+/// A question as it was typed, and the names of what was appended to it:
+/// for the bubble and the task list, which show what you wrote, while the
+/// model is sent the whole.
+pub fn split_context(text: &str) -> (String, Vec<String>) {
+    let starts = |at: usize| CONTEXT.iter().find(|h| text[at..].starts_with(&format!("\n\n# {h}\n")));
+    let Some(first) = text.match_indices("\n\n# ").map(|(i, _)| i).find(|&i| starts(i).is_some()) else {
+        return (text.to_string(), Vec::new());
+    };
+    let mut attached = Vec::new();
+    for (i, _) in text.match_indices("\n\n# ").filter(|&(i, _)| i >= first) {
+        let Some(heading) = starts(i) else { continue };
+        let label = match *heading {
+            // The file by its name in backticks on the line after.
+            "The file open in the editor" => text[i..]
+                .lines()
+                .nth(3)
+                .and_then(|l| l.split('`').nth(1))
+                .map(|path| path.to_string())
+                .unwrap_or_else(|| "the file open".into()),
+            mention => mention.to_string(),
+        };
+        if !attached.contains(&label) {
+            attached.push(label);
+        }
+    }
+    (text[..first].to_string(), attached)
 }
 
 /// How the agent is doing, for the composer and the statusline.
@@ -714,8 +751,11 @@ impl Agent {
 
         self.conversation
             .push(Message::user(vec![Block::text(text)]));
+        // What was typed, in the bubble; what went with it, as its chips.
+        let (said, attached) = split_context(text);
         self.transcript.push(Entry {
-            text: text.to_string(),
+            text: said,
+            attached,
             ..Entry::new(Speaker::You)
         });
         // One entry for the whole reply, however many round trips it takes.
@@ -1031,8 +1071,10 @@ impl Agent {
 ",
                         );
                     if !text.is_empty() {
+                        let (said, attached) = split_context(&text);
                         self.transcript.push(Entry {
-                            text,
+                            text: said,
+                            attached,
                             ..Entry::new(Speaker::You)
                         });
                     }
@@ -1295,6 +1337,20 @@ mod tests {
         assert_eq!(first_line("only one"), "only one");
         assert_eq!(first_line("first\nsecond\nthird"), "first (+2 more)");
         assert_eq!(first_line(""), "");
+    }
+
+    #[test]
+    fn a_question_is_shown_as_typed_and_what_went_with_it_by_name() {
+        let sent = "why the red line?\n\n# The file open in the editor\n`src/queue.h` (all 2 lines); the cursor is on line 1.\n\n```h\nint x;\n```\n\n# @selection\n`queue.h` lines 1-1\n\n```\nint x;\n```";
+        assert_eq!(split_context(sent), ("why the red line?".to_string(), vec!["src/queue.h".to_string(), "@selection".to_string()]));
+        // A heading of the person's own is part of what they wrote.
+        let own = "notes:\n\n# Plan\nstep one";
+        assert_eq!(split_context(own), (own.to_string(), Vec::new()));
+        // Restored from a conversation's file, as typed too.
+        let mut agent = Agent::new("/tmp");
+        agent.restore(vec![Message::user(vec![Block::text(sent)])]);
+        assert_eq!(agent.transcript()[0].text, "why the red line?");
+        assert_eq!(agent.transcript()[0].attached.len(), 2);
     }
 
     #[test]

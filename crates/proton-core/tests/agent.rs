@@ -590,8 +590,9 @@ fn a_question_asked_in_codex_carries_the_open_file_once_until_it_changes() {
     let first = seen.recv().unwrap();
     assert!(first.contains("# The file open in the editor") && first.contains("`src/queue.h` (all 2 lines)") && first.contains("int queue_push(int x);"), "{first}");
     // The words typed are what the transcript shows.
-    let you = ws.agent().transcript().iter().find(|e| e.speaker == proton_core::agent::Speaker::You).unwrap().text.clone();
-    assert!(you.starts_with("why is there a red line here?"));
+    // The bubble keeps what was typed, the file named beside it.
+    let you = ws.agent().transcript().iter().find(|e| e.speaker == proton_core::agent::Speaker::You).unwrap().clone();
+    assert_eq!((you.text.as_str(), you.attached.clone()), ("why is there a red line here?", vec!["src/queue.h".to_string()]));
 
     // Asked again, unchanged: said to be still open, not sent again.
     ws.apply(Command::Ask { text: "and now?".into() });

@@ -110,6 +110,17 @@ function safeUrl(url) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : "";
 }
 
+/** A link to a file on this machine, and the line it points at if it does:
+ *  `file:///Users/x/a.c#L37` or `#L37-L40`. Anything else is not one.
+ *  @param {string} href */
+export function filePath(href) {
+  const m = /^file:\/\/(\/[^#?]+)(?:#L(\d+)(?:-L?\d+)?)?$/i.exec(href.trim());
+  if (!m) return null;
+  let path = m[1];
+  try { path = decodeURIComponent(path); } catch { /* left as written */ }
+  return { path, line: m[2] ? Number(m[2]) : null };
+}
+
 /** Inline markup, in text that has already been escaped.
  *  @param {string} text escaped @param {Options} o */
 function inline(text, o) {
@@ -137,6 +148,14 @@ function inline(text, o) {
   // Links and images: [text](url) — the url arrives escaped, so `&amp;` is
   // put back before it is checked and escaped again for the attribute.
   out = out.replace(/(!?)\[([^\]\n]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (whole, bang, label, href) => {
+    // A file on this machine — `file:///…`, the way agents link one — is
+    // named by its file alone, its whole path kept for over it and a click.
+    const file = filePath(href.replace(/&amp;/g, "&"));
+    if (file && !bang) {
+      const name = (unescapeHtml(label).split("/").pop() || file.path.split("/").pop() || file.path).trim();
+      const at = file.line ? ` · line ${file.line}` : "";
+      return hold(`<span class="file-link" data-file-link="${esc(file.path)}"${file.line ? ` data-file-line="${file.line}"` : ""} title="${esc(file.path)}${at}">${esc(name)}</span>`);
+    }
     const url = safeUrl(href.replace(/&amp;/g, "&"));
     if (!url) return whole;
     const shown = bang ? `${label || "image"} ↗` : label || url;

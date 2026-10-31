@@ -11,4 +11,9 @@ thinking: string, calls: Array<ToolCall>,
 /**
  * The turn is still arriving.
  */
-streaming: boolean, };
+streaming: boolean, 
+/**
+ * What went with a question besides its words — the file open, a
+ * mention's context — by name: sent to the model, drawn as chips.
+ */
+attached: Array<string>, };

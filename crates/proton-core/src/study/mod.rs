@@ -1741,8 +1741,10 @@ impl Study {
         self.chat_event().into_iter().collect()
     }
 
-    /// Hand a file the tutor wrote to the app that opens it: a PDF to the
-    /// reader, a `.tex` to whatever edits it.
+    /// Show a file the tutor wrote, in Proton: a PDF in the document viewer,
+    /// as a source's is; anything else in Codex's editor. Not handed to the
+    /// desktop — the app it would go to (Quark, here) may take a file sent
+    /// while it is running and show nothing.
     fn open_file(&mut self, name: &str) -> Vec<Event> {
         let Some(open) = &self.open else { return Vec::new() };
         let Some(name) = proton_study::tutor::file_name(name) else {
@@ -1752,11 +1754,11 @@ impl Study {
         if !path.is_file() {
             return vec![notice(format!("{name} is not in the notebook's files/ any more."), NoticeLevel::Warn)];
         }
-        let program = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-        match std::process::Command::new(program).arg(&path).spawn() {
-            Ok(_) => Vec::new(),
-            Err(why) => vec![notice(format!("could not open {name}: {why}"), NoticeLevel::Warn)],
+        if crate::bus::ViewerKind::of(&path).is_some() {
+            self.documents.insert(path.clone());
+            return vec![Event::Document { path: path.display().to_string(), name, kind: crate::bus::ViewerKind::Pdf, page: None }];
         }
+        vec![Event::StudyFileAt { path: path.display().to_string() }]
     }
 
     /// Compile a `.tex` the tutor wrote, asked for with its button.

@@ -3,9 +3,13 @@ import type { TaskState } from "./TaskState";
 
 export type Task = { id: number, 
 /**
- * What was asked, as it was typed.
+ * What was asked, with what went with it: what the model is sent.
  */
-prompt: string, state: TaskState, 
+prompt: string, 
+/**
+ * What was asked, as it was typed: what the list shows.
+ */
+shown: string, state: TaskState, 
 /**
  * One line about what happened: the answer's first sentence, or why it
  * failed. Empty while it is still queued.

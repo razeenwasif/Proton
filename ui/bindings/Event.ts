@@ -349,7 +349,7 @@ drafts: Array<StudyDrafted>,
  * An exam paper's sections, how long it is sat for, what the past
  * papers it is like are like, and the past paper it is, if it is one.
  */
-sections: Array<StudyPaperSection>, minutes: number | null, blueprint: string, source: string | null, } | { "type": "studyTask", id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string, } | { "type": "studyChatLive", id: string, live: StudyLive, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
+sections: Array<StudyPaperSection>, minutes: number | null, blueprint: string, source: string | null, } | { "type": "studyTask", id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string, } | { "type": "studyChatLive", id: string, live: StudyLive, } | { "type": "studyFileAt", path: string, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
 /**
  * Whether it is a source of the notebook too.
  */

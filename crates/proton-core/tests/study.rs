@@ -975,6 +975,17 @@ fn a_tex_file_the_tutor_writes_is_kept_in_files_and_compiled_only_when_asked() {
     assert!(turns[0].files[0].pdf && files.join("sheet.pdf").is_file());
     let names: Vec<String> = std::fs::read_dir(&files).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
     assert!(!names.iter().any(|n| n.ends_with(".aux") || n.ends_with(".log")), "{names:?}");
+    // Opened in Proton: the PDF in the document viewer, which may then read
+    // it; the .tex in Codex's editor.
+    let events = session.apply(Command::StudyFileOpen { name: "sheet.pdf".into() });
+    let shown = events.iter().find_map(|e| match e {
+        Event::Document { path, .. } => Some(path.clone()),
+        _ => None,
+    });
+    assert!(shown.as_deref().is_some_and(|p| p.ends_with("files/sheet.pdf")), "{events:?}");
+    assert!(session.document_file(shown.as_deref().unwrap()).is_some(), "the viewer may not read it");
+    let events = session.apply(Command::StudyFileOpen { name: "sheet.tex".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::StudyFileAt { path } if path.ends_with("files/sheet.tex"))), "{events:?}");
     // A name that climbs out is refused.
     let events = session.apply(Command::StudyFileCompile { name: "../x.tex".into() });
     assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("not a file here"))), "{events:?}");

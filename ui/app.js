@@ -352,6 +352,13 @@ document.addEventListener("click", (e) => {
     dispatch({ type: "undoAgentEdit", call: undo.dataset.agentUndo });
     return;
   }
+  // A file an answer names: opened in Codex's editor, at its line if it has one.
+  const file = e.target.closest("[data-file-link]");
+  if (file) {
+    dispatchMany([{ type: "setMode", mode: "codex" }, { type: "openBuffer", path: file.dataset.fileLink },
+      ...(file.dataset.fileLine ? [{ type: "placeCursor", line: Number(file.dataset.fileLine) - 1, column: 0 }] : [])]);
+    return;
+  }
   const run = e.target.closest("[data-agent-run], [data-agent-skip]");
   if (run) {
     run.disabled = true;
@@ -3495,6 +3502,11 @@ function renderEvent(event) {
       study?.note(event);
       break;
 
+    // A file the tutor wrote that is not a PDF: in Codex's editor.
+    case "studyFileAt":
+      dispatchMany([{ type: "setMode", mode: "codex" }, { type: "openBuffer", path: event.path }]);
+      break;
+
     case "studyChat":
       study?.chat(event);
       break;
@@ -4455,9 +4467,14 @@ function entryHtml(entry) {
   // its way does not look like an empty answer that arrived.
   const caret = entry.streaming ? `<span class="cursor"></span>` : "";
 
+  // What went with a question besides its words, by name: the file open,
+  // a mention. The model has it; the bubble only says so.
+  const attached = you && entry.attached?.length
+    ? `<div class="attached">${entry.attached.map((a) => `<span class="attached-chip" title="Sent with the question">${a.startsWith("@") ? "" : "📄 "}${escapeHtml(a.split("/").pop() || a)}</span>`).join("")}</div>`
+    : "";
   return (
     `<div class="msg${you ? " you" : ""}"><div class="who">${who}</div>` +
-    `${thinking}${calls}${you ? proseHtml(entry.text) : answerHtml(entry.text, entry.streaming)}${caret}</div>`
+    `${thinking}${calls}${you ? proseHtml(entry.text) : answerHtml(entry.text, entry.streaming)}${attached}${caret}</div>`
   );
 }
 
@@ -4585,7 +4602,7 @@ function taskHtml(task) {
   return (
     `<div class="task" data-task="${task.id}">` +
     `<div class="hd"><span class="ring ${RING[task.state] ?? ""}"></span>` +
-    `${escapeHtml(task.prompt)}${drop}</div>${note}${files}</div>`
+    `${escapeHtml(task.shown || task.prompt)}${drop}</div>${note}${files}</div>`
   );
 }
 

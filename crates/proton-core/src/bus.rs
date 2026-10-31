@@ -2232,6 +2232,10 @@ pub enum Event {
         id: String,
         live: crate::study::tutor::StudyLive,
     },
+    /// A file a tutor wrote, to open in Codex's editor: where it is.
+    StudyFileAt {
+        path: String,
+    },
     /// A note, to read and edit.
     StudyNote {
         id: String,

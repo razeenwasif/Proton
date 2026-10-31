@@ -1478,6 +1478,23 @@ await test('The file open in Codex is named in the composer as going with each q
   await win.pushEvents([{type: 'buffers', names: [{name: '[No Name]', path: null, modified: false}], active: 0}]);
   assert(chip.hidden, 'a buffer with no file is named as going with the question');
 });
+await test('A question shows what was typed with what went along as chips, and a file an answer links is named and opens', async () => {
+  await showAgentDock();
+  await win.pushEvents([{type: 'agent', provider: 'claude', model: 'claude-opus-5-5', credential: '', activity: 'idle', inputTokens: 0, outputTokens: 0, cachedTokens: 0,
+    transcript: [{speaker: 'you', text: 'see if you can read it now', thinking: '', streaming: false, calls: [], attached: ['TinyML/Review.tex']},
+      {speaker: 'proton', text: 'I have read [Review.tex](file:///Users/r/Github/Research/TinyML/Review.tex#L12) in full.', thinking: '', streaming: false, calls: [], attached: []}]}]);
+  await nextFrame();
+  const thread = $('#codex-dock [data-agent-thread]');
+  const you = thread.querySelector('.msg.you');
+  assert(you.textContent.includes('see if you can read it now') && you.querySelector('.attached-chip')?.textContent === '📄 Review.tex', you.innerHTML);
+  const link = thread.querySelector('.msg:not(.you) .file-link');
+  assert(link?.textContent === 'Review.tex' && !thread.textContent.includes('file:///'), thread.innerHTML);
+  const before = win.commands.length;
+  link.click(); await settle();
+  const sentNow = win.commands.slice(before);
+  assert(sentNow.some((c) => c.type === 'openBuffer' && c.path === '/Users/r/Github/Research/TinyML/Review.tex'), JSON.stringify(sentNow));
+  assert(sentNow.some((c) => c.type === 'placeCursor' && c.line === 11), JSON.stringify(sentNow));
+});
 await test('A file the agent wrote has an Undo, and a command it proposes runs only from Run', async () => {
   await showAgentDock();
   await win.pushEvents([{type: 'agent', provider: 'claude', model: 'claude-opus-5-5', credential: '', activity: 'working', inputTokens: 0, outputTokens: 0, cachedTokens: 0,

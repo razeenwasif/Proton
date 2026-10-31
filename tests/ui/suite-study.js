@@ -457,6 +457,12 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     before = win.commands.length;
     ws().querySelector('[data-study-file-open="sheet.pdf"]').click(); await settle();
     assert(sent(before, 'studyFileOpen')[0]?.name === 'sheet.pdf', 'the PDF did not open');
+    // Told where a .tex is, the window opens it in Codex's editor.
+    before = win.commands.length;
+    await win.pushEvents([{type: 'studyFileAt', path: '/Users/r/Notebooks/sys/files/sheet.tex'}]); await settle();
+    const opened = win.commands.slice(before);
+    assert(opened.some((c) => c.type === 'openBuffer' && c.path === '/Users/r/Notebooks/sys/files/sheet.tex'), JSON.stringify(opened));
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
   });
 
   await test('The tutor\'s answers draw their citations as chips: over one, its passage; clicked, the source at that place', async () => {

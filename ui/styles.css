@@ -1908,6 +1908,10 @@ table.df td[data-df-cell]:hover { background: var(--accent-soft); color: var(--i
 .scope-chip { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .file-chip { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); cursor: pointer; }
 .file-chip::before { content: "📄 "; }
+.file-link { padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); font-family: var(--mono, monospace); font-size: .92em; cursor: pointer; overflow-wrap: anywhere; }
+.file-link:hover { text-decoration: underline; }
+.attached { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.attached-chip { padding: 1px 8px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--info) 35%, transparent); color: var(--info); font: 11px var(--mono); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-chip.off { color: var(--ink-4); text-decoration: line-through; border-color: transparent; }
 
 /* A library row: the citation, and the passage under it. Two lines because

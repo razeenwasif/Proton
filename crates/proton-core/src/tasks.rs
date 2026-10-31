@@ -32,8 +32,11 @@ pub enum TaskState {
 #[serde(rename_all = "camelCase")]
 pub struct Task {
     pub id: usize,
-    /// What was asked, as it was typed.
+    /// What was asked, with what went with it: what the model is sent.
     pub prompt: String,
+    /// What was asked, as it was typed: what the list shows.
+    #[serde(default)]
+    pub shown: String,
     pub state: TaskState,
     /// One line about what happened: the answer's first sentence, or why it
     /// failed. Empty while it is still queued.
@@ -71,6 +74,7 @@ impl Queue {
         self.tasks.push(Task {
             id,
             prompt: prompt.to_string(),
+            shown: crate::agent::split_context(prompt).0,
             state: if running {
                 TaskState::Queued
             } else {

@@ -1236,8 +1236,11 @@ opened ````` ````note N004 ````` writes that note again; an id that names no
 note makes a new one. A fence never closed keeps nothing. A block opened
 ````` ````file sheet.tex ````` is a file instead: kept whole in the notebook's
 `files/` under a plain name (`tutor::file_name`: no slashes, no leading dot),
-recorded on the turn (`StudyTurn.files`), and drawn with Open — the app the
-desktop opens it with — and, for a `.tex`, Compile PDF. Compiling is only ever
+recorded on the turn (`StudyTurn.files`), and drawn with Open and, for a
+`.tex`, Compile PDF. Open shows it in Proton, not the desktop's app for it
+(here Quark, which took a PDF sent to it while running and showed nothing): a
+PDF in the document viewer, registered as a source's is so the shell may read
+it; anything else in Codex's editor (`Event::StudyFileAt`). Compiling is only ever
 that button (`study::latex`): the machine's pdflatex — on the PATH, MacTeX's
 `/Library/TeX/texbin`, a TinyTeX of the person's or Quark's — run in `files/`
 with its working files in `files/.build/`, `-no-shell-escape`, no input, on a
@@ -2016,6 +2019,12 @@ and its text — what is on screen, unsaved changes said to be — whole up to
 sent again: a line says it is still open, unchanged, and where the cursor is;
 a new conversation, or one reopened, shows it afresh. Only a file on disk, and
 only for a question asked in Codex — the other modes have their own mentions.
+The bubble shows what was typed: `agent::split_context` cuts the question at
+the first of these headings — the file's, or a mention's — and the entry
+names what followed (`Entry.attached`) as chips, in a reopened conversation
+too; the task list shows the same (`Task.shown`). An answer's `file://` link
+is drawn as the file's name, its path over it, and opens it in Codex's
+editor at its `#L` line.
 
 **The review it stages.** A staged change reaches neither the buffer nor the
 disk until somebody accepts it.
