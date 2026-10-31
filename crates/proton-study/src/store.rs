@@ -187,6 +187,22 @@ impl Book {
         self.select(&ids)
     }
 
+    /* ── files a tutor wrote ──────────────────────────────────────── */
+
+    /// Where the files a tutor wrote are kept: `files/`, in the notebook.
+    pub fn files_dir(&self) -> PathBuf {
+        self.dir.join("files")
+    }
+
+    /// Keep a file a tutor wrote, whole, under a name `tutor::file_name`
+    /// allows; one of that name is written over.
+    pub fn write_file(&self, name: &str, body: &str) -> Result<PathBuf, String> {
+        let name = crate::tutor::file_name(name).ok_or_else(|| format!("{name}: not a name a file can have here"))?;
+        let path = self.files_dir().join(&name);
+        atomic_write(&path, body.as_bytes())?;
+        Ok(path)
+    }
+
     /* ── notes ─────────────────────────────────────────────────────── */
 
     /// Every note, in order of its id.

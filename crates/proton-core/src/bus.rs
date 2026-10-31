@@ -1061,6 +1061,15 @@ pub enum Command {
     StudyAsk {
         text: String,
     },
+    /// Open a file a tutor wrote — or the PDF compiled from it — in the
+    /// app the desktop opens it with.
+    StudyFileOpen {
+        name: String,
+    },
+    /// Compile a `.tex` a tutor wrote to a PDF beside it, with pdflatex.
+    StudyFileCompile {
+        name: String,
+    },
     /// Stop the answer being given.
     StudyStopAnswer,
     /// Begin a new chat with the tutor.

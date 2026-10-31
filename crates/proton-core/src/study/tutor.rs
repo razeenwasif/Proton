@@ -173,7 +173,8 @@ impl Tutor {
             message = format!("{}\n\n{message}", plan::earlier(&self.chat.turns, EARLIER));
         }
         // The notes the last answer kept, by their ids, to write again.
-        let saved = plan::saved(self.chat.turns.last().map(|t| t.notes.as_slice()).unwrap_or_default());
+        let last = self.chat.turns.last();
+        let saved = plan::saved(last.map(|t| t.notes.as_slice()).unwrap_or_default(), last.map(|t| t.files.as_slice()).unwrap_or_default());
         if !saved.is_empty() {
             message = format!("{saved}\n\n{message}");
         }
@@ -242,6 +243,7 @@ impl Tutor {
                     model: status.model.clone(),
                     error: error.clone().filter(|e| !e.is_empty()),
                     notes: Vec::new(),
+                    files: Vec::new(),
                 };
                 self.asking = None;
                 self.chat.turns.push(turn);

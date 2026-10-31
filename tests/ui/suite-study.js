@@ -439,6 +439,26 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(sent(before, 'studyShowNote')[0]?.id === 'N004', 'the note did not open');
   });
 
+  await test('A .tex file the tutor wrote shows on its answer, compiles only from its button, and opens its PDF once made', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    const made = {...turn('Make a .tex cheatsheet and compile it', 'Compile it with the button.', []), notes: [], files: [{name: 'sheet.tex', pdf: false}]};
+    await win.pushEvents([notebook([row('S01')]), chatEvent({turns: [made]})]); await settle();
+    ws().querySelector('[data-study-view="chat"]')?.click(); await settle();
+    const file = ws().querySelector('.st-made-file');
+    assert(file?.textContent.includes('sheet.tex') && file.textContent.includes('Compile PDF') && !file.textContent.includes('Open PDF'), file?.textContent);
+    let before = win.commands.length;
+    file.querySelector('[data-study-file-compile]').click(); await settle();
+    assert(sent(before, 'studyFileCompile')[0]?.name === 'sheet.tex', 'Compile sent nothing');
+    before = win.commands.length;
+    file.querySelector('[data-study-file-open="sheet.tex"]').click(); await settle();
+    assert(sent(before, 'studyFileOpen')[0]?.name === 'sheet.tex', 'Open sent nothing');
+    // Compiled: its PDF opens from the answer.
+    await win.pushEvents([chatEvent({turns: [{...made, files: [{name: 'sheet.tex', pdf: true}]}]})]); await settle();
+    before = win.commands.length;
+    ws().querySelector('[data-study-file-open="sheet.pdf"]').click(); await settle();
+    assert(sent(before, 'studyFileOpen')[0]?.name === 'sheet.pdf', 'the PDF did not open');
+  });
+
   await test('The tutor\'s answers draw their citations as chips: over one, its passage; clicked, the source at that place', async () => {
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     await win.pushEvents([notebook([row('S01')]), chatEvent()]); await settle();

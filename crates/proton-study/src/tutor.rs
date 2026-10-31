@@ -85,6 +85,19 @@ pub struct StudyTurn {
     /// The notes it wrote, kept in the notebook.
     #[serde(default)]
     pub notes: Vec<StudyTurnNote>,
+    /// The files it wrote, kept in the notebook's `files/`.
+    #[serde(default)]
+    pub files: Vec<StudyTurnFile>,
+}
+
+/// A file a tutor wrote in an answer: kept in the notebook's `files/`, and
+/// for a `.tex`, whether it has been compiled to a PDF beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct StudyTurnFile {
+    pub name: String,
+    pub pdf: bool,
 }
 
 /// A note a tutor wrote in an answer, as the answer shows it once kept.
@@ -98,12 +111,26 @@ pub struct StudyTurnNote {
     pub updated: bool,
 }
 
-/// A note as a tutor wrote it: a new one, or one it made before, by its id.
+/// A note as a tutor wrote it: a new one, or one it made before, by its id —
+/// or, given a file's name, a file to keep whole under it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteDraft {
     pub id: Option<String>,
     pub title: String,
     pub body: String,
+    pub file: Option<String>,
+}
+
+/// A name a tutor may give a file: plain, with an ending, nothing that
+/// climbs out of `files/` or hides itself.
+pub fn file_name(name: &str) -> Option<String> {
+    let name = name.trim().trim_matches(['`', '"', '\'']);
+    let ok = !name.is_empty()
+        && name.len() <= 100
+        && !name.starts_with('.')
+        && name.contains('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || "._- ".contains(c));
+    ok.then(|| name.to_string())
 }
 
 /// A fence that opens a note: four backticks or more (three will do), or
@@ -117,6 +144,11 @@ fn opens_note(line: &str) -> Option<(String, Option<String>, String)> {
         return None;
     }
     let info = t[n..].trim();
+    // A file: its name, and the whole of it.
+    if let Some(name) = info.strip_prefix("file ").or_else(|| info.strip_prefix("File ")) {
+        let name = file_name(name.split_whitespace().next().unwrap_or_default())?;
+        return Some((c.to_string().repeat(n), None, format!("file:{name}")));
+    }
     let rest = info.strip_prefix("note").or_else(|| info.strip_prefix("Note"))?;
     if !(rest.is_empty() || rest.starts_with([' ', ':'])) {
         return None;
@@ -152,13 +184,20 @@ pub fn notes_in(answer: &str) -> (String, Vec<NoteDraft>) {
     while i < lines.len() {
         if let Some((fence, id, title)) = opens_note(lines[i]) {
             if let Some(end) = (i + 1..lines.len()).find(|&j| closes(lines[j], &fence)) {
+                if let Some(name) = title.strip_prefix("file:") {
+                    // A file is kept as written, its own blank lines and all.
+                    let body = lines[i + 1..end].join("\n") + "\n";
+                    notes.push(NoteDraft { id: None, title: name.to_string(), body, file: Some(name.to_string()) });
+                    i = end + 1;
+                    continue;
+                }
                 let body = lines[i + 1..end].join("\n").trim().to_string();
                 let title = match title.trim() {
                     "" => body.lines().map(|l| l.trim_start_matches('#').trim()).find(|l| !l.is_empty()).unwrap_or("A note").chars().take(80).collect(),
                     t => t.to_string(),
                 };
                 if !body.is_empty() || id.is_some() {
-                    notes.push(NoteDraft { id, title, body });
+                    notes.push(NoteDraft { id, title, body, file: None });
                 }
                 i = end + 1;
                 continue;
@@ -189,7 +228,11 @@ pub fn writing(answer: &str) -> String {
     let mut i = 0;
     while i < lines.len() {
         if let Some((fence, _, title)) = opens_note(lines[i]) {
-            let named = if title.is_empty() { "a note".to_string() } else { format!("the note “{title}”") };
+            let named = match title.strip_prefix("file:") {
+                Some(name) => name.to_string(),
+                None if title.is_empty() => "a note".to_string(),
+                None => format!("the note “{title}”"),
+            };
             match (i + 1..lines.len()).find(|&j| closes(lines[j], &fence)) {
                 Some(end) => {
                     out.push(format!("_Wrote {named}._"));
@@ -209,14 +252,24 @@ pub fn writing(answer: &str) -> String {
 }
 
 /// What a tutor is told of the notes the last answer kept, so it can write
-/// one of them again by its id.
-pub fn saved(notes: &[StudyTurnNote]) -> String {
-    match notes {
-        [] => String::new(),
-        notes => format!(
-            "(Proton kept the notes from your last answer: {}. To change one, write it again with its id.)",
+/// one of them again by its id — and of the files, by their names.
+pub fn saved(notes: &[StudyTurnNote], files: &[StudyTurnFile]) -> String {
+    let mut said = Vec::new();
+    if !notes.is_empty() {
+        said.push(format!(
+            "Proton kept the notes from your last answer: {}. To change one, write it again with its id.",
             notes.iter().map(|n| format!("{} “{}”", n.id, n.title)).collect::<Vec<_>>().join(", ")
-        ),
+        ));
+    }
+    if !files.is_empty() {
+        said.push(format!(
+            "Proton kept the files from your last answer in the notebook's files/: {}. To change one, write it again whole under the same name.",
+            files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    match said.is_empty() {
+        true => String::new(),
+        false => format!("({})", said.join(" ")),
     }
 }
 
@@ -353,7 +406,10 @@ pub fn instructions(notebook: &Notebook, settings: &TutorSettings, grounding: Gr
          note: in your answer, between a line ````note Its title and a line ````, four backticks each so code inside it keeps its own fences. \
          Proton saves it in the notebook's notes, where the student can read and edit it, so do not paste it again outside the block; say in a \
          sentence what you made. Write the note in Markdown, citing as in any answer. To change a note you made, open the block with its id: \
-         ````note N004 Its title.{length}{language}"
+         ````note N004 Its title.\n- When the student asks for a file — a LaTeX cheatsheet to compile, a script, a CSV — write it whole between a \
+         line ````file its-name.tex and a line ````. Proton keeps it in the notebook's files/ folder, and for a .tex file gives the student a \
+         button that compiles it to a PDF with pdflatex: you do not run anything, and you cannot. Make a .tex file compile on its own, with \
+         standard packages and no shell-escape, and say in a sentence what you made.{length}{language}"
     )
 }
 
@@ -427,7 +483,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let book = Folder::new(root).create("Search", 1).unwrap();
         assert_eq!(book.new_chat_id(), "C001");
-        let turn = StudyTurn { asked: "Why is UCS optimal?".into(), answer: "Because [[S01 p. 1]].".into(), citations: Vec::new(), at: 5, engine: "claude".into(), model: "m".into(), error: None, notes: Vec::new() };
+        let turn = StudyTurn { asked: "Why is UCS optimal?".into(), answer: "Because [[S01 p. 1]].".into(), citations: Vec::new(), at: 5, engine: "claude".into(), model: "m".into(), error: None, notes: Vec::new(), files: Vec::new() };
         for (id, updated) in [("C001", 10), ("C002", 20)] {
             book.write_chat(&Chat { id: id.into(), title: title(&turn.asked), created: 1, updated, settings: TutorSettings::default(), turns: vec![turn.clone()], lesson: None }).unwrap();
         }
@@ -439,7 +495,7 @@ mod tests {
 
     #[test]
     fn the_chat_so_far_is_told_newest_kept() {
-        let turn = |n: usize| StudyTurn { asked: format!("question {n}"), answer: "x".repeat(400), citations: Vec::new(), at: 0, engine: String::new(), model: String::new(), error: None, notes: Vec::new() };
+        let turn = |n: usize| StudyTurn { asked: format!("question {n}"), answer: "x".repeat(400), citations: Vec::new(), at: 0, engine: String::new(), model: String::new(), error: None, notes: Vec::new(), files: Vec::new() };
         let told = earlier(&[turn(1), turn(2), turn(3)], 900);
         assert!(told.contains("question 3") && told.contains("question 2") && !told.contains("question 1"), "{told}");
         assert_eq!(earlier(&[], 900), "");
@@ -470,10 +526,28 @@ mod tests {
         assert_eq!(writing("Making it.\n\n````note Sheet\n## A\nsome"), "Making it.\n\n_Writing the note “Sheet”…_");
         assert_eq!(writing("````note Sheet\nx\n````\nDone."), "_Wrote the note “Sheet”._\nDone.");
         assert_eq!(writing("No note here."), "No note here.");
-        let said = saved(&[StudyTurnNote { id: "N004".into(), title: "Sheet".into(), updated: false }]);
+        let said = saved(&[StudyTurnNote { id: "N004".into(), title: "Sheet".into(), updated: false }], &[]);
         assert!(said.contains("N004 “Sheet”"), "{said}");
-        assert_eq!(saved(&[]), "");
+        assert_eq!(saved(&[], &[]), "");
+        assert!(saved(&[], &[StudyTurnFile { name: "sheet.tex".into(), pdf: false }]).contains("files/: sheet.tex"));
         let told = instructions(&Notebook { title: "AI".into(), course: String::new(), exam: None, created: 0, opened: 0, archived: false, tutor: TutorSettings::default() }, &TutorSettings::default(), Grounding::Tools);
-        assert!(told.contains("````note Its title") && told.contains("````note N004"), "{told}");
+        assert!(told.contains("````note Its title") && told.contains("````note N004") && told.contains("````file its-name.tex"), "{told}");
+    }
+
+    #[test]
+    fn a_file_in_an_answer_is_kept_whole_under_a_safe_name() {
+        let answer = "Here it is.\n\n````file comp2310-cheatsheet.tex\n\\documentclass{article}\n\n\\begin{document}\nHi\n\\end{document}\n````\nCompile it.";
+        let (text, drafts) = notes_in(answer);
+        assert_eq!(text, "Here it is.\n\nCompile it.");
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].file.as_deref(), Some("comp2310-cheatsheet.tex"));
+        assert_eq!(drafts[0].body, "\\documentclass{article}\n\n\\begin{document}\nHi\n\\end{document}\n");
+        assert_eq!(writing("````file a.tex\n\\doc"), "_Writing a.tex…_");
+        for bad in ["../x.tex", "/etc/x.tex", ".hidden.tex", "noending", "a/b.tex", ""] {
+            assert!(file_name(bad).is_none(), "{bad}");
+        }
+        // A bad name is no file: the block stays in the answer.
+        let (text, drafts) = notes_in("````file ../escape.tex\nx\n````");
+        assert!(drafts.is_empty() && text.contains("escape"), "{text}");
     }
 }

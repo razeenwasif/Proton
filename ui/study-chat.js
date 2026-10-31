@@ -138,7 +138,19 @@ export function createChat(host) {
     const notes = (turn.notes ?? []).map((n) => `<button class="st-made-note" data-study-show-note="${esc(n.id)}" title="Open the note">` +
       `${icon("file-doc")}<span class="st-made-note-title">${esc(n.title)}</span>` +
       `<span class="st-faint">${n.updated ? "written again" : "kept as a note"} · ${esc(n.id)}</span></button>`).join("");
-    return `<div class="st-turn"><div class="st-asked">${esc(turn.asked)}</div>${turn.answer || !notes ? body : ""}${notes}` +
+    // The files it wrote, in the notebook's files/: a .tex compiles to a PDF
+    // when asked, never before.
+    const files = (turn.files ?? []).map((f) => {
+      const tex = f.name.endsWith(".tex");
+      const pdf = f.name.replace(/\.tex$/, ".pdf");
+      const ro = host.readOnly();
+      return `<div class="st-made-file">${icon(tex ? "file-doc" : "file-code")}<span class="st-made-note-title">${esc(f.name)}</span>` +
+        `<span class="st-faint">in files/</span><span class="grow"></span>` +
+        `<button class="cc-quiet" data-study-file-open="${esc(f.name)}" title="Open it in the app that opens ${tex ? ".tex files" : "it"}">Open</button>` +
+        (tex && !ro ? `<button class="${f.pdf ? "cc-quiet" : "cc-primary"}" data-study-file-compile="${esc(f.name)}" title="Compile it with pdflatex">${f.pdf ? "Compile again" : "Compile PDF"}</button>` : "") +
+        (tex && f.pdf ? `<button class="cc-primary" data-study-file-open="${esc(pdf)}">Open PDF</button>` : "") + `</div>`;
+    }).join("");
+    return `<div class="st-turn"><div class="st-asked">${esc(turn.asked)}</div>${turn.answer || !(notes || files) ? body : ""}${notes}${files}` +
       `<div class="st-turn-foot"><span class="st-faint">${esc(by)}</span>${keep}</div></div>`;
   }
 
@@ -312,6 +324,19 @@ export function createChat(host) {
       return true;
     }
     if (!root?.contains(t)) return false;
+    // A file an answer kept: opened in its own app, or compiled.
+    const file = at("[data-study-file-open]");
+    if (file) {
+      host.dispatch({ type: "studyFileOpen", name: file.dataset.studyFileOpen });
+      return true;
+    }
+    const compile = at("[data-study-file-compile]");
+    if (compile) {
+      /** @type {HTMLButtonElement} */ (compile).disabled = true;
+      compile.textContent = "Compiling…";
+      host.dispatch({ type: "studyFileCompile", name: compile.dataset.studyFileCompile });
+      return true;
+    }
     // A note an answer kept, opened where notes are.
     const note = at("[data-study-show-note]");
     if (note) {

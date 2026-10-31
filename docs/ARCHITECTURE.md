@@ -1233,7 +1233,17 @@ again. The turn records them (`StudyTurn.notes`) and draws each as a button
 that opens it; while the answer streams, a block is shown as “Writing the
 note…”. The next question tells the tutor the ids it was given, and a block
 opened ````` ````note N004 ````` writes that note again; an id that names no
-note makes a new one. A fence never closed keeps nothing.
+note makes a new one. A fence never closed keeps nothing. A block opened
+````` ````file sheet.tex ````` is a file instead: kept whole in the notebook's
+`files/` under a plain name (`tutor::file_name`: no slashes, no leading dot),
+recorded on the turn (`StudyTurn.files`), and drawn with Open — the app the
+desktop opens it with — and, for a `.tex`, Compile PDF. Compiling is only ever
+that button (`study::latex`): the machine's pdflatex — on the PATH, MacTeX's
+`/Library/TeX/texbin`, a TinyTeX of the person's or Quark's — run in `files/`
+with its working files in `files/.build/`, `-no-shell-escape`, no input, on a
+thread, stopped past two minutes; the PDF lands beside the `.tex`, the turn
+marks it and offers Open PDF, and a failure is said by the log's first error
+with its line.
 
 **The studio** makes things of the sources ticked, each by one unattended call
 to the engine the tutor is set to (`proton-core::study::jobs`): study guides,

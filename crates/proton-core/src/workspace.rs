@@ -1362,6 +1362,8 @@ impl Workspace {
             | Command::StudyNoteDelete { .. }
             | Command::StudyNoteSource { .. }
             | Command::StudyAsk { .. }
+            | Command::StudyFileOpen { .. }
+            | Command::StudyFileCompile { .. }
             | Command::StudyStopAnswer
             | Command::StudyChatNew
             | Command::StudyChatOpen { .. }

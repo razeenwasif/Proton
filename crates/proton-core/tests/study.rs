@@ -935,6 +935,53 @@ fn a_cheatsheet_the_tutor_writes_is_kept_as_a_note_and_written_again_by_its_id()
 }
 
 #[test]
+fn a_tex_file_the_tutor_writes_is_kept_in_files_and_compiled_only_when_asked() {
+    let scratch = Scratch::new("tutor-files");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, Some(scratch.root.join("bin/proton-mcp")), &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Systems".into() });
+    log.lock().unwrap().answers.push_back(
+        "A cheatsheet — compile it with the button.\n\n````file sheet.tex\n\\documentclass{article}\n\\begin{document}\nCallee-saved: $rbx$.\n\\end{document}\n````".into(),
+    );
+    session.apply(Command::StudyAsk { text: "Make a .tex cheatsheet and compile it".into() });
+    let turns = until(&mut session, |e| match e {
+        Event::StudyChat { turns, busy: false, .. } if turns.len() == 1 && !turns[0].files.is_empty() => Some(turns.clone()),
+        _ => None,
+    });
+    assert_eq!(turns[0].answer, "A cheatsheet — compile it with the button.");
+    assert_eq!((turns[0].files[0].name.as_str(), turns[0].files[0].pdf), ("sheet.tex", false));
+    let files = scratch.root.join("Notebooks/systems/files");
+    assert!(std::fs::read_to_string(files.join("sheet.tex")).unwrap().contains("Callee-saved"));
+    assert!(!files.join("sheet.pdf").exists(), "it was compiled before it was asked to be");
+    // Told on the next question what it was kept as.
+    session.apply(Command::StudyAsk { text: "thanks".into() });
+    assert!(log.lock().unwrap().sent[1].contains("files/: sheet.tex"), "{}", log.lock().unwrap().sent[1]);
+    until(&mut session, |e| matches!(e, Event::StudyChat { turns, busy: false, .. } if turns.len() == 2).then_some(()));
+
+    // Compiled when asked, if this Mac has a pdflatex; the turn then says so.
+    let events = session.apply(Command::StudyFileCompile { name: "sheet.tex".into() });
+    if events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("No pdflatex"))) {
+        return;
+    }
+    let turns = until(&mut session, |e| match e {
+        Event::StudyChat { turns, .. } if turns[0].files[0].pdf => Some(turns.clone()),
+        Event::Notice { text, .. } if text.contains("did not compile") => panic!("{text}"),
+        _ => None,
+    });
+    assert!(turns[0].files[0].pdf && files.join("sheet.pdf").is_file());
+    let names: Vec<String> = std::fs::read_dir(&files).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    assert!(!names.iter().any(|n| n.ends_with(".aux") || n.ends_with(".log")), "{names:?}");
+    // A name that climbs out is refused.
+    let events = session.apply(Command::StudyFileCompile { name: "../x.tex".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("not a file here"))), "{events:?}");
+    session.shutdown();
+}
+
+#[test]
 fn with_no_server_every_engine_is_given_passages() {
     let scratch = Scratch::new("tutor-passages");
     let settings = scratch.knowledge_base();

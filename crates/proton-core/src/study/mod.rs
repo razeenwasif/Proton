@@ -14,6 +14,7 @@
 
 pub mod jobs;
 pub mod code;
+mod latex;
 mod kb;
 mod learning;
 pub mod media;
@@ -87,6 +88,8 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyNoteDelete { .. }
             | Command::StudyNoteSource { .. }
             | Command::StudyAsk { .. }
+            | Command::StudyFileOpen { .. }
+            | Command::StudyFileCompile { .. }
             | Command::StudyStopAnswer
             | Command::StudyChatNew
             | Command::StudyChatOpen { .. }
@@ -199,6 +202,8 @@ pub struct Study {
     documents: std::collections::HashSet<PathBuf>,
     /// The open notebook's chat, and the conversation answering it.
     tutor: Option<Tutor>,
+    /// `.tex` files a tutor wrote, being compiled.
+    compiles: Vec<latex::Compile>,
     /// What makes tutors: the engines, or a test's script.
     tutors: Box<dyn Tutors>,
     /// The studio's calls.
@@ -270,6 +275,7 @@ impl Default for Study {
             batches: Vec::new(),
             documents: Default::default(),
             tutor: None,
+            compiles: Vec::new(),
             tutors: Box::new(tutor::Live),
             jobs: jobs::Jobs::default(),
             review: None,
@@ -480,6 +486,7 @@ impl Study {
         }
         events.extend(self.take_answers());
         events.extend(self.poll_tutor());
+        events.extend(self.poll_compiles());
         let roots = self.kb.labelled_roots();
         if self.jobs.poll(self.tutors.as_mut(), &roots) {
             events.extend(self.studio_event());
@@ -610,6 +617,8 @@ impl Study {
             Command::StudyNoteDelete { id } => self.delete_note(&id),
             Command::StudyNoteSource { id } => self.note_source(&id),
             Command::StudyAsk { text } => self.ask(&text),
+            Command::StudyFileOpen { name } => self.open_file(&name),
+            Command::StudyFileCompile { name } => self.compile(&name),
             Command::StudyStopAnswer => {
                 if let Some(tutor) = &mut self.tutor {
                     tutor.interrupt();
@@ -1732,6 +1741,80 @@ impl Study {
         self.chat_event().into_iter().collect()
     }
 
+    /// Hand a file the tutor wrote to the app that opens it: a PDF to the
+    /// reader, a `.tex` to whatever edits it.
+    fn open_file(&mut self, name: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        let Some(name) = proton_study::tutor::file_name(name) else {
+            return vec![notice(format!("{name}: not a file here"), NoticeLevel::Warn)];
+        };
+        let path = open.book.files_dir().join(&name);
+        if !path.is_file() {
+            return vec![notice(format!("{name} is not in the notebook's files/ any more."), NoticeLevel::Warn)];
+        }
+        let program = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        match std::process::Command::new(program).arg(&path).spawn() {
+            Ok(_) => Vec::new(),
+            Err(why) => vec![notice(format!("could not open {name}: {why}"), NoticeLevel::Warn)],
+        }
+    }
+
+    /// Compile a `.tex` the tutor wrote, asked for with its button.
+    fn compile(&mut self, name: &str) -> Vec<Event> {
+        let Some(open) = &self.open else { return Vec::new() };
+        if self.compiles.iter().any(|c| c.name == name) {
+            return vec![notice(format!("{name} is being compiled already."), NoticeLevel::Info)];
+        }
+        let Some(name) = proton_study::tutor::file_name(name) else {
+            return vec![notice(format!("{name}: not a file here"), NoticeLevel::Warn)];
+        };
+        match latex::start(&open.book.files_dir(), &name) {
+            Ok(compile) => {
+                self.compiles.push(compile);
+                vec![notice(format!("Compiling {name} with pdflatex…"), NoticeLevel::Info)]
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Warn)],
+        }
+    }
+
+    /// Say how each compile ended; a PDF made is marked on the turns that
+    /// wrote its `.tex`, whose button then opens it.
+    fn poll_compiles(&mut self) -> Vec<Event> {
+        if self.compiles.is_empty() {
+            return Vec::new();
+        }
+        let mut ended = Vec::new();
+        self.compiles.retain(|c| match c.ended() {
+            Some(result) => {
+                ended.push((c.name.clone(), result));
+                false
+            }
+            None => true,
+        });
+        let mut events = Vec::new();
+        for (name, result) in ended {
+            let pdf = format!("{}.pdf", name.trim_end_matches(".tex"));
+            match result {
+                Ok(()) => {
+                    events.push(notice(format!("Compiled {pdf}, in the notebook's files/."), NoticeLevel::Info));
+                    if let (Some(open), Some(tutor)) = (&self.open, &mut self.tutor) {
+                        let mut marked = false;
+                        for file in tutor.chat.turns.iter_mut().flat_map(|t| t.files.iter_mut()).filter(|f| f.name == name) {
+                            file.pdf = true;
+                            marked = true;
+                        }
+                        if marked {
+                            let _ = open.book.write_chat(&tutor.chat);
+                        }
+                    }
+                    events.extend(self.chat_event());
+                }
+                Err(why) => events.push(notice(format!("{name} did not compile — {why}"), NoticeLevel::Error)),
+            }
+        }
+        events
+    }
+
     fn poll_tutor(&mut self) -> Vec<Event> {
         let (Some(open), Some(tutor)) = (&self.open, &mut self.tutor) else { return Vec::new() };
         match tutor.poll(&open.book) {
@@ -2275,26 +2358,48 @@ impl Study {
     fn keep_tutor_notes(&mut self, drafts: Vec<proton_study::tutor::NoteDraft>) -> Vec<Event> {
         let Some(chat) = self.tutor.as_ref().map(|t| t.chat.id.clone()) else { return Vec::new() };
         let mut kept = Vec::new();
+        let mut files = Vec::new();
         let mut events = Vec::new();
         for draft in drafts {
+            if let Some(name) = draft.file.clone() {
+                let written = match self.writable() {
+                    Ok(book) => book.write_file(&name, &draft.body),
+                    Err(why) => {
+                        events.extend(why);
+                        continue;
+                    }
+                };
+                match written {
+                    Ok(_) => files.push(proton_study::tutor::StudyTurnFile { name, pdf: false }),
+                    Err(why) => events.push(notice(why, NoticeLevel::Error)),
+                }
+                continue;
+            }
             let before = draft.id.as_deref().and_then(|id| self.open.as_ref()?.book.note(id)).is_some();
             match self.put_note(draft.id, &draft.title, &draft.body, Some(chat.clone())) {
                 Ok(note) => kept.push(proton_study::tutor::StudyTurnNote { id: note.id, title: note.title, updated: before }),
                 Err(why) => events.extend(why),
             }
         }
-        if kept.is_empty() {
+        if kept.is_empty() && files.is_empty() {
             return events;
         }
-        events.extend(self.saved());
-        let said = match kept.as_slice() {
-            [one] => format!("{} the note “{}” ({}).", if one.updated { "Wrote again" } else { "Kept" }, one.title, one.id),
-            many => format!("Kept {} notes: {}.", many.len(), many.iter().map(|n| format!("“{}”", n.title)).collect::<Vec<_>>().join(", ")),
-        };
-        events.push(notice(said, NoticeLevel::Info));
+        if !kept.is_empty() {
+            events.extend(self.saved());
+            let said = match kept.as_slice() {
+                [one] => format!("{} the note “{}” ({}).", if one.updated { "Wrote again" } else { "Kept" }, one.title, one.id),
+                many => format!("Kept {} notes: {}.", many.len(), many.iter().map(|n| format!("“{}”", n.title)).collect::<Vec<_>>().join(", ")),
+            };
+            events.push(notice(said, NoticeLevel::Info));
+        }
+        if !files.is_empty() {
+            let names = files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ");
+            events.push(notice(format!("Kept {names} in the notebook's files/."), NoticeLevel::Info));
+        }
         if let (Some(open), Some(tutor)) = (&self.open, &mut self.tutor) {
             if let Some(turn) = tutor.chat.turns.last_mut() {
                 turn.notes = kept;
+                turn.files = files;
             }
             if let Err(why) = open.book.write_chat(&tutor.chat) {
                 events.push(notice(format!("The chat could not be kept: {why}"), NoticeLevel::Error));
