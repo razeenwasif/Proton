@@ -279,6 +279,57 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(!ws().querySelector('.st-reader') && ws().querySelector('.st-nb-head'), 'Back did not return to the notebook');
   });
 
+  await test('Sources opened stay as tabs beside the tutor\'s: ⌃⇥ and ⌃⇧⇥ go round them, each where it was left, and a tab closes', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01', {kind: 'markdown', units: 'lines', title: 'Search.md'}), row('S02', {title: 'Exam_2020.pdf'}), row('S03')])]); await settle();
+    const strip = ws().querySelector('[data-study-tabs]');
+    assert(!shown(strip), 'there are tabs before a source is opened');
+    const long = Array.from({length: 80}, (_, i) => `Line ${i + 1} of the notes on search.`).join('\n\n');
+    const one = {type: 'studySource', id: 'S01', title: 'Search.md', kind: 'markdown', at: null, said: null, guide: null, citations: [], view: {shape: 'sections', sections: [{from: 1, to: 160, text: long}]}};
+    const two = {type: 'studySource', id: 'S02', title: 'Exam_2020.pdf', kind: 'pdf', at: null, said: null, guide: null, citations: [], view: {shape: 'pages', pages: ['Question one', 'Question two']}};
+    await win.pushEvents([one]); await settle();
+    await win.pushEvents([two]); await settle();
+    const names = () => [...strip.querySelectorAll('[data-study-tab]')].map((b) => b.textContent);
+    const on = () => strip.querySelector('.st-tab.on [data-study-tab]')?.dataset.studyTab;
+    assert(shown(strip) && JSON.stringify(names()) === '["Tutor","Search.md","Exam_2020.pdf"]', `the sources opened are not tabs: ${JSON.stringify(names())}`);
+    assert(on() === 'S02' && ws().querySelector('.st-reader h1')?.textContent === 'Exam_2020.pdf', 'the last source opened is not the tab shown');
+
+    const stage = ws().querySelector('[data-study-stage]');
+    strip.querySelector('[data-study-tab="S01"]').click(); await settle();
+    assert(on() === 'S01' && ws().querySelector('.st-reader h1')?.textContent === 'Search.md', 'clicking a tab does not show its source');
+    stage.scrollTop = 300;
+    const asked = win.commands.length;
+    const press = (/** @type {boolean} */ shiftKey) => doc.body.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey, bubbles: true, cancelable: true}));
+    press(false); await settle();
+    assert(on() === 'S02', `⌃⇥ did not go to the next tab: ${on()}`);
+    press(false); await settle();
+    assert(on() === '' && ws().querySelector('[data-study-chat-box]'), `⌃⇥ did not go round to the tutor's: ${on()}`);
+    press(true); await settle();
+    assert(on() === 'S02', `⌃⇧⇥ did not go back: ${on()}`);
+    press(true); await settle();
+    assert(on() === 'S01' && Math.abs(stage.scrollTop - 300) < 2, `the source is not where it was left: ${stage.scrollTop}`);
+    assert(sent(asked, 'studyShow').length === 0, 'going between tabs asked the core again');
+    strip.querySelector('[data-study-tab=""]').click(); await settle();
+    await win.pushEvents([{type: 'studyChat', id: 'C001', title: 'New chat', settings: {engine: 'claude', model: '', style: 'default', custom: '', length: 'default', language: ''},
+      turns: [], live: null, busy: false, error: null, grounding: 'tools', chats: []}]); await settle();
+    const typing = ws().querySelector('[data-study-chat-box] textarea');
+    assert(typing, 'the tutor\'s box is not there to type in');
+    typing.focus();
+    const key = new win.KeyboardEvent('keydown', {key: 'Tab', ctrlKey: true, bubbles: true, cancelable: true});
+    typing.dispatchEvent(key); await settle();
+    assert(key.defaultPrevented && on() === 'S01', 'from the tutor\'s box ⌃⇥ does not go to a source');
+
+    strip.querySelector('[data-study-tab="S01"]').click(); await settle();
+    strip.querySelector('[data-study-tab-close="S01"]').click(); await settle();
+    assert(JSON.stringify(names()) === '["Tutor","Exam_2020.pdf"]' && on() === 'S02', `closing the tab shown did not show the next: ${JSON.stringify(names())} ${on()}`);
+    await win.pushEvents([notebook([row('S01'), row('S03')])]); await settle();
+    assert(!shown(strip) && ws().querySelector('[data-study-chat-box]'), 'a source taken out keeps its tab');
+    await win.pushEvents([one]); await settle();
+    await win.pushEvents([{...notebook([row('S01')]), slug: 'other', title: 'Other'}]); await settle();
+    assert(!shown(strip), 'another notebook keeps the last one\'s tabs');
+    await win.pushEvents([notebook([])]); await settle();
+  });
+
   await test('A page of the web is added by its address, read as its article, opened in the browser, or fetched again', async () => {
     await win.pushEvents([notebook([row('S01')])]); await settle();
     ws().querySelector('[data-study-view="overview"]').click(); await settle();

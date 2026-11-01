@@ -4005,6 +4005,20 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .st-cat-form input { flex: 1 1 auto; min-width: 0; }
 .st-cat-confirm { margin: 0 12px 4px; }
 .st-source.dragging { opacity: .45; }
+/* The sources opened, as tabs beside the tutor's. */
+.st-open-tabs { display: flex; align-self: stretch; gap: 2px; flex: 0 0 auto; overflow-x: auto; padding: 4px 10px; border-bottom: 1px solid var(--cc-line); scrollbar-width: none; }
+.st-open-tabs::-webkit-scrollbar { display: none; }
+.st-open-tabs[hidden] { display: none; }
+.st-tab { flex: 0 0 auto; display: flex; align-items: center; max-width: 220px; border-radius: 6px; color: var(--cc-muted); }
+.st-tab:hover { background: var(--row-hover); color: var(--cc-text); }
+.st-tab.on { background: var(--cc-raise); color: var(--cc-text); box-shadow: inset 0 0 0 1px var(--cc-line-2); }
+.st-tab > [data-study-tab] { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 9px; border: 0; background: none; color: inherit;
+  font: var(--z-2xs)/1.3 var(--cc-font); cursor: pointer; }
+.st-tab > [data-study-tab]:only-child { padding-right: 10px; }
+.st-tab > [data-study-tab] .i { flex: 0 0 auto; width: 12px; height: 12px; color: var(--cc-faint); }
+.st-tab > [data-study-tab] span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-tab .st-x { margin-right: 3px; }
+.st-tab:hover .st-x, .st-tab.on .st-x { opacity: 1; }
 .st-filing { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 12px 8px 38px; font: var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-faint); }
 .st-chip.on { color: var(--cc-text); border-color: var(--cc-accent); }
 .st-source:hover .st-x, .st-x:focus-visible { opacity: 1; }

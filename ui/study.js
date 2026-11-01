@@ -103,6 +103,7 @@ export function createStudy(host) {
     where: q("[data-study-where]"),
     title: q("[data-study-title]"),
     stage: q("[data-study-stage]"),
+    tabs: q("[data-study-tabs]"),
     studio: q("[data-study-studio-body]"),
   };
   const picker = createPicker({
@@ -148,7 +149,8 @@ export function createStudy(host) {
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
    *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null, digest: string | null,
    *   artifacts: ArtifactRow[] | null, picked: Set<string>,
-   *   folded: Set<string>, naming: string | null, unnaming: string | null, filing: string | null}} */
+   *   folded: Set<string>, naming: string | null, unnaming: string | null, filing: string | null,
+   *   tabs: SourceEvent[], scrolls: Map<string, number>}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -165,6 +167,9 @@ export function createStudy(host) {
     // Categories: those folded shut; one being named ("" for a new one);
     // one whose taking away is being confirmed; a source being filed.
     folded: new Set(), naming: null, unnaming: null, filing: null,
+    // The sources opened, in the order they were, each as a tab beside the
+    // tutor's, and how far down each was read.
+    tabs: [], scrolls: new Map(),
     // What the middle shows: the chat, the sources, a source in the
     // reader, a note — and what Back returns to.
     shown: { kind: "chat" },
@@ -255,7 +260,7 @@ export function createStudy(host) {
     // Filed in a category from a row of choices under it: its own, none, or another.
     const filing = state.filing === s.id && cats.length
       ? `<div class="st-filing">Move to ${cats.map((c) => `<button class="st-chip${c.sources.includes(s.id) ? " on" : ""}" data-study-file-to="${esc(c.name)}" data-id="${esc(s.id)}">${esc(c.name)}</button>`).join("")}` +
-        `<button class="st-chip" data-study-file-to="" data-id="${esc(s.id)}">No category</button></div>` : "";
+        `<button class="st-chip${cats.some((c) => c.sources.includes(s.id)) ? "" : " on"}" data-study-file-to="" data-id="${esc(s.id)}">No category</button></div>` : "";
     const file = !readOnly() && cats.length
       ? `<button class="st-x st-file-btn" data-study-filing="${esc(s.id)}" title="Move it to a category" aria-label="Move to a category">${icon("folder")}</button>` : "";
     return `<div class="st-source${s.selected ? " on" : ""}" data-study-source="${esc(s.id)}" title="${esc(`${s.id} · ${origin}`)}"${readOnly() ? "" : ` draggable="true"`}>` +
@@ -811,7 +816,81 @@ export function createStudy(host) {
     renderSources();
     renderWhere();
     renderStage();
+    renderTabs();
     renderStudio();
+  }
+
+  /** The tab shown: "" the tutor's, a source's id, or null when something
+   *  else is — a note, a file, something made — and the tabs are put away,
+   *  so going to one cannot lose what is being written there. */
+  function shownTab() {
+    const shown = state.shown;
+    if (shown.kind === "chat") return "";
+    if (shown.kind === "source" || shown.kind === "artifact") return shown.source.id;
+    return null;
+  }
+
+  function renderTabs() {
+    const on = shownTab();
+    const tabs = state.notebook && on !== null ? state.tabs : [];
+    els.tabs.hidden = !tabs.length;
+    if (!tabs.length) {
+      els.tabs.innerHTML = "";
+      return;
+    }
+    const kinds = new Map((state.notebook?.sources ?? []).map((s) => [s.id, s.kind]));
+    /** @param {string} id @param {string} title @param {string} glyph @param {boolean} close */
+    const tab = (id, title, glyph, close) => `<div class="st-tab${on === id ? " on" : ""}">` +
+      `<button role="tab" aria-selected="${on === id}" data-study-tab="${esc(id)}" title="${esc(title)} · ⌃⇥ for the next">${icon(glyph)}<span>${esc(title)}</span></button>` +
+      (close ? `<button class="st-x" data-study-tab-close="${esc(id)}" title="Close the tab" aria-label="Close ${esc(title)}">${icon("close")}</button>` : "") + `</div>`;
+    els.tabs.innerHTML = tab("", "Tutor", "chat", false) +
+      tabs.map((t) => tab(t.id, t.title, KIND_ICON[kinds.get(t.id) ?? t.kind] ?? "file", true)).join("");
+    els.tabs.querySelector(".st-tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  /** Keep how far down the source being read is. */
+  function rememberScroll() {
+    const on = shownTab();
+    if (on) state.scrolls.set(on, els.stage.scrollTop);
+  }
+
+  /** Go to a tab: the tutor's (""), or a source as it was left. @param {string} id */
+  function showTab(id) {
+    const t = id ? state.tabs.find((s) => s.id === id) : null;
+    if (id && !t) return;
+    rememberScroll();
+    if (t) state.shown = { kind: "source", source: { ...t, at: null } };
+    else {
+      state.shown = { kind: "chat" };
+      state.back = "chat";
+    }
+    els.stage.innerHTML = "";
+    render();
+    const y = id ? state.scrolls.get(id) : undefined;
+    if (y !== undefined) els.stage.scrollTop = y;
+  }
+
+  /** The next tab, or the one before: the tutor's, then the sources. @param {number} by */
+  function cycleTab(by) {
+    const on = shownTab();
+    if (on === null || !state.tabs.length) return false;
+    const order = ["", ...state.tabs.map((t) => t.id)];
+    showTab(order[(order.indexOf(on) + by + order.length) % order.length]);
+    return true;
+  }
+
+  /** Close a source's tab; shown, the one after it is, or before it, or the tutor's. @param {string} id */
+  function closeTab(id) {
+    const at = state.tabs.findIndex((t) => t.id === id);
+    if (at < 0) return;
+    const shown = shownTab() === id;
+    state.tabs.splice(at, 1);
+    state.scrolls.delete(id);
+    if (shown) {
+      state.shown = { kind: "chat" };
+      return showTab(state.tabs[Math.min(at, state.tabs.length - 1)]?.id ?? "");
+    }
+    renderTabs();
   }
 
   /* ── what is clicked ───────────────────────────────────────────── */
@@ -975,7 +1054,12 @@ export function createStudy(host) {
       /** @type {HTMLButtonElement} */ (compileHere).disabled = true;
       return;
     }
+    const tabClose = at("[data-study-tab-close]");
+    if (tabClose) return closeTab(tabClose.dataset.studyTabClose ?? "");
+    const tab = at("[data-study-tab]");
+    if (tab) return showTab(tab.dataset.studyTab ?? "");
     if (at("[data-study-back]")) {
+      rememberScroll();
       state.shown = { kind: state.back };
       els.stage.innerHTML = "";
       return render();
@@ -1313,6 +1397,18 @@ export function createStudy(host) {
     if (state.shown.kind === "coding") coder.typed(/** @type {HTMLElement} */ (e.target));
   });
 
+  // ⌃⇥ and ⌃⇧⇥ go between the tabs, wherever Notebook has the keyboard: taken
+  // first, so neither a field nor the app's own keys see them.
+  host.root.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab" || !e.ctrlKey || e.metaKey || e.altKey || !ws.classList.contains("on")) return;
+    const t = e.target instanceof Element ? e.target : null;
+    if (t && t !== document.body && t !== document.documentElement && !ws.contains(t)) return;
+    if (cycleTab(e.shiftKey ? -1 : 1)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+
   ws.addEventListener("keydown", (e) => {
     if (state.shown.kind === "review" && cards.key(e, () => renderStage())) return;
     if (state.shown.kind === "slides" && decks.key(e, () => renderStage())) return;
@@ -1438,6 +1534,15 @@ export function createStudy(host) {
       state.getting = null;
       state.shown = { kind: "chat" };
       state.back = "chat";
+      state.tabs = [];
+      state.scrolls.clear();
+    }
+    // A source taken out takes its tab with it.
+    const have = new Set(event.sources.map((s) => s.id));
+    state.tabs = state.tabs.filter((t) => have.has(t.id));
+    if ((state.shown.kind === "source" || state.shown.kind === "artifact") && !have.has(state.shown.source.id)) {
+      state.shown = { kind: "chat" };
+      els.stage.innerHTML = "";
     }
     state.notebook = event;
     state.open = event.slug;
@@ -1628,11 +1733,18 @@ export function createStudy(host) {
 
   /** A source, in the reader. @param {SourceEvent} event */
   function source(event) {
+    rememberScroll();
+    // Opened again — a guide written, a recompile — it keeps its tab and its place.
+    const had = state.tabs.findIndex((t) => t.id === event.id);
+    if (had >= 0) state.tabs[had] = event;
+    else state.tabs.push(event);
     state.shown = { kind: "source", source: event };
     state.editing = false;
     state.pasting = false;
     els.stage.innerHTML = "";
     render();
+    const y = state.scrolls.get(event.id);
+    if (had >= 0 && !event.at && y !== undefined) els.stage.scrollTop = y;
   }
 
   /** A file the tutor wrote, to read and edit. @param {FileEvent} event */
@@ -1671,6 +1783,8 @@ export function createStudy(host) {
   function closed() {
     state.notebook = null;
     state.open = null;
+    state.tabs = [];
+    state.scrolls.clear();
     cards.clear();
     quizzes.clear();
     sounds.clear();

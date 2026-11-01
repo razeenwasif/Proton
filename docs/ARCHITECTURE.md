@@ -1191,7 +1191,11 @@ sources about it (`proton-study::guide`). The person's own **categories**
 (`Sources::categories`, in `sources.json` in their order) group the sources in
 the panel: a source is in one or none, its membership dropped when it is taken
 out, and a name is unique whatever its case; taking a category away keeps its
-sources, in none. A PDF's pages with few words of
+sources, in none. Each source opened stays as a **tab** beside the tutor's, in
+the window only (`state.tabs`, its last `studySource` event and how far down it
+was read): ⌃⇥ and ⌃⇧⇥ go round them without asking the core again, a source
+opened again replaces its tab's copy, and a source taken out or another
+notebook opened takes the tabs away. A PDF's pages with few words of
 their own — slides that are mostly pictures — are **made readable** on asking,
 told how many calls it takes: drawn by pdftoppm on a worker, never from a file
 in iCloud, then read eight to a call by an engine that can see them (Antigravity's
