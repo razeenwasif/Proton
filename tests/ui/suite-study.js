@@ -678,6 +678,12 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.pushEvents([notebook([search(['Search']), exam(['Exams', 'Search'])]), job({state: 'done', made: 'labels'})]); await settle();
     const chips = [...ws().querySelectorAll('[data-study-label-pick]')].map((c) => c.textContent);
     assert(JSON.stringify(chips) === '["Exams","Search"]', `the labels are not offered to tick by: ${JSON.stringify(chips)}`);
+    const bar = ws().querySelector('.st-label-bar');
+    assert(!bar.open && bar.querySelector('summary').textContent.includes('Topics'), 'the topics are not folded to one line');
+    bar.querySelector('summary').click(); await settle();
+    assert(ws().querySelector('.st-label-bar').open, 'the topics did not open');
+    await win.pushEvents([notebook([search(['Search']), exam(['Exams', 'Search'])])]); await settle();
+    assert(ws().querySelector('.st-label-bar').open, 'the topics folded again when the notebook was redrawn');
     assert(ws().querySelector('.st-source[data-study-source="S02"] .st-labels')?.textContent === 'ExamsSearch', 'a source does not show its labels');
     const tick = win.commands.length;
     ws().querySelector('[data-study-label-pick="Exams"]').click(); await settle();

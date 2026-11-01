@@ -3967,7 +3967,16 @@ body { font-size: calc(13px * var(--ui-scale)); }
 /* A source's topics, and the bar that ticks sources by them. */
 .st-labels { display: flex; flex-wrap: wrap; gap: 3px; }
 .st-label { padding: 0 6px; border-radius: 999px; background: var(--cc-raise); color: var(--cc-muted); font: calc(var(--z-2xs) * .88)/1.6 var(--cc-font); white-space: nowrap; }
-.st-label-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 8px; }
+.st-label-bar { padding: 0 12px 6px; }
+.st-label-bar > summary { display: flex; align-items: center; gap: 5px; width: fit-content; list-style: none; cursor: pointer;
+  font: var(--z-2xs)/1.6 var(--cc-font); color: var(--cc-muted); }
+.st-label-bar > summary::-webkit-details-marker { display: none; }
+.st-label-bar > summary:hover { color: var(--cc-text); }
+.st-label-bar > summary .i { width: 11px; height: 11px; transform: rotate(-90deg); transition: transform .15s; }
+.st-label-bar[open] > summary .i { transform: none; }
+.st-label-chips { display: flex; flex-wrap: wrap; gap: 3px; padding-top: 5px; max-height: 128px; overflow-y: auto; }
+.st-label-chips .st-chip { max-width: 100%; padding: 0 7px; font-size: calc(var(--z-2xs) * .88); line-height: 1.7;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-chip { padding: 2px 9px; border: 1px solid var(--cc-line-2); border-radius: 999px; background: transparent; color: var(--cc-muted);
   font: var(--z-2xs)/1.5 var(--cc-font); cursor: pointer; }
 .st-chip:hover { color: var(--cc-text); border-color: var(--cc-accent); }

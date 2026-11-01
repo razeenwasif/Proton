@@ -150,7 +150,7 @@ export function createStudy(host) {
    *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null, digest: string | null,
    *   artifacts: ArtifactRow[] | null, picked: Set<string>,
    *   folded: Set<string>, naming: string | null, unnaming: string | null, filing: string | null,
-   *   tabs: SourceEvent[], scrolls: Map<string, number>}} */
+   *   tabs: SourceEvent[], scrolls: Map<string, number>, topicsOpen: boolean}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -170,6 +170,8 @@ export function createStudy(host) {
     // The sources opened, in the order they were, each as a tab beside the
     // tutor's, and how far down each was read.
     tabs: [], scrolls: new Map(),
+    // The topics to tick sources by, folded to one line until asked for.
+    topicsOpen: false,
     // What the middle shows: the chat, the sources, a source in the
     // reader, a note — and what Back returns to.
     shown: { kind: "chat" },
@@ -338,7 +340,8 @@ export function createStudy(host) {
     // Every topic a source is labelled with: each ticks the sources about it.
     const topics = [...new Set(usable.flatMap((s) => s.labels))].sort((a, b) => a.localeCompare(b));
     const labelBar = topics.length && !readOnly()
-      ? `<div class="st-label-bar">${topics.map((t) => `<button class="st-chip" data-study-label-pick="${esc(t)}" title="Use only the sources about ${esc(t)}">${esc(t)}</button>`).join("")}</div>` : "";
+      ? `<details class="st-label-bar"${state.topicsOpen ? " open" : ""}><summary data-study-topics title="Tick the sources by their topic">${icon("chev")}Topics <span class="st-faint">${topics.length}</span></summary>` +
+        `<div class="st-label-chips">${topics.map((t) => `<button class="st-chip" data-study-label-pick="${esc(t)}" title="Use only the sources about ${esc(t)}">${esc(t)}</button>`).join("")}</div></details>` : "";
     const tickAll = usable.length > 1 && !readOnly()
       ? `<label class="st-all"><input type="checkbox" data-study-all${all ? " checked" : ""}> Use every source</label>` : "";
     const rows = groupedHtml(nb);
@@ -1160,6 +1163,11 @@ export function createStudy(host) {
     const question = at("[data-study-ask-question]");
     if (question) return askTutor(question.dataset.studyAskQuestion ?? "");
     // Categories: made, named, folded, taken away; a source filed in one.
+    if (at("[data-study-topics]")) {
+      e.preventDefault();
+      state.topicsOpen = !state.topicsOpen;
+      return renderSources();
+    }
     if (at("[data-study-cat-new]")) {
       state.naming = "";
       renderSources();
