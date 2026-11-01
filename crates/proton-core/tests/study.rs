@@ -1076,10 +1076,14 @@ fn with_no_server_every_engine_is_given_passages() {
         Event::StudyNotebook { sources, .. } if sources.iter().all(|s| s.status == SourceStatus::Ready) && !sources.is_empty() => Some(()),
         _ => None,
     });
+    // A note of the student's own, which is not a source.
+    session.apply(Command::StudyNote { id: None, title: "My BFS sheet".into(), body: "Queue, not stack.".into() });
     session.apply(Command::StudyAsk { text: "breadth first search".into() });
     let log = log.lock().unwrap();
     assert!(log.started[0].2.mcp.is_empty());
     assert!(log.sent[0].contains("[[S01 § Search L1-2]]"), "{}", log.sent[0]);
+    // Given its notes too, by id and whole.
+    assert!(log.sent[0].contains("The student's notes") && log.sent[0].contains("N001 — My BFS sheet") && log.sent[0].contains("Queue, not stack."), "{}", log.sent[0]);
     drop(log);
     session.shutdown();
 }

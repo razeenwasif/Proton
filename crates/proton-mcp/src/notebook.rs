@@ -12,6 +12,10 @@
 //! sections says, where it begins — when the studio has made one, so a
 //! source too long to read whole can be seen whole, section by section.
 //!
+//! `read_note` hands back one of the notebook's notes — the student's own
+//! writing, a cheatsheet the tutor made — whole: `notebook_sources` lists
+//! them after the sources, ticked or not, since a note is not a source.
+//!
 //! `view_pages` draws a PDF source's pages as pictures, for slides whose
 //! words were too few to read: it needs the file itself, found under the
 //! roots named with `--root Label=/path`, and refuses one in iCloud. The
@@ -185,6 +189,13 @@ pub fn tools() -> Value {
             }
         },
         {
+            "name": "read_note",
+            "description": "Read one of the notebook's notes, by its id (N001) as notebook_sources lists them: the \
+                            student's own notes, and cheatsheets and summaries made for them. Name a note as \"your \
+                            note N001\"; it is not a source, so it is not cited in brackets.",
+            "inputSchema": { "type": "object", "properties": { "note": { "type": "string", "description": "The note's id: N001." } }, "required": ["note"] }
+        },
+        {
             "name": "notebook_status",
             "description": "How many sources this notebook has, how many you may use, and whether any is still being read.",
             "inputSchema": { "type": "object", "properties": {} }
@@ -214,15 +225,49 @@ pub fn call(served: &mut Served, name: &str, args: &Value) -> Value {
             Err(why) => rpc::tool_output(why, true),
         },
         "notebook_status" => rpc::tool_output(status(served), false),
+        "read_note" => match note(served, args) {
+            Ok(text) => rpc::tool_output(text, false),
+            Err(why) => rpc::tool_output(why, true),
+        },
         other => rpc::tool_output(format!("no tool named {other}"), true),
     }
+}
+
+/// The notebook's notes, by id and title: listed after the sources.
+fn notes_list(book: &Book) -> String {
+    let notes = book.notes();
+    if notes.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\nThe student's notes — their own writing, and what you made for them; read_note shows one:\n");
+    for n in notes {
+        out.push_str(&format!("{}  {}\n", n.id, n.title));
+    }
+    out
+}
+
+/// One note, whole or as far as a call may hand back.
+fn note(served: &Served, args: &Value) -> Result<String, String> {
+    let book = served.book.as_ref().ok_or("the notebook cannot be read")?;
+    let id = args["note"].as_str().ok_or("read_note: `note` is required, a note's id: N001")?;
+    let note = book.note(id.trim()).ok_or_else(|| format!("{id}: no such note — notebook_sources lists them"))?;
+    let mut body = note.body.clone();
+    if body.len() > MOST {
+        let mut cut = MOST;
+        while !body.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        body.truncate(cut);
+        body.push_str("\n…(cut here: the rest is longer than one call hands back)");
+    }
+    Ok(format!("{} — {}\n\n{body}", note.id, note.title))
 }
 
 fn sources(served: &Served) -> String {
     let Some(book) = &served.book else { return "the notebook cannot be read".into() };
     let ticked = served.ticked();
     if ticked.is_empty() {
-        return "No sources are ticked for you to use. Say so: the student ticks sources in the notebook.".into();
+        return format!("No sources are ticked for you to use. Say so: the student ticks sources in the notebook.\n{}", notes_list(book));
     }
     let mut out = format!("The notebook \"{}\" — the sources you may use:\n", book.notebook.title);
     for s in &ticked {
@@ -242,6 +287,7 @@ fn sources(served: &Served) -> String {
     if others > 0 {
         out.push_str(&format!("{others} other source{} are not ticked, and are not yours to use.\n", if others == 1 { " is" } else { "s" }));
     }
+    out.push_str(&notes_list(book));
     out
 }
 
@@ -524,6 +570,22 @@ mod tests {
         let refused = call(&mut served, "read_source", &json!({ "source": "S03" }));
         assert_eq!(refused["isError"], json!(true));
         assert!(text(&refused).contains("not ticked"));
+    }
+
+    #[test]
+    fn the_notes_are_listed_after_the_sources_and_read_whole_by_id() {
+        let (dir, _) = notebook("notes");
+        let book = Book::read(&dir).unwrap();
+        let note = proton_study::model::Note { id: "N001".into(), title: "Search cheatsheet".into(), created: 1, updated: 1, from: None, body: "A* is optimal when h is admissible.".into() };
+        book.write_note(&note).unwrap();
+        let mut served = Served::open(dir.clone(), Vec::new());
+        let listed = text(&call(&mut served, "notebook_sources", &json!({})));
+        assert!(listed.contains("The student's notes") && listed.contains("N001  Search cheatsheet"), "{listed}");
+        let read = call(&mut served, "read_note", &json!({ "note": "N001" }));
+        assert_eq!(read["isError"], json!(false));
+        assert!(text(&read).contains("A* is optimal when h is admissible."), "{}", text(&read));
+        assert_eq!(call(&mut served, "read_note", &json!({ "note": "N404" }))["isError"], json!(true));
+        assert!(tools().as_array().unwrap().iter().any(|t| t["name"] == "read_note"));
     }
 
     #[test]

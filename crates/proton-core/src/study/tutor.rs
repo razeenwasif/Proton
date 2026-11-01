@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// The notebook server's tools a tutor may call.
-pub const TOOLS: [&str; 6] = ["notebook_sources", "search_sources", "read_source", "digest_source", "view_pages", "notebook_status"];
+pub const TOOLS: [&str; 7] = ["notebook_sources", "search_sources", "read_source", "digest_source", "view_pages", "notebook_status", "read_note"];
 
 /// The most passages a tutor without the tools is given, in characters.
 const PASSAGES: usize = 16_000;
@@ -285,6 +285,7 @@ fn step(tool: &Tool) -> StudyStep {
             ("read", format!("Read {}{range}", field("source")))
         }
         "digest_source" => ("read", format!("Read {}'s digest", field("source"))),
+        "read_note" => ("read", format!("Read the note {}", field("note"))),
         "view_pages" => {
             let pages: Vec<String> = input.get("pages").and_then(|v| v.as_array()).map(|p| p.iter().map(|n| n.to_string()).collect()).unwrap_or_default();
             ("view", format!("Looked at {} page {}", field("source"), pages.join(", ")))
@@ -310,7 +311,32 @@ fn passages(book: &Book, question: &str) -> String {
         used += size;
         kept.push(hit);
     }
-    proton_library::quote(&kept)
+    let mut out = proton_library::quote(&kept);
+    out.push_str(&notes_given(book));
+    out
+}
+
+/// The notebook's notes, for a tutor given passages rather than tools: whole,
+/// as far as their share of what it is given goes, and otherwise by title.
+fn notes_given(book: &Book) -> String {
+    /// What the notes may take of a message, in characters.
+    const NOTES: usize = 8_000;
+    let notes = book.notes();
+    if notes.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n\nThe student's notes — their own, and what was made for them; not sources, so name one as \"your note N001\", unbracketed:\n");
+    let mut used = 0;
+    for n in notes {
+        let whole = format!("\n## {} — {}\n{}\n", n.id, n.title, n.body.trim());
+        if used + whole.len() <= NOTES {
+            used += whole.len();
+            out.push_str(&whole);
+        } else {
+            out.push_str(&format!("\n## {} — {} (too long to give here)\n", n.id, n.title));
+        }
+    }
+    out
 }
 
 /// The tutor settings a notebook has, with a change applied: a custom role

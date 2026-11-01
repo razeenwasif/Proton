@@ -1208,12 +1208,14 @@ Antigravity, as the notebook has it set (`proton-core::study::tutor`). The
 first three reach the sources through `proton-mcp --notebook`, which serves
 only those ticked, from the words the notebook kept — `notebook_sources`,
 `search_sources`, `read_source`, `digest_source` (a long source's digest,
-section by section), `view_pages`, `notebook_status` — and have
-nothing else: Claude Code with no built-in tools (`--tools ""`), Codex in a
+section by section), `view_pages`, `notebook_status`, and `read_note`: the
+notebook's notes, listed after the sources ticked or not, since a note is no
+source — and have nothing else: Claude Code with no built-in tools (`--tools ""`), Codex in a
 read-only sandbox that never asks, Gemini with no extensions and only Proton's
 server allowed, none with the person's own servers. Antigravity, which takes
 no server, is given the passages found for each question, as any engine is
-when the server cannot be found. The tutor is told to follow every claim with
+when the server cannot be found. Its notes come with them, whole up to 8,000
+characters and by title past that. The tutor is told to follow every claim with
 its citation, copied from the tools, and to say plainly what the sources do
 not cover; Default, Learning Guide and a role of one's own set how it answers.
 Each citation is resolved as the answer streams (`proton-study::cite`): drawn as
