@@ -546,6 +546,73 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
+  await test('Sources are kept in categories of the student\'s own: made, filed by dragging or Move to, ticked, folded, renamed and taken away', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    const three = [row('S01'), row('S02', {selected: false}), row('S03')];
+    await win.pushEvents([notebook(three)]); await settle();
+    assert(!ws().querySelector('.st-cat') && ws().querySelectorAll('.st-source').length === 3, 'with no categories, the sources are not one list');
+    const made = win.commands.length;
+    ws().querySelector('[data-study-cat-new]').click(); await settle();
+    const input = ws().querySelector('[data-study-cat-form] input');
+    assert(doc.activeElement === input, 'the new category\'s name is not asked for');
+    input.value = 'Past exams';
+    ws().querySelector('[data-study-cat-form]').requestSubmit(); await settle();
+    assert(sent(made, 'studyCategoryAdd')[0]?.name === 'Past exams', `the category was not made: ${JSON.stringify(sent(made, 'studyCategoryAdd'))}`);
+
+    const grouped = (/** @type {any[]} */ categories) => ({...notebook(three), categories});
+    await win.pushEvents([grouped([{name: 'Past exams', sources: ['S02']}, {name: 'Lecture slides', sources: []}])]); await settle();
+    const sections = [...ws().querySelectorAll('.st-cat')].map((c) => [c.querySelector('.st-cat-name')?.textContent, [...c.querySelectorAll('.st-source')].map((r) => r.dataset.studySource)]);
+    assert(JSON.stringify(sections) === '[["Past exams",["S02"]],["Lecture slides",[]],["Uncategorized",["S01","S03"]]]', `not grouped, the rest last: ${JSON.stringify(sections)}`);
+    assert(ws().querySelector('.st-cat[data-study-cat="Lecture slides"] .st-cat-empty'), 'an empty category does not say sources can be dragged to it');
+
+    const tick = win.commands.length;
+    const box = ws().querySelector('[data-study-cat-tick="Past exams"]');
+    box.click(); await settle();
+    assert(JSON.stringify(sent(tick, 'studySelect')[0]?.ids) === '["S01","S02","S03"]', `the category's sources were not ticked with the rest kept: ${JSON.stringify(sent(tick, 'studySelect'))}`);
+    const untick = win.commands.length;
+    ws().querySelector('[data-study-cat-tick=""]').click(); await settle();
+    assert(JSON.stringify(sent(untick, 'studySelect')[0]?.ids) === '[]', `Uncategorized's box did not untick only its own: ${JSON.stringify(sent(untick, 'studySelect'))}`);
+
+    const moved = win.commands.length;
+    ws().querySelector('[data-study-filing="S01"]').click(); await settle();
+    ws().querySelector('.st-filing [data-study-file-to="Lecture slides"]').click(); await settle();
+    assert(JSON.stringify(sent(moved, 'studyCategorize')[0]) === '{"type":"studyCategorize","ids":["S01"],"category":"Lecture slides"}', `Move to did not file it: ${JSON.stringify(sent(moved, 'studyCategorize'))}`);
+
+    const dragged = win.commands.length;
+    const data = new win.DataTransfer();
+    const from = ws().querySelector('.st-source[data-study-source="S03"]');
+    const onto = ws().querySelector('.st-cat-head[data-study-cat-drop="Past exams"]');
+    from.dispatchEvent(new win.DragEvent('dragstart', {bubbles: true, cancelable: true, dataTransfer: data}));
+    const over = new win.DragEvent('dragover', {bubbles: true, cancelable: true, dataTransfer: data});
+    onto.dispatchEvent(over);
+    assert(over.defaultPrevented && onto.classList.contains('drop'), 'the heading does not take a dragged source');
+    onto.dispatchEvent(new win.DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: data}));
+    from.dispatchEvent(new win.DragEvent('dragend', {bubbles: true}));
+    await settle();
+    assert(JSON.stringify(sent(dragged, 'studyCategorize')[0]?.ids) === '["S03"]' && sent(dragged, 'studyCategorize')[0]?.category === 'Past exams', `dropping did not file it: ${JSON.stringify(sent(dragged, 'studyCategorize'))}`);
+
+    ws().querySelector('[data-study-cat-fold="Past exams"]').click(); await settle();
+    assert(!ws().querySelector('.st-source[data-study-source="S02"]') && ws().querySelector('.st-cat.folded .st-cat-name')?.textContent === 'Past exams', 'the category did not fold');
+    ws().querySelector('[data-study-cat-fold="Past exams"]').click(); await settle();
+    assert(ws().querySelector('.st-source[data-study-source="S02"]'), 'the category did not unfold');
+
+    const renamed = win.commands.length;
+    ws().querySelector('[data-study-cat-rename="Past exams"]').click(); await settle();
+    const name = ws().querySelector('[data-study-cat-form] input');
+    assert(name?.value === 'Past exams', 'the rename does not start from its name');
+    name.value = 'Practice exams';
+    ws().querySelector('[data-study-cat-form]').requestSubmit(); await settle();
+    assert(JSON.stringify(sent(renamed, 'studyCategoryRename')[0]) === '{"type":"studyCategoryRename","from":"Past exams","to":"Practice exams"}', `not renamed: ${JSON.stringify(sent(renamed, 'studyCategoryRename'))}`);
+
+    const removed = win.commands.length;
+    ws().querySelector('[data-study-cat-remove="Lecture slides"]').click(); await settle();
+    assert(ws().querySelector('.st-cat-confirm')?.textContent.includes('Its sources stay'), 'taking it away is not confirmed first');
+    assert(sent(removed, 'studyCategoryRemove').length === 0, 'it was taken away before Yes');
+    ws().querySelector('[data-study-cat-remove-yes="Lecture slides"]').click(); await settle();
+    assert(sent(removed, 'studyCategoryRemove')[0]?.name === 'Lecture slides', 'it was not taken away on Yes');
+    await win.pushEvents([notebook(three)]); await settle();
+  });
+
   await test('Sources are labelled by topic and ticked by label; a source is given its guide on asking, whose topics ask the tutor', async () => {
     await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
     const search = (/** @type {string[]} */ labels) => row('S01', {kind: 'markdown', units: 'lines', title: 'Search.md', labels});

@@ -3992,6 +3992,21 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .st-x { flex: 0 0 auto; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none;
   color: var(--cc-faint); cursor: pointer; opacity: 0; }
 .st-x .i { width: 12px; height: 12px; }
+/* The student's categories: a heading that folds, ticks, and takes a dropped source. */
+.st-cat-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px 8px; font: 600 var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-muted); }
+.st-cat-head.drop { background: var(--row-hover); box-shadow: inset 0 0 0 1px var(--cc-accent); border-radius: 6px; }
+.st-cat-head:hover .st-x, .st-cat-head .st-x:focus-visible { opacity: 1; }
+.st-cat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cc-text); }
+.st-cat-fold { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: var(--cc-faint); cursor: pointer; }
+.st-cat-fold .i { width: 11px; height: 11px; transition: transform .15s; }
+.st-cat-fold[aria-expanded="false"] .i { transform: rotate(-90deg); }
+.st-cat-empty.drop { color: var(--cc-text); background: var(--row-hover); }
+.st-cat-form { display: flex; gap: 6px; padding: 6px 12px; }
+.st-cat-form input { flex: 1 1 auto; min-width: 0; }
+.st-cat-confirm { margin: 0 12px 4px; }
+.st-source.dragging { opacity: .45; }
+.st-filing { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 12px 8px 38px; font: var(--z-2xs)/1.3 var(--cc-font); color: var(--cc-faint); }
+.st-chip.on { color: var(--cc-text); border-color: var(--cc-accent); }
 .st-source:hover .st-x, .st-x:focus-visible { opacity: 1; }
 .st-x:hover { color: var(--cc-text); background: var(--row-hover); }
 .st-confirm { flex: 0 0 auto; color: var(--cc-text); }

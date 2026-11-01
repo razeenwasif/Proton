@@ -91,6 +91,11 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyFileOpen { .. }
             | Command::StudyFileCompile { .. }
             | Command::StudyFileSave { .. }
+            | Command::StudyCategoryAdd { .. }
+            | Command::StudyCategoryRename { .. }
+            | Command::StudyCategoryRemove { .. }
+            | Command::StudyCategoryMove { .. }
+            | Command::StudyCategorize { .. }
             | Command::StudyStopAnswer
             | Command::StudyChatNew
             | Command::StudyChatOpen { .. }
@@ -636,6 +641,11 @@ impl Study {
             Command::StudyFileOpen { name } => self.open_file(&name),
             Command::StudyFileCompile { name } => self.compile(&name),
             Command::StudyFileSave { name, body } => self.save_file(&name, &body),
+            Command::StudyCategoryAdd { name } => self.categories(|s| s.add_category(&name).map(|_| ())),
+            Command::StudyCategoryRename { from, to } => self.categories(|s| s.rename_category(&from, &to).map(|_| ())),
+            Command::StudyCategoryRemove { name } => self.categories(|s| s.remove_category(&name)),
+            Command::StudyCategoryMove { name, to } => self.categories(|s| s.move_category(&name, to)),
+            Command::StudyCategorize { ids, category } => self.categories(|s| s.categorize(&ids, category.as_deref())),
             Command::StudyStopAnswer => {
                 if let Some(tutor) = &mut self.tutor {
                     tutor.interrupt();
@@ -824,6 +834,7 @@ impl Study {
                 .iter()
                 .map(|s| StudySourceRow { labels: labels.get(&s.id).cloned().unwrap_or_default(), ..StudySourceRow::of(s, selected.contains(&s.id)) })
                 .collect(),
+            categories: book.sources.categories.clone(),
             notes: book.notes().iter().map(StudyNoteRow::of).collect(),
         })
     }
@@ -1228,6 +1239,7 @@ impl Study {
             if let Some(first) = duplicate {
                 let title = book.sources.get(&id).map(|s| s.title.clone()).unwrap_or_default();
                 book.sources.sources.retain(|s| s.id != id);
+        book.sources.forget(&id);
                 snapshot::forget(book, &id);
                 said.push(notice(format!("{title} is the same file as {first}, which is kept."), NoticeLevel::Info));
             } else if let Some(source) = book.sources.get_mut(&id) {
@@ -1616,6 +1628,7 @@ impl Study {
         };
         let before = book.sources.sources.len();
         book.sources.sources.retain(|s| s.id != id);
+        book.sources.forget(&id);
         if book.sources.sources.len() == before {
             return vec![notice(format!("{id}: no such source"), NoticeLevel::Warn)];
         }
@@ -1625,6 +1638,22 @@ impl Study {
         let mut events = self.saved();
         events.insert(0, self.list_event());
         events
+    }
+
+    /// A change to the categories, saved, and the panel drawn again — or
+    /// why it was not made.
+    fn categories(&mut self, change: impl FnOnce(&mut proton_study::model::Sources) -> Result<(), String>) -> Vec<Event> {
+        let book = match self.writable() {
+            Ok(book) => book,
+            Err(events) => return events,
+        };
+        if let Err(why) = change(&mut book.sources) {
+            return vec![notice(why, NoticeLevel::Warn)];
+        }
+        if let Err(why) = book.save_sources() {
+            return vec![notice(why, NoticeLevel::Error)];
+        }
+        self.notebook_event().into_iter().collect()
     }
 
     fn select(&mut self, ids: &[String]) -> Vec<Event> {

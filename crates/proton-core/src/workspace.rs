@@ -1370,6 +1370,11 @@ impl Workspace {
             | Command::StudyFileOpen { .. }
             | Command::StudyFileCompile { .. }
             | Command::StudyFileSave { .. }
+            | Command::StudyCategoryAdd { .. }
+            | Command::StudyCategoryRename { .. }
+            | Command::StudyCategoryRemove { .. }
+            | Command::StudyCategoryMove { .. }
+            | Command::StudyCategorize { .. }
             | Command::StudyStopAnswer
             | Command::StudyChatNew
             | Command::StudyChatOpen { .. }

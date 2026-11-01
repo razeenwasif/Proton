@@ -1053,6 +1053,28 @@ pub enum Command {
     StudyNoteDelete {
         id: String,
     },
+    /// Make a category of sources, last in the list.
+    StudyCategoryAdd {
+        name: String,
+    },
+    StudyCategoryRename {
+        from: String,
+        to: String,
+    },
+    /// Take a category away; its sources are in none.
+    StudyCategoryRemove {
+        name: String,
+    },
+    /// Move a category to a place in the list.
+    StudyCategoryMove {
+        name: String,
+        to: usize,
+    },
+    /// Put sources in a category — or in none.
+    StudyCategorize {
+        ids: Vec<String>,
+        category: Option<String>,
+    },
     /// Make a note a source, so the tutor reads it too.
     StudyNoteSource {
         id: String,
@@ -2005,6 +2027,8 @@ pub enum Event {
         exam: Option<String>,
         read_only: Option<String>,
         sources: Vec<proton_study::view::StudySourceRow>,
+        /// The student's groups of sources, in order, each with its sources' ids.
+        categories: Vec<proton_study::model::Category>,
         notes: Vec<proton_study::view::StudyNoteRow>,
     },
     /// No notebook is open.

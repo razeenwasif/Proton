@@ -1062,6 +1062,45 @@ fn chat_turns(events: &[Event]) -> Option<Vec<proton_study::tutor::StudyTurn>> {
 }
 
 #[test]
+fn sources_are_kept_in_categories_of_the_students_own() {
+    let scratch = Scratch::new("categories");
+    let settings = scratch.knowledge_base();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(tutor::Log::default()));
+    let mut session = tutored(&scratch, &settings, None, &log);
+    session.apply(Command::SetMode { mode: ModeId::Study });
+    session.apply(Command::StudyFolder { folder: scratch.root.join("Notebooks").display().to_string() });
+    until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
+    session.apply(Command::StudyNew { title: "Search".into() });
+    session.apply(Command::StudyAdd { paths: vec!["Vault/notes.md".into(), "Courses/COMP3670/Exam_2020.pdf".into()] });
+    let categories = |events: &[Event]| {
+        events.iter().rev().find_map(|e| match e {
+            Event::StudyNotebook { categories, .. } => Some(categories.iter().map(|c| (c.name.clone(), c.sources.clone())).collect::<Vec<_>>()),
+            _ => None,
+        })
+    };
+    session.apply(Command::StudyCategoryAdd { name: "Lecture notes".into() });
+    let events = session.apply(Command::StudyCategoryAdd { name: "Past exams".into() });
+    assert_eq!(categories(&events).unwrap().len(), 2);
+    session.apply(Command::StudyCategorize { ids: vec!["S01".into()], category: Some("Lecture notes".into()) });
+    let events = session.apply(Command::StudyCategorize { ids: vec!["S02".into()], category: Some("Past exams".into()) });
+    assert_eq!(categories(&events).unwrap(), [("Lecture notes".to_string(), vec!["S01".to_string()]), ("Past exams".to_string(), vec!["S02".to_string()])]);
+    // A name taken is refused, and said.
+    let events = session.apply(Command::StudyCategoryAdd { name: "past exams".into() });
+    assert!(events.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("already"))), "{events:?}");
+    session.apply(Command::StudyCategoryRename { from: "Past exams".into(), to: "Practice exams".into() });
+    let events = session.apply(Command::StudyCategoryMove { name: "Practice exams".into(), to: 0 });
+    assert_eq!(categories(&events).unwrap()[0], ("Practice exams".to_string(), vec!["S02".to_string()]));
+    // Kept in sources.json, and a source taken out leaves its category.
+    let kept = std::fs::read_to_string(scratch.root.join("Notebooks/search/sources.json")).unwrap();
+    assert!(kept.contains("Practice exams"), "{kept}");
+    let events = session.apply(Command::StudyRemove { id: "S02".into() });
+    assert_eq!(categories(&events).unwrap()[0].1, Vec::<String>::new());
+    let events = session.apply(Command::StudyCategoryRemove { name: "Lecture notes".into() });
+    assert_eq!(categories(&events).unwrap().len(), 1);
+    session.shutdown();
+}
+
+#[test]
 fn with_no_server_every_engine_is_given_passages() {
     let scratch = Scratch::new("tutor-passages");
     let settings = scratch.knowledge_base();

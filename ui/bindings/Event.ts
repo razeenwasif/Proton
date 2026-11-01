@@ -73,6 +73,7 @@ import type { StudyAttempt } from "./StudyAttempt";
 import type { StudyAudioFormat } from "./StudyAudioFormat";
 import type { StudyBlock } from "./StudyBlock";
 import type { StudyCardRow } from "./StudyCardRow";
+import type { StudyCategory } from "./StudyCategory";
 import type { StudyChapter } from "./StudyChapter";
 import type { StudyChatSummary } from "./StudyChatSummary";
 import type { StudyCitation } from "./StudyCitation";
@@ -282,7 +283,11 @@ check: boolean,
 /**
  * Whether this Proton asks anybody at all.
  */
-live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "studyList", notebooks: Array<StudySummary>, open: string | null, folder: string | null, } | { "type": "studyNotebook", slug: string, title: string, course: string, exam: string | null, readOnly: string | null, sources: Array<StudySourceRow>, notes: Array<StudyNoteRow>, } | { "type": "studyClosed" } | { "type": "studyKb", roots: Array<StudyRoot>, rules: Array<string>, 
+live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "studyList", notebooks: Array<StudySummary>, open: string | null, folder: string | null, } | { "type": "studyNotebook", slug: string, title: string, course: string, exam: string | null, readOnly: string | null, sources: Array<StudySourceRow>, 
+/**
+ * The student's groups of sources, in order, each with its sources' ids.
+ */
+categories: Array<StudyCategory>, notes: Array<StudyNoteRow>, } | { "type": "studyClosed" } | { "type": "studyKb", roots: Array<StudyRoot>, rules: Array<string>, 
 /**
  * Whether it has been begun on: Notebook has been opened.
  */

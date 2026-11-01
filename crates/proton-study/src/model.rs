@@ -185,7 +185,23 @@ pub struct Sources {
     /// Never goes down: a removed source's id is never given to another.
     pub next: u32,
     pub sources: Vec<Source>,
+    /// The student's own groups of sources, in the order the panel shows
+    /// them; a source is in one at most.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<Category>,
 }
+
+/// A group of sources the student made — "Past exams", "Lecture slides" —
+/// and the sources in it, by id, in order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/", rename = "StudyCategory")]
+pub struct Category {
+    pub name: String,
+    pub sources: Vec<String>,
+}
+
+/// The longest a category's name may be.
+pub const CATEGORY: usize = 60;
 
 impl Sources {
     /// `S01` … `S99`, then `S100`.
@@ -202,6 +218,88 @@ impl Sources {
 
     pub fn get_mut(&mut self, id: &str) -> Option<&mut Source> {
         self.sources.iter_mut().find(|s| s.id == id)
+    }
+
+    /* ── categories ── */
+
+    /// The category a source is in, if any.
+    pub fn category_of(&self, id: &str) -> Option<&str> {
+        self.categories.iter().find(|c| c.sources.iter().any(|s| s == id)).map(|c| c.name.as_str())
+    }
+
+    /// A name a category can have: trimmed, not empty, not too long, and not
+    /// one already taken, whatever its case — `besides` excepted.
+    fn category_name(&self, name: &str, besides: Option<&str>) -> Result<String, String> {
+        let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if name.is_empty() {
+            return Err("A category needs a name.".into());
+        }
+        if name.chars().count() > CATEGORY {
+            return Err(format!("A category's name is at most {CATEGORY} characters."));
+        }
+        let taken = self.categories.iter().any(|c| c.name.eq_ignore_ascii_case(&name) && Some(c.name.as_str()) != besides);
+        if taken {
+            return Err(format!("There is a category called {name} already."));
+        }
+        Ok(name)
+    }
+
+    /// A new category, last.
+    pub fn add_category(&mut self, name: &str) -> Result<String, String> {
+        let name = self.category_name(name, None)?;
+        self.categories.push(Category { name: name.clone(), sources: Vec::new() });
+        Ok(name)
+    }
+
+    pub fn rename_category(&mut self, from: &str, to: &str) -> Result<String, String> {
+        let to = self.category_name(to, Some(from))?;
+        let category = self.categories.iter_mut().find(|c| c.name == from).ok_or_else(|| format!("No category is called {from}."))?;
+        category.name = to.clone();
+        Ok(to)
+    }
+
+    /// A category gone; its sources are in none.
+    pub fn remove_category(&mut self, name: &str) -> Result<(), String> {
+        let before = self.categories.len();
+        self.categories.retain(|c| c.name != name);
+        match self.categories.len() < before {
+            true => Ok(()),
+            false => Err(format!("No category is called {name}.")),
+        }
+    }
+
+    /// A category moved to `to` in the order, clamped to the list.
+    pub fn move_category(&mut self, name: &str, to: usize) -> Result<(), String> {
+        let at = self.categories.iter().position(|c| c.name == name).ok_or_else(|| format!("No category is called {name}."))?;
+        let category = self.categories.remove(at);
+        let to = to.min(self.categories.len());
+        self.categories.insert(to, category);
+        Ok(())
+    }
+
+    /// Sources put in a category, out of any other — or in none. Ids that
+    /// name no source are passed over.
+    pub fn categorize(&mut self, ids: &[String], category: Option<&str>) -> Result<(), String> {
+        if let Some(name) = category {
+            if !self.categories.iter().any(|c| c.name == name) {
+                return Err(format!("No category is called {name}."));
+            }
+        }
+        let ids: Vec<&String> = ids.iter().filter(|id| self.get(id).is_some()).collect();
+        for c in &mut self.categories {
+            c.sources.retain(|s| !ids.contains(&s));
+        }
+        if let Some(c) = category.and_then(|name| self.categories.iter_mut().find(|c| c.name == name)) {
+            c.sources.extend(ids.into_iter().cloned());
+        }
+        Ok(())
+    }
+
+    /// A source taken out of the notebook, out of its category too.
+    pub fn forget(&mut self, id: &str) {
+        for c in &mut self.categories {
+            c.sources.retain(|s| s != id);
+        }
     }
 }
 
@@ -224,6 +322,43 @@ pub struct Note {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sources_are_grouped_by_the_students_own_categories() {
+        let mut sources = Sources::default();
+        for _ in 0..3 {
+            let id = sources.take_id();
+            sources.sources.push(serde_json::from_value(serde_json::json!({
+                "id": id, "title": "x", "kind": "pdf", "origin": { "from": "pasted" }, "role": "reading", "units": "pages",
+                "status": { "state": "ready" }, "added": 0
+            })).unwrap());
+        }
+        assert_eq!(sources.add_category("  Past   exams "), Ok("Past exams".into()));
+        sources.add_category("Lecture slides").unwrap();
+        assert!(sources.add_category("past EXAMS").is_err(), "a name taken, whatever its case");
+        assert!(sources.add_category("  ").is_err() && sources.add_category(&"x".repeat(61)).is_err());
+        sources.categorize(&["S01".into(), "S02".into(), "S99".into()], Some("Past exams")).unwrap();
+        assert_eq!(sources.categories[0].sources, ["S01", "S02"], "an id of no source is passed over");
+        // Moved: out of the one it was in.
+        sources.categorize(&["S02".into()], Some("Lecture slides")).unwrap();
+        assert_eq!((sources.category_of("S01"), sources.category_of("S02"), sources.category_of("S03")), (Some("Past exams"), Some("Lecture slides"), None));
+        sources.categorize(&["S01".into()], None).unwrap();
+        assert_eq!(sources.category_of("S01"), None);
+        assert!(sources.categorize(&["S03".into()], Some("Nope")).is_err());
+        // Renamed, reordered, removed.
+        sources.rename_category("Lecture slides", "Slides").unwrap();
+        assert!(sources.rename_category("Slides", "slides").is_ok(), "its own name, recased");
+        sources.move_category("slides", 0).unwrap();
+        assert_eq!(sources.categories.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["slides", "Past exams"]);
+        sources.forget("S02");
+        assert!(sources.categories[0].sources.is_empty());
+        sources.remove_category("slides").unwrap();
+        assert_eq!(sources.categories.len(), 1);
+        // Kept in sources.json, and left out of it when there are none.
+        let text = serde_json::to_string(&sources).unwrap();
+        assert!(text.contains("\"categories\":[{\"name\":\"Past exams\""), "{text}");
+        assert!(!serde_json::to_string(&Sources::default()).unwrap().contains("categories"));
+    }
 
     #[test]
     fn an_id_is_never_given_twice() {

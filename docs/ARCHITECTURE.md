@@ -1187,7 +1187,11 @@ written by one call from that source alone and kept in `.notebook/guides/`;
 and the sources are **labelled** by topic in one call over each one's
 beginning, from a vocabulary the call chooses, kept in `.notebook/labels.json`
 apart from `sources.json`, which only the notebook writes; a label ticks the
-sources about it (`proton-study::guide`). A PDF's pages with few words of
+sources about it (`proton-study::guide`). The person's own **categories**
+(`Sources::categories`, in `sources.json` in their order) group the sources in
+the panel: a source is in one or none, its membership dropped when it is taken
+out, and a name is unique whatever its case; taking a category away keeps its
+sources, in none. A PDF's pages with few words of
 their own — slides that are mostly pictures — are **made readable** on asking,
 told how many calls it takes: drawn by pdftoppm on a worker, never from a file
 in iCloud, then read eight to a call by an engine that can see them (Antigravity's

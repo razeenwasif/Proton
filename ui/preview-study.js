@@ -53,6 +53,8 @@ export function createStudyPreview(deliver) {
     next: /** @type {Record<string, number>} */ ({ "comp3670-exam": 4, "machine-learning": 1 }),
     roots: ["~/OnyxVault", "~/Courses", "~/Library/Mobile Documents/com~apple~CloudDocs/ANU"],
     /** @type {Record<string, {id: string, title: string, body: string, updated: number, source: string | null}[]>} */
+    /** @type {Record<string, {name: string, sources: string[]}[]>} */
+    categories: {},
     notes: { "comp3670-exam": [{ id: "N001", title: "What the exam asks", body: "Two questions on search every year: **optimality** and **heuristics**.\n\n- $h(n) \\le h^*(n)$", updated: now - 3600, source: null }] },
     paused: false,
     /** The open chat, as the core would keep it. */
@@ -85,7 +87,7 @@ export function createStudyPreview(deliver) {
     const n = state.notebooks.find((b) => b.slug === state.open);
     if (!n) return { type: "studyClosed" };
     const notes = (state.notes[n.slug] ?? []).map((x) => ({ id: x.id, title: x.title, updated: x.updated, preview: x.body.replace(/\s+/g, " ").slice(0, 140) }));
-    return { type: "studyNotebook", slug: n.slug, title: n.title, course: n.course, exam: n.exam, readOnly: null, sources: state.sources[n.slug], notes };
+    return { type: "studyNotebook", slug: n.slug, title: n.title, course: n.course, exam: n.exam, readOnly: null, sources: state.sources[n.slug], categories: state.categories[n.slug] ?? [], notes };
   }
 
   function kbEvent() {
@@ -594,7 +596,32 @@ export function createStudyPreview(deliver) {
         }
         case "studyRemove":
           state.sources[state.open ?? ""] = (state.sources[state.open ?? ""] ?? []).filter((s) => s.id !== command.id);
+          for (const c of state.categories[state.open ?? ""] ?? []) c.sources = c.sources.filter((id) => id !== command.id);
           return [notebookEvent(), listEvent()];
+        case "studyCategoryAdd":
+        case "studyCategoryRename":
+        case "studyCategoryRemove":
+        case "studyCategoryMove":
+        case "studyCategorize": {
+          const cats = (state.categories[state.open ?? ""] ??= []);
+          const named = (/** @type {string} */ name) => cats.find((c) => c.name.toLowerCase() === name.toLowerCase());
+          const name = String(command.name ?? command.to ?? "").trim();
+          if ((command.type === "studyCategoryAdd" || (command.type === "studyCategoryRename" && name.toLowerCase() !== command.from.toLowerCase())) && named(name))
+            return [{ type: "notice", level: "warn", text: `There is already a category “${name}”.` }];
+          if (command.type === "studyCategoryAdd") cats.push({ name, sources: [] });
+          if (command.type === "studyCategoryRename") { const c = named(command.from); if (c) c.name = name; }
+          if (command.type === "studyCategoryRemove") cats.splice(cats.findIndex((c) => c.name === command.name), 1);
+          if (command.type === "studyCategoryMove") {
+            const at = cats.findIndex((c) => c.name === command.name);
+            if (at >= 0) cats.splice(Math.min(command.to, cats.length - 1), 0, ...cats.splice(at, 1));
+          }
+          if (command.type === "studyCategorize") {
+            for (const c of cats) c.sources = c.sources.filter((id) => !command.ids.includes(id));
+            const to = command.category ? named(command.category) : null;
+            if (to) to.sources.push(...command.ids);
+          }
+          return [notebookEvent()];
+        }
         case "studySelect":
           for (const s of state.sources[state.open ?? ""] ?? []) s.selected = command.ids.includes(s.id);
           return [notebookEvent()];

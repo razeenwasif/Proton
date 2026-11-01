@@ -187,7 +187,9 @@ tesseract), pages of the web kept as their articles, your artifacts — read as
 their articles, KaTeX's formulas read back as TeX, and opened as themselves —
 YouTube videos' captions (with yt-dlp), and recordings, transcribed by Fish Audio when you
 choose, told what it costs; a reader, with a guide to each source on asking;
-sources labelled by topic, and ticked by label; slides with few words read
+sources labelled by topic, and ticked by label; sources kept in
+categories of your own — past exams, lecture slides, labs, books — each
+dragged into one or moved with Move to, a category ticked, folded or renamed; slides with few words read
 from their pictures; notes;
 and the tutor, which searches the sources you tick through Proton's own MCP
 server and cites them — each citation a number whose passage shows over it and

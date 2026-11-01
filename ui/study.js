@@ -45,8 +45,9 @@ import { createStudio, madeHtml, taskHtml } from "./study-studio.js";
  *   | {kind: "made", made: MadeEvent} | {kind: "task", task: TaskEvent} | {kind: "deck"} | {kind: "review"} | {kind: "quiz"}
  *   | {kind: "learning", learning: import("./study-overview.js").OverviewEvent} | {kind: "audio"} | {kind: "slides"}
  *   | {kind: "graphic", graphic: import("./study-graphic.js").GraphicEvent} | {kind: "coding"}} Shown */
+/** @typedef {import("./bindings/StudyCategory").StudyCategory} Category */
 /** @typedef {{slug: string, title: string, course: string, exam: string | null, readOnly: string | null,
- *   sources: SourceRow[], notes: NoteRow[]}} NotebookEvent */
+ *   sources: SourceRow[], categories?: Category[], notes: NoteRow[]}} NotebookEvent */
 
 /** What a source can be to a course, in the order a menu offers them. */
 export const ROLES = /** @type {[Role, string][]} */ ([
@@ -146,7 +147,8 @@ export function createStudy(host) {
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web" | "artifacts" | "folder", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
    *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null, digest: string | null,
-   *   artifacts: ArtifactRow[] | null, picked: Set<string>}} */
+   *   artifacts: ArtifactRow[] | null, picked: Set<string>,
+   *   folded: Set<string>, naming: string | null, unnaming: string | null, filing: string | null}} */
   const state = {
     list: [], open: null, folder: null,
     // Whether the core has said where notebooks are kept — `null` until it has.
@@ -160,6 +162,9 @@ export function createStudy(host) {
     // given; a source whose taking out is being confirmed; sources whose
     // download from iCloud is being confirmed.
     editing: false, pasting: false, removing: null, getting: null,
+    // Categories: those folded shut; one being named ("" for a new one);
+    // one whose taking away is being confirmed; a source being filed.
+    folded: new Set(), naming: null, unnaming: null, filing: null,
     // What the middle shows: the chat, the sources, a source in the
     // reader, a note — and what Back returns to.
     shown: { kind: "chat" },
@@ -246,14 +251,58 @@ export function createStudy(host) {
       : "";
     const thin = s.thin ? ` · ${s.thin} thin` : "";
     const labels = s.labels.length ? `<span class="st-labels">${s.labels.map((l) => `<span class="st-label">${esc(l)}</span>`).join("")}</span>` : "";
-    return `<div class="st-source${s.selected ? " on" : ""}" data-study-source="${esc(s.id)}" title="${esc(`${s.id} · ${origin}`)}">` +
+    const cats = state.notebook?.categories ?? [];
+    // Filed in a category from a row of choices under it: its own, none, or another.
+    const filing = state.filing === s.id && cats.length
+      ? `<div class="st-filing">Move to ${cats.map((c) => `<button class="st-chip${c.sources.includes(s.id) ? " on" : ""}" data-study-file-to="${esc(c.name)}" data-id="${esc(s.id)}">${esc(c.name)}</button>`).join("")}` +
+        `<button class="st-chip" data-study-file-to="" data-id="${esc(s.id)}">No category</button></div>` : "";
+    const file = !readOnly() && cats.length
+      ? `<button class="st-x st-file-btn" data-study-filing="${esc(s.id)}" title="Move it to a category" aria-label="Move to a category">${icon("folder")}</button>` : "";
+    return `<div class="st-source${s.selected ? " on" : ""}" data-study-source="${esc(s.id)}" title="${esc(`${s.id} · ${origin}`)}"${readOnly() ? "" : ` draggable="true"`}>` +
       `<input type="checkbox" data-study-tick="${esc(s.id)}"${s.selected ? " checked" : ""}${hasWords(s) && !readOnly() ? "" : " disabled"} aria-label="Use ${esc(s.title)}">` +
       `${icon(KIND_ICON[s.kind] ?? "file")}` +
       `<span class="st-source-text"><button class="st-source-name" data-study-show="${esc(s.id)}" title="Read it">${esc(s.title)}</button>` +
       `<span class="st-faint">${esc(s.id)}${extent(s) ? ` · ${esc(extent(s))}${esc(thin)}` : ""}</span>${labels}</span>` +
-      (confirm || statusHtml(s) +
+      (confirm || statusHtml(s) + file +
         (readOnly() ? "" : `<button class="st-x" data-study-remove="${esc(s.id)}" title="Take it out of this notebook" aria-label="Take it out">${icon("close")}</button>`)) +
-      `</div>`;
+      `</div>${filing}`;
+  }
+
+  /** The sources, under the student's categories if they have made any —
+   *  each a heading that folds, ticks its sources, takes a dropped source,
+   *  and is renamed or taken away — then those in none.
+   *  @param {NotebookEvent} nb */
+  function groupedHtml(nb) {
+    const cats = nb.categories ?? [];
+    const naming = state.naming === "" ? `<form class="st-cat-form" data-study-cat-form data-from=""><input name="name" maxlength="60" placeholder="A category — Past exams, Lecture slides…" autocomplete="off">` +
+      `<button class="cc-primary">Add</button><button type="button" class="cc-quiet" data-study-cat-cancel>Cancel</button></form>` : "";
+    if (!cats.length) return naming + (nb.sources.length ? nb.sources.map(sourceHtml).join("") : `<p class="st-faint st-pad">No sources yet.</p>`);
+    const byId = new Map(nb.sources.map((s) => [s.id, s]));
+    const filed = new Set(cats.flatMap((c) => c.sources));
+    /** @param {string} name @param {SourceRow[]} rows @param {boolean} own */
+    const section = (name, rows, own) => {
+      const usable = rows.filter(hasWords);
+      const ticked = usable.length > 0 && usable.every((s) => s.selected);
+      const open = !state.folded.has(name);
+      const key = own ? name : "";
+      const head = state.naming === name && own
+        ? `<form class="st-cat-form" data-study-cat-form data-from="${esc(name)}"><input name="name" maxlength="60" value="${esc(name)}" autocomplete="off">` +
+          `<button class="cc-primary">Rename</button><button type="button" class="cc-quiet" data-study-cat-cancel>Cancel</button></form>`
+        : `<header class="st-cat-head" data-study-cat-drop="${esc(key)}">` +
+          `<button class="st-cat-fold" data-study-cat-fold="${esc(name)}" aria-expanded="${open}" title="${open ? "Fold" : "Unfold"}">${icon("chev")}</button>` +
+          (usable.length && !readOnly() ? `<input type="checkbox" data-study-cat-tick="${esc(key)}"${ticked ? " checked" : ""} title="Use every source in it" aria-label="Use every source in ${esc(name)}">` : "") +
+          `<span class="st-cat-name">${esc(name)}</span><span class="st-faint">${rows.length}</span><span class="grow"></span>` +
+          (own && !readOnly() ? `<button class="st-x" data-study-cat-rename="${esc(name)}" title="Rename it" aria-label="Rename ${esc(name)}">${icon("pen")}</button>` +
+            `<button class="st-x" data-study-cat-remove="${esc(name)}" title="Take the category away: its sources stay" aria-label="Take ${esc(name)} away">${icon("close")}</button>` : "") +
+          `</header>`;
+      const confirm = state.unnaming === name && own
+        ? `<div class="st-confirm st-cat-confirm">Take “${esc(name)}” away? Its sources stay, in no category. <button class="st-link" data-study-cat-remove-yes="${esc(name)}">Yes</button> <button class="st-link" data-study-cat-cancel>No</button></div>` : "";
+      const body = open ? rows.map(sourceHtml).join("") || `<p class="st-faint st-pad st-cat-empty" data-study-cat-drop="${esc(key)}">Drag sources here.</p>` : "";
+      return `<section class="st-cat${open ? "" : " folded"}" data-study-cat="${esc(key)}">${head}${confirm}${body}</section>`;
+    };
+    const loose = nb.sources.filter((s) => !filed.has(s.id));
+    return naming + cats.map((c) => section(c.name, c.sources.map((id) => byId.get(id)).filter((s) => s !== undefined), true)).join("") +
+      (loose.length ? section("Uncategorized", loose, false) : "");
   }
 
   /** What a source is to the course, to change. @param {SourceRow} s */
@@ -279,16 +328,15 @@ export function createStudy(host) {
     // Its buttons kept together: on a narrow pane they go under the count,
     // rather than a button's words breaking inside it.
     const head = `<header class="st-sources-head"><b>Sources</b><span class="st-faint">${ticked} of ${usable.length} used</span><span class="st-sources-acts">${label}` +
-      (readOnly() ? "" : `<button class="cc-quiet" data-study-pick title="Add sources from your folders">${icon("plus")}Add</button>`) + `</span></header>`;
+      (readOnly() ? "" : `<button class="cc-quiet" data-study-cat-new title="Make a category to group sources in">${icon("folder")}Category</button>` +
+        `<button class="cc-quiet" data-study-pick title="Add sources from your folders">${icon("plus")}Add</button>`) + `</span></header>`;
     // Every topic a source is labelled with: each ticks the sources about it.
     const topics = [...new Set(usable.flatMap((s) => s.labels))].sort((a, b) => a.localeCompare(b));
     const labelBar = topics.length && !readOnly()
       ? `<div class="st-label-bar">${topics.map((t) => `<button class="st-chip" data-study-label-pick="${esc(t)}" title="Use only the sources about ${esc(t)}">${esc(t)}</button>`).join("")}</div>` : "";
     const tickAll = usable.length > 1 && !readOnly()
       ? `<label class="st-all"><input type="checkbox" data-study-all${all ? " checked" : ""}> Use every source</label>` : "";
-    const rows = nb.sources.length
-      ? nb.sources.map(sourceHtml).join("")
-      : `<p class="st-faint st-pad">No sources yet.</p>`;
+    const rows = groupedHtml(nb);
     const notes = nb.notes.map((n) => {
       const on = state.shown.kind === "note" && state.shown.note?.id === n.id;
       return `<button class="st-note${on ? " on" : ""}" data-study-show-note="${esc(n.id)}" title="${esc(n.id)}">` +
@@ -1027,6 +1075,54 @@ export function createStudy(host) {
     }
     const question = at("[data-study-ask-question]");
     if (question) return askTutor(question.dataset.studyAskQuestion ?? "");
+    // Categories: made, named, folded, taken away; a source filed in one.
+    if (at("[data-study-cat-new]")) {
+      state.naming = "";
+      renderSources();
+      /** @type {HTMLInputElement | null} */ (els.sources.querySelector("[data-study-cat-form] input"))?.focus();
+      return;
+    }
+    if (at("[data-study-cat-cancel]")) {
+      state.naming = null;
+      state.unnaming = null;
+      return renderSources();
+    }
+    const folding = at("[data-study-cat-fold]");
+    if (folding) {
+      const name = folding.dataset.studyCatFold ?? "";
+      if (state.folded.has(name)) state.folded.delete(name);
+      else state.folded.add(name);
+      return renderSources();
+    }
+    const rename = at("[data-study-cat-rename]");
+    if (rename) {
+      state.naming = rename.dataset.studyCatRename ?? null;
+      renderSources();
+      const input = /** @type {HTMLInputElement | null} */ (els.sources.querySelector("[data-study-cat-form] input"));
+      input?.focus();
+      input?.select();
+      return;
+    }
+    const unname = at("[data-study-cat-remove]");
+    if (unname) {
+      state.unnaming = unname.dataset.studyCatRemove ?? null;
+      return renderSources();
+    }
+    const unnamed = at("[data-study-cat-remove-yes]");
+    if (unnamed) {
+      state.unnaming = null;
+      return host.dispatch({ type: "studyCategoryRemove", name: unnamed.dataset.studyCatRemoveYes });
+    }
+    const filing = at("[data-study-filing]");
+    if (filing) {
+      state.filing = state.filing === filing.dataset.studyFiling ? null : filing.dataset.studyFiling ?? null;
+      return renderSources();
+    }
+    const fileTo = at("[data-study-file-to]");
+    if (fileTo) {
+      state.filing = null;
+      return host.dispatch({ type: "studyCategorize", ids: [fileTo.dataset.id], category: fileTo.dataset.studyFileTo || null });
+    }
     if (at("[data-study-label-all]")) {
       host.dispatch({ type: "studyMake", kind: "labels", options: { focus: "", ask: "", columns: [], amount: "standard", level: "medium", deck: null,
         objectives: [], source: null, count: null, format: null, language: "", slides: null, slide: null } });
@@ -1131,6 +1227,40 @@ export function createStudy(host) {
     }
   });
 
+  // A source dragged onto a category's heading is filed there; onto the
+  // "Uncategorized" heading, taken out of its category.
+  /** @type {string | null} */ let dragged = null;
+  ws.addEventListener("dragstart", (e) => {
+    const row = e.target instanceof HTMLElement ? e.target.closest("[data-study-source]") : null;
+    if (!(row instanceof HTMLElement) || !e.dataTransfer || !(state.notebook?.categories ?? []).length) return;
+    dragged = row.dataset.studySource ?? null;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragged ?? "");
+    row.classList.add("dragging");
+  });
+  ws.addEventListener("dragend", () => {
+    dragged = null;
+    ws.querySelectorAll(".st-source.dragging, [data-study-cat-drop].drop").forEach((el) => el.classList.remove("dragging", "drop"));
+  });
+  /** @param {Event} e */
+  const dropOn = (e) => (dragged !== null && e.target instanceof Element ? e.target.closest("[data-study-cat-drop]") : null);
+  ws.addEventListener("dragover", (e) => {
+    const on = dropOn(e);
+    if (!(on instanceof HTMLElement)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    ws.querySelectorAll("[data-study-cat-drop].drop").forEach((el) => el !== on && el.classList.remove("drop"));
+    on.classList.add("drop");
+  });
+  ws.addEventListener("drop", (e) => {
+    const on = dropOn(e);
+    if (!(on instanceof HTMLElement) || dragged === null) return;
+    e.preventDefault();
+    const id = dragged;
+    dragged = null;
+    host.dispatch({ type: "studyCategorize", ids: [id], category: on.dataset.studyCatDrop || null });
+  });
+
   ws.addEventListener("change", (e) => {
     const t = /** @type {HTMLInputElement | HTMLSelectElement} */ (e.target);
     if (t.closest("[data-study-picker]")) return;
@@ -1153,6 +1283,16 @@ export function createStudy(host) {
     if (state.shown.kind === "audio" && sounds.change(t, els.stage)) return;
     const nb = state.notebook;
     if (!nb) return;
+    // A category's box ticks every source in it, or none of them, leaving the rest.
+    const catTick = t.dataset.studyCatTick;
+    if (catTick !== undefined && t instanceof HTMLInputElement) {
+      const cats = nb.categories ?? [];
+      const filed = new Set(cats.flatMap((c) => c.sources));
+      const inIt = new Set(catTick ? cats.find((c) => c.name === catTick)?.sources ?? [] : nb.sources.filter((s) => !filed.has(s.id)).map((s) => s.id));
+      const ids = nb.sources.filter((s) => (inIt.has(s.id) ? t.checked && hasWords(s) : s.selected)).map((s) => s.id);
+      host.dispatch({ type: "studySelect", ids });
+      return;
+    }
     const tick = t.dataset.studyTick;
     if (tick !== undefined && t instanceof HTMLInputElement) {
       const ids = nb.sources.filter((s) => (s.id === tick ? t.checked : s.selected)).map((s) => s.id);
@@ -1198,6 +1338,17 @@ export function createStudy(host) {
     e.preventDefault();
     const data = new FormData(form);
     const field = (/** @type {string} */ name) => String(data.get(name) ?? "").trim();
+    if (form.matches("[data-study-cat-form]")) {
+      const name = field("name");
+      if (!name) return /** @type {HTMLInputElement | null} */ (form.querySelector("input"))?.focus();
+      const from = form.dataset.from ?? "";
+      state.naming = null;
+      if (from) {
+        if (state.folded.delete(from)) state.folded.add(name);
+        return host.dispatch({ type: "studyCategoryRename", from, to: name });
+      }
+      return host.dispatch({ type: "studyCategoryAdd", name });
+    }
     if (form.matches("[data-study-folder-form]") || form.matches("[data-study-where-form]")) {
       const folder = field("folder");
       if (!folder) return;
