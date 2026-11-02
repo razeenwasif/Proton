@@ -196,14 +196,20 @@ pub fn tools() -> Value {
             "description": "Read one of the notebook's notes, by its id (N001) as notebook_sources lists them: the \
                             student's own notes, and cheatsheets and summaries made for them. Name a note as \"your \
                             note N001\"; it is not a source, so it is not cited in brackets.",
-            "inputSchema": { "type": "object", "properties": { "note": { "type": "string", "description": "The note's id: N001." } }, "required": ["note"] }
+            "inputSchema": { "type": "object", "properties": {
+                "note": { "type": "string", "description": "The note's id: N001." },
+                "from": { "type": "integer", "description": "The line to read from, from 1: a long note is handed back in turns, each saying where the next begins." }
+            }, "required": ["note"] }
         },
         {
             "name": "read_file",
             "description": "Read one of the files written for the student, kept in the notebook's files/ — a .tex cheatsheet, \
                             a script — by its name as notebook_sources lists them. Name it as \"the file sheet.tex\"; it is not \
                             a source, so it is not cited in brackets. A PDF compiled from one is a source.",
-            "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "The file's name: sheet.tex." } }, "required": ["name"] }
+            "inputSchema": { "type": "object", "properties": {
+                "name": { "type": "string", "description": "The file's name: sheet.tex." },
+                "from": { "type": "integer", "description": "The line to read from, from 1: a long file is handed back in turns, each saying where the next begins. Read all of it before writing it again." }
+            }, "required": ["name"] }
         },
         {
             "name": "notebook_status",
@@ -286,33 +292,56 @@ fn size_of(bytes: u64) -> String {
 fn written(served: &Served, args: &Value) -> Result<String, String> {
     let book = served.book.as_ref().ok_or("the notebook cannot be read")?;
     let name = args["name"].as_str().ok_or("read_file: `name` is required, a file's name: sheet.tex")?;
-    let mut body = book.read_file(name)?;
-    if body.len() > MOST {
-        let mut cut = MOST;
-        while !body.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        body.truncate(cut);
-        body.push_str("\n…(cut here: the rest is longer than one call hands back)");
-    }
-    Ok(format!("files/{}\n\n{body}", name.trim()))
+    let body = book.read_file(name)?;
+    Ok(format!("files/{}{}", name.trim(), by_lines(&body, from(args), "read_file")))
 }
 
-/// One note, whole or as far as a call may hand back.
+/// One note, whole, or from a line as far as a call may hand back.
 fn note(served: &Served, args: &Value) -> Result<String, String> {
     let book = served.book.as_ref().ok_or("the notebook cannot be read")?;
     let id = args["note"].as_str().ok_or("read_note: `note` is required, a note's id: N001")?;
     let note = book.note(id.trim()).ok_or_else(|| format!("{id}: no such note — notebook_sources lists them"))?;
-    let mut body = note.body.clone();
-    if body.len() > MOST {
+    Ok(format!("{} — {}{}", note.id, note.title, by_lines(&note.body, from(args), "read_note")))
+}
+
+/// The line a read starts from, from 1.
+fn from(args: &Value) -> usize {
+    args["from"].as_u64().map_or(1, |n| (n as usize).max(1))
+}
+
+/// A note's or a file's text from a line on, as many whole lines as one call
+/// may hand back, and where the rest goes on from: a long one is read in
+/// turns, never cut short without saying how to read on.
+fn by_lines(body: &str, from: usize, tool: &str) -> String {
+    let lines: Vec<&str> = body.lines().collect();
+    let total = lines.len();
+    if from > total.max(1) {
+        return format!("\n\n(it has {total} lines: there is nothing from line {from})");
+    }
+    let mut out = String::new();
+    let mut to = from - 1;
+    for line in lines.iter().skip(from - 1) {
+        if !out.is_empty() && out.len() + line.len() + 1 > MOST {
+            break;
+        }
+        out.push_str(line);
+        out.push('\n');
+        to += 1;
+    }
+    // One line longer than a call hands back is cut, and the next read starts after it.
+    if out.len() > MOST {
         let mut cut = MOST;
-        while !body.is_char_boundary(cut) {
+        while !out.is_char_boundary(cut) {
             cut -= 1;
         }
-        body.truncate(cut);
-        body.push_str("\n…(cut here: the rest is longer than one call hands back)");
+        out.truncate(cut);
+        out.push_str("…(this line is cut here)\n");
     }
-    Ok(format!("{} — {}\n\n{body}", note.id, note.title))
+    if from == 1 && to >= total {
+        return format!("\n\n{out}");
+    }
+    let next = if to < total { format!("\n…(lines {}–{total} follow: {tool} with from: {} reads on)", to + 1, to + 1) } else { "\n(the end)".into() };
+    format!(" — lines {from}–{to} of {total}\n\n{out}{next}")
 }
 
 fn sources(served: &Served) -> String {
@@ -661,6 +690,27 @@ mod tests {
             assert_eq!(call(&mut served, "read_file", &json!({ "name": outside }))["isError"], json!(true), "{outside}");
         }
         assert!(tools().as_array().unwrap().iter().any(|t| t["name"] == "read_file"));
+
+        // A long one is read in turns, each from where the last stopped, to the end.
+        let long: String = (1..=2_000).map(|n| format!("\\item box {n}: a line of the cheatsheet\n")).collect();
+        book.write_file("long.tex", &long).unwrap();
+        let mut from = 1;
+        let mut seen = String::new();
+        for _ in 0..20 {
+            let part = text(&call(&mut served, "read_file", &json!({ "name": "long.tex", "from": from })));
+            assert!(part.len() < MOST + 400, "{}", part.len());
+            seen.push_str(part.split_once("\n\n").unwrap().1);
+            match part.split_once("with from: ") {
+                Some((_, rest)) => from = rest.split(' ').next().unwrap().parse().unwrap(),
+                None => {
+                    assert!(part.contains("(the end)"), "{part}");
+                    break;
+                }
+            }
+        }
+        assert!(seen.contains("box 1: ") && seen.contains("box 2000: "), "not read to its end");
+        assert_eq!(seen.matches("\\item").count(), 2_000, "a line was read twice or missed");
+        assert!(text(&call(&mut served, "read_file", &json!({ "name": "long.tex", "from": 5_000 }))).contains("nothing from line 5000"));
     }
 
     #[test]

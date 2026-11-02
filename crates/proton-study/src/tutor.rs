@@ -383,7 +383,8 @@ pub fn instructions(notebook: &Notebook, settings: &TutorSettings, grounding: Gr
                               is in digest_source. A slide whose words are few can be seen with view_pages. The student's notes — theirs, \
                               and cheatsheets made for them — are listed by notebook_sources too, and read with read_note: read one when the \
                               student mentions it, or when it would help. So are the files written for them in the notebook's files/ — a .tex \
-                              cheatsheet — read with read_file: read one before changing it, and write it again whole.\n- Every claim you take from a source is followed by its citation, copied exactly as the tools give it, in \
+                              cheatsheet — read with read_file: read one before changing it, all of it (a long one comes in turns: read on with \
+                              from), and write it again whole.\n- Every claim you take from a source is followed by its citation, copied exactly as the tools give it, in \
                               double brackets: [[S07 p. 12]], [[S03 § Search › Uniform cost L40-58]], [[S12 @ 3:12-3:40]]. Cite each passage \
                               you use, and never cite what you did not read.",
         Grounding::Passages => "- Each message comes with passages from the notebook's sources, found for it, each beginning with its citation in \
