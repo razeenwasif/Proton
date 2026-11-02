@@ -3,25 +3,25 @@
 
 /** @param {{test: Function, assert: Function, win: any, doc: Document, $: (s: string) => any, settle: () => Promise<void>, key: Function, shown: (el: any) => boolean}} t */
 export async function studyChecks({test, assert, win, doc, $, settle, key, shown}) {
-  await test('Notebook sits after Research: ⌃5 opens it, in Codex\'s chrome and on an opaque ground, and Excel follows it on ⌃6', async () => {
+  await test('Notebook sits after Research: ⌃4 opens it, in Codex\'s chrome and on an opaque ground, and Excel follows it on ⌃5', async () => {
     const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
     const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
-    await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
     const before = win.commands.length, opaque = asked().length;
     doc.body.focus();
-    key('5', {ctrlKey: true}); await settle();
-    assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'study'), '⌃5 did not ask for Notebook');
+    key('4', {ctrlKey: true}); await settle();
+    assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'study'), '⌃4 did not ask for Notebook');
     assert($('.workspace.on')?.dataset.ws === 'study', 'Notebook is not on screen');
     assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Notebook kept the old chrome');
     assert(!shown($('.titlebar [data-term-toggle]')), 'Notebook offers a terminal it cannot show');
     const tab = $('.titlebar [data-mode="study"]');
-    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃5') && tab.textContent.trim() === 'Notebook', 'the title bar does not show Notebook');
+    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃4') && tab.textContent.trim() === 'Notebook', 'the title bar does not show Notebook');
     assert($('.mode-rail [data-mode="study"]')?.textContent.trim() === 'Notebook', 'the rail does not say Notebook');
     assert(!$('.titlebar [data-mode="design"]'), 'Design is still in the title bar');
     assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Notebook is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
-    const before6 = win.commands.length;
-    key('6', {ctrlKey: true}); await settle();
-    assert(win.commands.slice(before6).some((c) => c.type === 'setMode' && c.mode === 'sheet'), '⌃6 did not ask for Excel');
+    const before5 = win.commands.length;
+    key('5', {ctrlKey: true}); await settle();
+    assert(win.commands.slice(before5).some((c) => c.type === 'setMode' && c.mode === 'sheet'), '⌃5 did not ask for Excel');
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   });
 
@@ -365,7 +365,7 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     ws().querySelector('[data-study-back]').click(); await settle();
   });
 
-  await test('Your artifacts are listed to add as sources, and one opens as itself, framed as the chat frames one', async () => {
+  await test('Your artifacts are listed to add as sources, and one opens as itself, framed', async () => {
     await win.pushEvents([notebook([row('S01')])]); await settle();
     ws().querySelector('[data-study-view="overview"]').click(); await settle();
     const before = win.commands.length;
@@ -374,8 +374,17 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     assert(ws().querySelector('[data-study-artifacts-form]')?.textContent.includes('Looking'), 'it does not say it is looking');
     const id = '4a1f9d2e-77b3-4c41-9e0a-5c2d8f1b6a30';
     const kept = (/** @type {Partial<any>} */ more) => ({id, title: 'Fleet grid frame times', description: '', icon: 'chart', seq: 2, at: 1_790_000_000_000, file: 'index.html', source: null, ...more});
-    await win.pushEvents([{type: 'studyArtifacts', artifacts: [kept({}), kept({id: '9c3b7e21-4d8a-4f6b-a1e2-7b5c0d9e8f14', title: 'Telemetry glossary', source: 'S01'}),
-      kept({id: '0b7e5a10-1c2d-4e3f-8a9b-0c1d2e3f4a5b', title: 'Published elsewhere', file: ''})]}]); await settle();
+    const kept3 = [kept({}), kept({id: '9c3b7e21-4d8a-4f6b-a1e2-7b5c0d9e8f14', title: 'Telemetry glossary', source: 'S01'}),
+      kept({id: '0b7e5a10-1c2d-4e3f-8a9b-0c1d2e3f4a5b', title: 'Published elsewhere', file: ''})];
+    await win.pushEvents([{type: 'studyArtifacts', importing: false, artifacts: kept3}]); await settle();
+    // What Claude published that Proton does not keep yet is imported from here.
+    const importer = () => ws().querySelector('[data-study-artifacts-import]');
+    importer().click(); await settle();
+    assert(sent(before, 'studyImportArtifacts').length === 1, 'the import was not asked for');
+    await win.pushEvents([{type: 'studyArtifacts', importing: true, artifacts: kept3}]); await settle();
+    assert(importer().disabled && importer().textContent.includes('Importing'), 'it does not say it is importing');
+    await win.pushEvents([{type: 'studyArtifacts', importing: false, artifacts: kept3}]); await settle();
+    assert(!importer().disabled, 'the import stayed busy');
     const picks = [...ws().querySelectorAll('[data-study-artifact-pick]')];
     assert(picks.length === 3 && !picks[0].disabled && picks[1].disabled && picks[2].disabled, 'a source already, or one with no page, can be ticked');
     const form = () => ws().querySelector('[data-study-artifacts-form]');
@@ -397,8 +406,8 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     const frame = ws().querySelector('.st-artifact-frame');
     assert(/^(artifact:\/\/localhost|http:\/\/artifact\.localhost|\/fixtures\/artifacts)\//.test(frame?.getAttribute('src') ?? '') && frame.getAttribute('src').endsWith(`/${id}/2/index.html`),
       `framed ${frame?.getAttribute('src')}`);
-    const chat = doc.querySelector('[data-artifact-frame]');
-    assert(frame.getAttribute('sandbox') === chat.getAttribute('sandbox') && frame.getAttribute('allow') === chat.getAttribute('allow'), 'not sandboxed as the chat sandboxes one');
+    const sandbox = frame.getAttribute('sandbox');
+    assert(sandbox.includes('allow-scripts') && !sandbox.includes('allow-same-origin'), `a page can reach the editor: ${sandbox}`);
     assert(frame.hasAttribute('allowfullscreen') && frame.getAttribute('allow').includes('fullscreen'), 'its videos cannot go full screen');
     ws().querySelector('[data-study-artifact-back]').click(); await settle();
     assert(ws().querySelector('.st-reader .st-sec')?.textContent.includes('Before and after'), 'Back did not return to its words');

@@ -24,7 +24,7 @@
 //!
 //! ## Verbs are what a mode can be asked to do
 //!
-//! `dd` in Codex deletes a line. In Data it deletes a cell. In Chat it does
+//! `dd` in Codex deletes a line. In Data it deletes a cell. In Research it does
 //! nothing at all, because the noun is prose and the editing verbs belong to
 //! the composer. A mode that cannot implement a verb has to say so — the
 //! statusline reports it, because silently doing nothing is the failure users
@@ -43,10 +43,6 @@ use crate::mode::ModeId;
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub enum Slot {
-    /// Nothing here. A mode with an empty slot gets the space back rather
-    /// than an empty panel, which is the difference between a layout and a
-    /// frame with a hole in it.
-    Empty,
     /// The project's files.
     Explorer,
     /// Text, in panes, with a cursor.
@@ -91,8 +87,6 @@ pub enum Slot {
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub enum DocumentKind {
-    /// `.proton/chats/*.json`
-    Conversation,
     /// Whatever the project is written in.
     Source,
     /// `.ipynb` and `.sql`.
@@ -136,15 +130,6 @@ impl Layout {
     /// What a mode is made of.
     pub fn of(mode: ModeId) -> Layout {
         let (context, stage, dock, document) = match mode {
-            // The composer is the stage, and the conversation list is what
-            // you pick from. No dock: a chat with a third column is a chat
-            // competing with itself for attention.
-            ModeId::Chat => (
-                Slot::Explorer,
-                Slot::Agent,
-                Slot::Empty,
-                DocumentKind::Conversation,
-            ),
             ModeId::Codex => (
                 Slot::Explorer,
                 Slot::Editor,
@@ -225,7 +210,7 @@ impl Layout {
         match self.mode {
             // The noun is prose, so the editing verbs belong to the composer
             // rather than to the mode.
-            ModeId::Chat | ModeId::Research | ModeId::Study | ModeId::Sheet | ModeId::Circuit | ModeId::Logic => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
+            ModeId::Research | ModeId::Study | ModeId::Sheet | ModeId::Circuit | ModeId::Logic => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
             _ => true,
         }
     }
@@ -268,15 +253,8 @@ mod tests {
             count: 1,
             register: None,
         };
-        assert!(!Layout::of(ModeId::Chat).supports(&delete));
+        assert!(!Layout::of(ModeId::Research).supports(&delete));
         assert!(Layout::of(ModeId::Codex).supports(&delete));
         assert!(Layout::of(ModeId::Data).supports(&delete));
-    }
-
-    #[test]
-    fn an_empty_slot_is_a_real_answer() {
-        // Chat has no dock on purpose. A mode with nothing to put in a slot
-        // should get the space back rather than an empty panel.
-        assert_eq!(Layout::of(ModeId::Chat).dock, Slot::Empty);
     }
 }

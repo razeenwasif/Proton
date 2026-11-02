@@ -77,6 +77,7 @@ pub fn handles(command: &Command) -> bool {
             | Command::StudyMakeReadable { .. }
             | Command::StudyMakeDigest { .. }
             | Command::StudyArtifacts
+            | Command::StudyImportArtifacts
             | Command::StudyAddArtifacts { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
@@ -223,6 +224,8 @@ pub struct Study {
     tutors: Box<dyn Tutors>,
     /// The studio's calls.
     jobs: jobs::Jobs,
+    /// An import reading the sessions on a thread, until it answers.
+    importing: Option<std::sync::mpsc::Receiver<Vec<proton_claude::import::Found>>>,
     /// The open notebook's session of flashcards, while there is one.
     review: Option<proton_study::deck::Session>,
     /// The quiz last looked at: drawn again as its answers are marked.
@@ -294,6 +297,7 @@ impl Default for Study {
             parked: Vec::new(),
             tutors: Box::new(tutor::Live),
             jobs: jobs::Jobs::default(),
+            importing: None,
             review: None,
             quiz: None,
             sitting: None,
@@ -501,6 +505,7 @@ impl Study {
             events.push(self.kb.event());
         }
         events.extend(self.take_answers());
+        events.extend(self.poll_import());
         events.extend(self.poll_tutor());
         events.extend(self.poll_parked());
         events.extend(self.poll_compiles());
@@ -627,6 +632,7 @@ impl Study {
             Command::StudyMakeReadable { id } => self.make_readable(&id),
             Command::StudyMakeDigest { id } => self.make_digest(&id),
             Command::StudyArtifacts => vec![self.artifacts_event()],
+            Command::StudyImportArtifacts => self.import_artifacts(),
             Command::StudyAddArtifacts { ids } => self.add_artifacts(&ids),
             Command::StudyRemove { id } => self.remove(&id),
             Command::StudySelect { ids } => self.select(&ids),
@@ -1564,7 +1570,57 @@ impl Study {
                 }
             })
             .collect();
-        Event::StudyArtifacts { artifacts }
+        Event::StudyArtifacts { artifacts, importing: self.importing.is_some() }
+    }
+
+    /// Read the sessions for artifacts Proton does not keep yet — on a thread,
+    /// because it is a gigabyte of files on a long-used machine.
+    fn import_artifacts(&mut self) -> Vec<Event> {
+        if self.importing.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = std::thread::Builder::new().name("proton-artifact-import".into()).spawn(move || {
+                let _ = tx.send(proton_claude::import::discover());
+            });
+            self.importing = Some(rx);
+        }
+        vec![self.artifacts_event()]
+    }
+
+    /// An import that has finished reading: keep what it found.
+    fn poll_import(&mut self) -> Vec<Event> {
+        let Some(importing) = &self.importing else { return Vec::new() };
+        let found = match importing.try_recv() {
+            Ok(found) => found,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return Vec::new(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
+        };
+        self.importing = None;
+        let done = proton_claude::artifacts::Store::open().import(found);
+        let mended = match done.mended {
+            0 => String::new(),
+            1 => " One kept before without the files its page uses — clips, pictures — has them now.".to_string(),
+            n => format!(" {n} kept before without the files their pages use — clips, pictures — have them now."),
+        };
+        let text = match (done.added, done.updated) {
+            (0, 0) if done.mended > 0 => mended.trim_start().to_string(),
+            (0, 0) => "No artifacts to import: every one published from this machine is already here.".to_string(),
+            (added, updated) => {
+                let mut parts = Vec::new();
+                if added > 0 {
+                    parts.push(format!("{added} artifact{}", if added == 1 { "" } else { "s" }));
+                }
+                if updated > 0 {
+                    parts.push(format!("{updated} newer version{}", if updated == 1 { "" } else { "s" }));
+                }
+                let remote = if done.remote > 0 {
+                    format!(" {} of them no longer have a page on this machine and open on claude.ai.", done.remote)
+                } else {
+                    String::new()
+                };
+                format!("Imported {}.{remote}{mended}", parts.join(" and "))
+            }
+        };
+        vec![self.artifacts_event(), notice(text, NoticeLevel::Info)]
     }
 
     /// Add artifacts as sources: each the latest version of it Proton keeps,

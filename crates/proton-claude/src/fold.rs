@@ -156,7 +156,6 @@ pub struct Ask {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/", rename = "ClaudeActivity")]
 #[serde(rename_all = "camelCase")]
 pub enum Activity {
     /// Nothing running and nothing asked.
@@ -170,7 +169,6 @@ pub enum Activity {
 
 /// One entry of Claude's task list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/", rename = "ClaudeTask")]
 #[serde(rename_all = "camelCase")]
 pub struct Task {
     pub id: String,
@@ -183,7 +181,6 @@ pub struct Task {
 
 /// How much of a usage limit is spent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/", rename = "ClaudeLimit")]
 #[serde(rename_all = "camelCase")]
 pub struct Limit {
     /// Which window: `five_hour`, `seven_day`…
@@ -199,7 +196,6 @@ pub struct Limit {
 
 /// Where a session stands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/", rename = "ClaudeStatus")]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub session: String,

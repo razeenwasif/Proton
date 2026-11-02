@@ -5,4 +5,4 @@
  *
  * Named rather than drawn: this says *what*, and the front end decides how.
  */
-export type Slot = "empty" | "explorer" | "editor" | "cells" | "agent" | "panels" | "table" | "investigations" | "board" | "lab" | "sources" | "tutor" | "studio" | "grid" | "schematic" | "worksheet";
+export type Slot = "explorer" | "editor" | "cells" | "agent" | "panels" | "table" | "investigations" | "board" | "lab" | "sources" | "tutor" | "studio" | "grid" | "schematic" | "worksheet";

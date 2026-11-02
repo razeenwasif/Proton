@@ -452,11 +452,11 @@ fn an_artifact_claude_published_is_a_source_read_as_its_article_its_formulas_tex
     until(&mut session, |e| matches!(e, Event::StudyKb { ready: true, walking: false, .. }).then_some(()));
     session.apply(Command::StudyNew { title: "Optimisation".into() });
     let events = session.apply(Command::StudyArtifacts);
-    let Some(Event::StudyArtifacts { artifacts }) = events.first() else { panic!("{events:?}") };
+    let Some(Event::StudyArtifacts { artifacts, .. }) = events.first() else { panic!("{events:?}") };
     assert_eq!((artifacts[0].title.as_str(), artifacts[0].seq, artifacts[0].file.as_str(), artifacts[0].source.clone()), ("Bowls & Barriers", 1, "page.html", None));
 
     let events = session.apply(Command::StudyAddArtifacts { ids: vec![id.into()] });
-    assert!(events.iter().any(|e| matches!(e, Event::StudyArtifacts { artifacts } if artifacts[0].source.as_deref() == Some("S01"))), "it is said to be a source now");
+    assert!(events.iter().any(|e| matches!(e, Event::StudyArtifacts { artifacts, .. } if artifacts[0].source.as_deref() == Some("S01"))), "it is said to be a source now");
     let rows = until(&mut session, |e| match e {
         Event::StudyNotebook { sources, .. } if sources.len() == 1 && sources[0].status == SourceStatus::Ready => Some(sources.clone()),
         Event::StudyNotebook { sources, .. } if sources.iter().any(|s| matches!(s.status, SourceStatus::Failed { .. })) => panic!("{sources:?}"),

@@ -23,24 +23,24 @@ export async function circuitChecks({test, assert, win, doc, $, settle, key, sho
   };
   const frames = () => new Promise((r) => win.requestAnimationFrame(() => win.requestAnimationFrame(r)));
 
-  await test('Circuit sits after Excel: ⌃7 opens it, in Codex\'s chrome and on an opaque ground, and Logic follows it on ⌃8', async () => {
+  await test('Circuit sits after Excel: ⌃6 opens it, in Codex\'s chrome and on an opaque ground, and Logic follows it on ⌃7', async () => {
     const asked = () => (win.invokes ?? []).filter((/** @type {any} */ c) => c.name === 'set_opaque').map((/** @type {any} */ c) => c.args.color);
     const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
-    await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
+    await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
     const before = win.commands.length, opaque = asked().length;
     /** @type {HTMLElement} */ (doc.body).focus();
-    key('7', {ctrlKey: true}); await settle();
-    assert(sent(before, 'setMode').some((c) => c.mode === 'circuit'), '⌃7 did not ask for Circuit');
+    key('6', {ctrlKey: true}); await settle();
+    assert(sent(before, 'setMode').some((c) => c.mode === 'circuit'), '⌃6 did not ask for Circuit');
     assert($('.workspace.on')?.dataset.ws === 'circuit', 'Circuit is not on screen');
     assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Circuit kept the old chrome');
     assert(!shown($('.titlebar [data-term-toggle]')), 'Circuit offers a terminal it cannot show');
     const tab = $('.titlebar [data-mode="circuit"]');
-    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃7') && tab.textContent.trim() === 'Circuit', 'the title bar does not show Circuit');
+    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃6') && tab.textContent.trim() === 'Circuit', 'the title bar does not show Circuit');
     assert($('.mode-rail [data-mode="circuit"]')?.textContent.trim() === 'Circuit', 'the rail does not say Circuit');
     assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Circuit is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
-    const before8 = win.commands.length;
-    key('8', {ctrlKey: true}); await settle();
-    assert(sent(before8, 'setMode').some((c) => c.mode === 'logic'), '⌃8 did not ask for Logic');
+    const before7 = win.commands.length;
+    key('7', {ctrlKey: true}); await settle();
+    assert(sent(before7, 'setMode').some((c) => c.mode === 'logic'), '⌃7 did not ask for Logic');
     await win.dispatch({type: 'setMode', mode: 'circuit'}); await settle();
   });
 

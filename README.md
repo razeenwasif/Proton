@@ -2,9 +2,9 @@
 
 # Proton
 
-A code editor that is also a chat client, a data notebook, a research
-workbench, a study notebook, a spreadsheet, a logic simulator and a logic
-workbench — one window, eight modes, a shared Vim-style
+A code editor that is also a data notebook, a research workbench, a study
+notebook, a spreadsheet, a logic simulator and a logic workbench — one window,
+seven modes, a shared Vim-style
 modal engine underneath all of them, and an agent that can act in any of them.
 
 Every mode in the window reads and writes a real document: the editor,
@@ -31,7 +31,7 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃5` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -68,7 +68,7 @@ collision is why the mode chord is `⌃`.
 | `docs/CODE-VISUALIZER.md` | Integration plan for [Code-Visualizer](https://github.com/razeenwasif/Code-Visualizer) |
 | `assets/` | The reference designs the whole thing was drawn from |
 
-## The eight modes
+## The seven modes
 
 Every mode keeps projects of its own: the folder open in Codex is not
 carried into Data, Research or any other, and going back to a mode brings
@@ -79,10 +79,6 @@ in several modes is one project, listed by each.
 
 See the [current capability matrix](docs/ARCHITECTURE.md) for implemented documents and runtime limitations.
 
-**Chat** · Claude Code itself — your `claude`, its tools, permissions,
-sessions and Artifact tool — drawn as Claude Code's app draws it, with what it
-publishes in a pane beside the conversation. Codex, Gemini and Antigravity
-answer in the same tab.
 **Codex** · the editor — buffers, LSP, splits, the agent dock, and the mobile
 target's device / layout-inspector / Logcat panel. C and C++ are left as
 written on save unless **Format C and C++ too** is on in Settings; then, and
@@ -225,12 +221,13 @@ PuLP and its solver among them. Your folders are named in your own settings,
 and catalogued in under a second without opening a file. A file still in
 iCloud is listed under a cloud and never read until you choose to download it,
 having been told its size.
-Design, Model, Game, Canvas, Diffuse and Video, once modes here on ⌃6–⌃-,
-are an app of their own now, and LaTeX and the Reader are Quark's. Codex
+Design, Model, Game, Canvas, Diffuse and Video, once modes here, are an app
+of their own now, LaTeX and the Reader are Quark's, and Chat, once the first
+mode here, has given way to Fairy. Codex
 still edits `.tex` and `.bib` files, with texlab when it is on `PATH`, and
 PDFs still open in the viewer from any mode.
 
-**Excel** · a spreadsheet on ⌃6, after Google Sheets and Excel. A workbook
+**Excel** · a spreadsheet on ⌃5, after Google Sheets and Excel. A workbook
 is a `Name.sheet/` folder of text that diffs — `workbook.json` and a
 `.cells` file a sheet, a line a cell — and `.xlsx`, `.csv` and `.tsv` open
 and save as themselves. Formulas are worked out by Proton's own engine
@@ -250,7 +247,7 @@ tools, `@sheet` sends what is selected, and a range goes to Data as a
 dataframe and a notebook's table comes back as a sheet. Edits are held until
 ⌘S, and quitting with an unsaved workbook asks first.
 
-**Circuit** · digital logic on ⌃7, after hneemann's
+**Circuit** · digital logic on ⌃6, after hneemann's
 [Digital](https://github.com/hneemann/Digital). A project is a
 `Name.circuit/` folder of text — a `.circ` file a circuit, a line a part or
 a wire, test tables, memory contents as `.hex` and state machines — and
@@ -270,7 +267,7 @@ screen, and Notebook makes circuit practice from your sources, each problem
 built and checked by the simulator before you see it. Edits are held until
 ⌘S.
 
-**Logic** · on ⌃8, a calculator after
+**Logic** · on ⌃7, a calculator after
 [logic-calculator.com](https://logic-calculator.com/) and a model finder
 after John Slaney's [Logic for Fun](https://logic4fun.comp.anu.edu.au/), with
 proofs. A `.logic` file is a worksheet or a theory in Proton's language, a
@@ -332,76 +329,31 @@ approved automatically. A recent runtime with experimental dynamic tools is
 required. Each question starts an ephemeral Codex thread with Proton's saved
 conversation; this adapter does not resume Codex desktop tasks.
 
-## Claude Code, in the Chat tab
+## The engines
 
-The Chat tab runs the real Claude Code. Proton starts your own `claude`
-command in the project, in the stream-json mode Claude Code's SDKs use, so it
-is your account, your settings and CLAUDE.md, your skills and connectors, and
-every tool Claude Code has. Run `claude` once in a terminal to sign in. Proton
-finds it in `~/.local/bin`, where Claude Code's installer puts it, on your login
-shell's PATH, or at `PROTON_CLAUDE_BIN`. Replies are drawn as the agent pane's
-answers are, coloured code and equations included, and so is the code in what
-its tools did: a file read, an edit's diff, a command.
+Research and Notebook's tutor run on the real CLIs, each on its own sign-in,
+driven over the protocol it offers hosts — your account, your settings and your
+subscription, not an API key:
 
-What Claude Code would ask in a terminal — may it run this command, edit this
-file, go ahead with this plan, which of these did you mean — is asked as a card
-in the conversation. The permission mode and the model are pills on the
-composer; ⇧⇥ steps the mode. The sessions on the left are every session Claude
-Code keeps for the folder, including ones started in a terminal or in the
-desktop app, and any of them can be picked up again. Under them, **Claude
-desktop** lists the desktop app's sessions from its other folders; one opens in
-its own folder, and one the desktop app has open right now (marked with a ring)
-carries on as a copy, so two programs never write to one session.
+| Agent | Runs | Sign in with |
+| --- | --- | --- |
+| Claude Code | `claude`, stream-json mode | `claude` |
+| Codex | `codex app-server` | `codex login` (ChatGPT plan) |
+| Gemini | `gemini --experimental-acp` | `gemini` (Google) |
+| Antigravity | `agy`, stream-json print mode | `agy` |
 
-**Folders.** Group chats into folders, as in Claude's own apps: the folder
-button beside **New session** makes one and puts its name up for editing,
-and a chat moves into a folder by dragging it there or from its **⋯** menu
-(right-click works too). A folder folds, and still shows a spinner or a dot
-when something in it is working or waiting on you. Folders are shared by
-every project, and hold chats from any of them — Claude Code's, the other
-engines', the desktop app's. Deleting a folder puts its chats back in the
-list; it never deletes them.
+Proton finds each in `~/.local/bin`, on your login shell's PATH, or at
+`PROTON_CLAUDE_BIN`, `PROTON_CODEX_BIN`, `PROTON_GEMINI_BIN` or `PROTON_AGY_BIN`.
 
-**Deleting a chat.** **Delete chat…** in a chat's **⋯** menu asks first, then
-stops it if it is running and moves its transcript to the Trash — with the
-folder beside it where Claude Code keeps its subagents' logs — so it can be
-put back. A chat open in another Claude Code can't be deleted here until it is
-closed there, since that program would only write it back.
-
-**Codex, Gemini and Antigravity.** The pill at the left of the composer picks
-who answers a new conversation. Each is the real CLI on its own sign-in,
-driven over the protocol it offers hosts, and drawn with the same rows, cards
-and pills:
-
-| Agent | Runs | Sign in with | Asks before acting | Picks a conversation up again |
-| --- | --- | --- | --- | --- |
-| Codex | `codex app-server` | `codex login` (ChatGPT plan) | yes, as cards | yes, its own thread |
-| Gemini | `gemini --experimental-acp` | `gemini` (Google) | yes, as cards | told what was said, as the CLI cannot load a session |
-| Antigravity | `agy`, stream-json print mode | `agy` | no: its mode decides, and refusals are listed when it finishes | yes, its own conversation |
-
-Their conversations are kept in Proton's data folder (`dev.razeen.proton/chats`,
-or `PROTON_CHATS`) and listed with the project's sessions. `PROTON_CODEX_BIN`,
-`PROTON_GEMINI_BIN` and `PROTON_AGY_BIN` point at the commands if they are
-somewhere unusual.
-
-**Artifacts.** When Claude publishes one with its Artifact tool, it opens in the
-pane on the right. Each chat has its own pane: switch chats and the pane
-shows what that chat had open — or nothing — and switch back to find yours
-as you left it. One a chat publishes while you are in another is waiting open
-when you go back to it, and the list puts the chat's own artifacts first. Proton keeps a copy of every version it publishes in
+**Artifacts.** Notebook takes what Claude published with its Artifact tool as
+sources. **Import from Claude**, under **Add your artifacts**, finds them in the
+desktop app's session records and in every Claude Code session's own file, with
+the files each page brought along, and keeps a copy of every version in
 `~/Library/Application Support/dev.razeen.proton/artifacts` (`PROTON_ARTIFACTS`
-moves it) — with the files each page brought along, its clips and pictures
-found where the Artifact tool found them, and carried into each new version as
-claude.ai carries them — and serves them from `artifact://`, sandboxed: a page
-can load what a claude.ai artifact can, play its own videos (answered a range
-of bytes at a time, as a player asks) and go full screen, and reach nothing of
-the editor's. **Open on claude.ai** goes to the published page. **Import from
-Claude**, in the artifacts list, brings in what Claude Code published from this
-machine before Proton was keeping it — found in the desktop app's session
-records and in every session's own file, with the files each page brought
-along — and gives a version kept before without its files the ones it names.
-One whose page has since been deleted comes in as its address, and opens on
-claude.ai. Notebook takes artifacts as sources too.
+moves it). They are served from `artifact://`, sandboxed: a page can load what a
+claude.ai artifact can, play its own videos and go full screen, and reach nothing
+of the editor's. One whose page has since been deleted comes in as its address,
+and cannot be added.
 
 ## Antigravity agent connection
 
@@ -453,8 +405,7 @@ record in a prompt by accident.
 **It also works outside Proton.** `proton-mcp` serves the same library over MCP,
 so the CLI you already have a subscription to can search and cite your notes. It
 ships with the app — in `Proton.app/Contents/Resources/` on a Mac, beside
-`Proton.exe` on Windows, in `/usr/lib/Proton/` on Linux — and `/council` hands
-it to each member whose CLI can take one for a single run:
+`Proton.exe` on Windows, in `/usr/lib/Proton/` on Linux:
 
 ```bash
 claude mcp add proton -- <path>/proton-mcp

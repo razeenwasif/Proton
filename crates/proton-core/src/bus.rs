@@ -5,10 +5,8 @@
 //! design would be wrong and the GPU front end in `docs/ARCHITECTURE.md` would
 //! be unreachable.
 
-use std::collections::BTreeMap;
 
-use proton_claude::folders::FolderView as ChatFolder;
-use proton_claude::{Artifact, Capabilities as ClaudeCapabilities, Engine as ChatEngine, Item as ClaudeItem, SessionSummary as ClaudeSession, Status as ClaudeStatus};
+use proton_claude::{Capabilities as ClaudeCapabilities, Item as ClaudeItem};
 use proton_research::supervisor::{RoundStatus, TaskRow as ResearchTask};
 use proton_research::view::{
     HypothesisDetail, HypothesisRow, LiteratureSourceRow, PaperDetail, PaperResult, PaperRow, SeatRow as ResearchSeatRow, Summary as ResearchSummary,
@@ -260,83 +258,6 @@ pub enum Command {
     /// Clear everything that has finished, leaving what is still to come.
     ClearTasks,
 
-    /* ── Claude Code, in the Chat tab ──────────────────────────────── */
-    /// A new conversation on screen, with the engine named or the one new
-    /// conversations start with. Nothing starts until something is said.
-    ClaudeNew {
-        #[serde(default)]
-        #[ts(optional)]
-        engine: Option<ChatEngine>,
-    },
-    /// The engine new conversations start with — Claude Code, Codex, Gemini
-    /// or Antigravity — and a new conversation with it on screen.
-    ClaudeEngine {
-        engine: ChatEngine,
-    },
-    /// Show one of the project's sessions, reading it back if it is not open.
-    ClaudeOpen {
-        session: String,
-    },
-    /// Say something in the conversation on screen.
-    ClaudeSend {
-        text: String,
-        images: Vec<ClaudeImage>,
-    },
-    /// Stop the turn in progress, as Escape does in a terminal.
-    ClaudeStop,
-    /// Answer what a conversation is waiting on.
-    ClaudeAnswer {
-        request: String,
-        answer: ClaudeAnswer,
-    },
-    /// The permission mode — `default`, `acceptEdits`, `plan`, `auto` — for
-    /// the conversation on screen and those started after it.
-    ClaudeMode {
-        mode: String,
-    },
-    ClaudeModel {
-        model: String,
-    },
-    ClaudeEffort {
-        effort: Option<String>,
-    },
-    /// Read the project's sessions again.
-    ClaudeSessions,
-    /// Delete a conversation: its transcript goes to the Trash.
-    ClaudeDelete {
-        session: String,
-    },
-    /// A new folder for conversations — named, or "New folder" until it is —
-    /// with these put in it.
-    ChatFolderNew {
-        name: String,
-        sessions: Vec<String>,
-    },
-    ChatFolderRename {
-        folder: String,
-        name: String,
-    },
-    /// Delete a folder. Its conversations go back to the list.
-    ChatFolderDelete {
-        folder: String,
-    },
-    ChatFolderCollapse {
-        folder: String,
-        collapsed: bool,
-    },
-    /// Put a conversation in a folder, taking it out of any other — or, with
-    /// no folder, take it out of the one it is in.
-    ChatFolderMove {
-        session: String,
-        folder: Option<String>,
-    },
-    /// Forget an artifact, and the copies of it kept here.
-    ForgetArtifact {
-        id: String,
-    },
-    /// Bring in the artifacts published from this machine before Proton was
-    /// keeping them: from the desktop app's records and the sessions' files.
-    ImportArtifacts,
     /// Open a web address in the browser.
     OpenLink {
         url: String,
@@ -1034,6 +955,9 @@ pub enum Command {
     },
     /// The artifacts Proton keeps, to choose sources from.
     StudyArtifacts,
+    /// Read the sessions Claude Code and its desktop app have kept for what
+    /// they published, and keep those too.
+    StudyImportArtifacts,
     /// Add artifacts as sources, each as its latest version reads.
     StudyAddArtifacts {
         ids: Vec<String>,
@@ -1384,15 +1308,6 @@ pub enum Command {
         // have to be widened for every setting added.
         #[ts(type = "unknown")]
         value: serde_json::Value,
-    },
-    /// Put a question to the council: every model with a subscription answers
-    /// it, reads the others, and one writes the brief.
-    Convene {
-        question: String,
-    },
-    /// Show a debate that already happened, by its directory name.
-    OpenDebate {
-        name: String,
     },
     /// Narrow the library to these folders, or widen it again with an empty
     /// list. Named as `library_sources` lists them.
@@ -1913,42 +1828,10 @@ pub enum Event {
     Unsaved {
         files: Vec<String>,
     },
-    /// The project's conversations, newest first — Claude Code's sessions
-    /// and the other engines' — then the desktop app's from other folders;
-    /// which one is on screen; which are working or waiting on you; and the
-    /// engine a new one starts with.
-    ClaudeSessions {
-        sessions: Vec<ClaudeSession>,
-        /// The folders conversations are grouped into, each with what it
-        /// holds; what is in a folder is not in `sessions` as well.
-        folders: Vec<ChatFolder>,
-        active: String,
-        busy: Vec<String>,
-        waiting: Vec<String>,
-        engine: ChatEngine,
-    },
-    /// Rows of the conversation on screen: the ones that changed, or with
-    /// `reset`, all of them. `earlier` says a long session's start was left
-    /// out.
-    ClaudeItems {
-        session: String,
-        items: Vec<ClaudeItem>,
-        reset: bool,
-        earlier: bool,
-    },
-    ClaudeStatus {
-        status: ClaudeStatus,
-    },
     /// What one engine offers — its models, modes and commands, whose
     /// account it is, or why it cannot be used here. One for each engine.
     ClaudeCapabilities {
         capabilities: ClaudeCapabilities,
-    },
-    /// Every artifact kept here, newest first, and whether an import is
-    /// reading the sessions for more.
-    Artifacts {
-        artifacts: Vec<Artifact>,
-        importing: bool,
     },
     /// The investigations, newest first, which one is open, and where they
     /// are kept: `research/` in the project, or a folder of their own —
@@ -2095,6 +1978,8 @@ pub enum Event {
     /// already is in the open notebook.
     StudyArtifacts {
         artifacts: Vec<proton_study::view::StudyArtifactRow>,
+        /// Whether the sessions are being read for more.
+        importing: bool,
     },
     /// Every file under a folder that can be added and is not a source yet:
     /// the first thousand, and how many there are.
@@ -2358,25 +2243,6 @@ pub enum Event {
         values: serde_json::Value,
         /// Where they are stored, for the panel to show and for a `:e` on it.
         path: String,
-    },
-    /// The council: what has been debated, and what is being debated now.
-    #[serde(rename_all = "camelCase")]
-    Council {
-        /// Past debates, newest first.
-        held: Vec<DebateSummary>,
-        /// The question being debated now, empty when none is.
-        running: String,
-        /// Which round is in flight — 1 or 2 — or 3 while the brief is being
-        /// written. Zero when nothing is running.
-        round: usize,
-        /// One line per member per round so far, in order.
-        progress: Vec<String>,
-        /// The brief on screen, as markdown. Empty when there is none.
-        brief: String,
-        /// Which past debate is being shown, by directory name.
-        showing: String,
-        /// Why the last debate could not be run or finished.
-        problem: String,
     },
     /// What the library has read, and from where.
     ///
@@ -2656,18 +2522,6 @@ pub struct BufferTab {
     pub modified: bool,
 }
 
-/// One debate that already happened, for the list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/")]
-#[serde(rename_all = "camelCase")]
-pub struct DebateSummary {
-    /// The directory it lives in, which is also how it is asked for.
-    pub name: String,
-    pub question: String,
-    /// Whether it got as far as a brief.
-    pub finished: bool,
-}
-
 /// One folder of the library, as the sources panel draws it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
@@ -2717,25 +2571,3 @@ pub struct ServerState {
     pub note: Option<String>,
 }
 
-/// A picture to go with a prompt.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/")]
-pub struct ClaudeImage {
-    /// `image/png`, `image/jpeg`…
-    pub media: String,
-    /// The bytes, in base64.
-    pub data: String,
-}
-
-/// Your answer to what Claude Code asked.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/")]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum ClaudeAnswer {
-    /// Yes — and with `remember`, the rule it suggested, for the session.
-    Allow { remember: bool },
-    /// No, and what to tell it instead.
-    Deny { message: String },
-    /// An AskUserQuestion's answers, by question.
-    Questions { answers: BTreeMap<String, String> },
-}

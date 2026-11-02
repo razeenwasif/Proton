@@ -124,13 +124,8 @@ pub struct Workspace {
     embedder: Option<proton_library::Embedder>,
     /// Library searches waiting on a query vector.
     asking: Vec<Asking>,
-    /// A council debate in flight, and what it has said so far. Two minutes of
-    /// three subscriptions, so the rounds are shown as they land rather than
-    /// all at the end.
-    council: Option<proton_council::Running>,
-    /// The Chat tab: Claude Code's sessions for this project, and the ones
-    /// running here.
-    claude: crate::claude::Claude,
+    /// What each agent offers, for Notebook's tutor to choose from.
+    engines: crate::engines::Engines,
     /// The investigations, in the Research tab: the project's own, in its
     /// `research/`, or the session's, where the person keeps them in a
     /// folder of their own and every project shows the same ones.
@@ -143,12 +138,6 @@ pub struct Workspace {
     /// The files opened in the document viewer: the only ones the shell's
     /// `read_document` will read for the page.
     documents: std::collections::BTreeSet<PathBuf>,
-    council_progress: Vec<String>,
-    council_round: usize,
-    /// The brief on screen, and which past debate it came from.
-    council_brief: String,
-    council_showing: String,
-    council_problem: String,
     /// Tool calls waiting on a kernel.
     ///
     /// A cell run is the one tool that cannot answer when it is asked: the
@@ -427,7 +416,7 @@ impl Workspace {
             pickers: Pickers::new(root),
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
-            claude: crate::claude::Claude::new(root),
+            engines: crate::engines::Engines::new(root),
             research: Arc::new(Mutex::new(crate::research::Research::new(root))),
             research_shared: false,
             documents: std::collections::BTreeSet::new(),
@@ -443,7 +432,6 @@ impl Workspace {
         // they say, or the first question of every session goes to whatever
         // the default provider is regardless of what was chosen.
         space.follow_agent_settings();
-        space.follow_claude_settings();
         // And the library, which starts its walk here rather than on the first
         // question: a vault takes the better part of a second to read, and the
         // moment somebody asks about their notes is the worst one to spend it.
@@ -777,13 +765,12 @@ impl Workspace {
                     self.notebook_event(),
                     self.settings_event(),
                     self.library_event(),
-                    self.council_event(),
                     self.chats_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
                     },
                 ]);
-                events.extend(self.claude.sync());
+                events.extend(self.engines.sync());
                 events.extend(self.research().sync());
                 // Excel's home page and workbook, when it is the mode on
                 // screen: finding the workbooks walks the project.
@@ -877,9 +864,6 @@ impl Workspace {
                     if key.starts_with("agent.") {
                         self.follow_agent_settings();
                     }
-                    if key.starts_with("claude.") || key.starts_with("chat.") {
-                        self.follow_claude_settings();
-                    }
                     let mut events = vec![self.settings_event()];
                     // A root added here starts a walk here. The panel says
                     // "reading" until the heartbeat brings the answer, which
@@ -962,32 +946,6 @@ impl Workspace {
                 events.extend(self.open_path(&path));
                 events.extend(self.apply(Command::PlaceCursor { line, column }));
                 events
-            }
-
-            Command::Convene { question } => self.convene(&question),
-
-            Command::OpenDebate { name } => {
-                let at = self.council_room().join(&name);
-                match std::fs::read_to_string(at.join("brief.md")) {
-                    Ok(text) => {
-                        self.council_brief = text;
-                        self.council_problem.clear();
-                    }
-                    Err(_) => {
-                        // No brief means it did not finish. The rounds are
-                        // still there and are most of the value, so show those
-                        // rather than an empty pane.
-                        self.council_brief = ["01-positions.md", "02-responses.md"]
-                            .iter()
-                            .filter_map(|file| std::fs::read_to_string(at.join(file)).ok())
-                            .collect::<Vec<_>>()
-                            .join("\n\n");
-                        self.council_problem =
-                            "this debate has no brief \u{2014} its rounds are below".into();
-                    }
-                }
-                self.council_showing = name;
-                vec![self.council_event()]
             }
 
             Command::SetLibraryScope { sources } => {
@@ -1318,14 +1276,6 @@ impl Workspace {
                 vec![self.tasks_event()]
             }
 
-            /* ── Claude Code ───────────────────────────────── */
-            Command::ClaudeNew { engine } => self.claude.start(engine),
-            Command::ClaudeEngine { engine } => {
-                let events = self.claude.set_engine(engine);
-                let _ = self.settings.set("chat.engine", serde_json::Value::String(engine.key().into()));
-                events
-            }
-            Command::ClaudeOpen { session } => self.claude.open(&session),
             // Where investigations are kept is the window's: the session
             // answers it for every project at once.
             Command::ResearchFolder { .. } => {
@@ -1356,6 +1306,7 @@ impl Workspace {
             | Command::StudyMakeReadable { .. }
             | Command::StudyMakeDigest { .. }
             | Command::StudyArtifacts
+            | Command::StudyImportArtifacts
             | Command::StudyAddArtifacts { .. }
             | Command::StudyRemove { .. }
             | Command::StudySelect { .. }
@@ -1456,43 +1407,6 @@ impl Workspace {
                 Ok(())
             }),
             Command::LeanRemove => self.research().lean_do(|lean| lean.remove()),
-            Command::ClaudeSend { text, images } => self.claude.send(&text, &images),
-            Command::ClaudeStop => self.claude.interrupt(),
-            Command::ClaudeAnswer { request, answer } => self.claude.answer(&request, answer),
-            // The choice is the session's, and the default for the next one —
-            // which is a project setting, so it is there when Proton is next
-            // opened on this folder.
-            Command::ClaudeMode { mode } => {
-                let events = self.claude.set_mode(&mode);
-                let _ = self.settings.set("claude.mode", serde_json::Value::String(mode));
-                events
-            }
-            Command::ClaudeModel { model } => {
-                let key = chat_setting(self.claude.active_engine(), "model");
-                let events = self.claude.set_model(&model);
-                let saved = match model.as_str() {
-                    "" | "default" => serde_json::Value::Null,
-                    _ => serde_json::Value::String(model),
-                };
-                let _ = self.settings.set(&key, saved);
-                events
-            }
-            Command::ClaudeEffort { effort } => {
-                let key = chat_setting(self.claude.active_engine(), "effort");
-                let events = self.claude.set_effort(effort.as_deref());
-                let saved = effort.filter(|e| !e.is_empty()).map(serde_json::Value::String).unwrap_or(serde_json::Value::Null);
-                let _ = self.settings.set(&key, saved);
-                events
-            }
-            Command::ClaudeSessions => self.claude.refresh(),
-            Command::ClaudeDelete { session } => self.claude.delete(&session),
-            Command::ChatFolderNew { name, sessions } => self.claude.folder_new(&name, &sessions),
-            Command::ChatFolderRename { folder, name } => self.claude.folder_rename(&folder, &name),
-            Command::ChatFolderDelete { folder } => self.claude.folder_delete(&folder),
-            Command::ChatFolderCollapse { folder, collapsed } => self.claude.folder_collapse(&folder, collapsed),
-            Command::ChatFolderMove { session, folder } => self.claude.folder_move(&session, folder.as_deref()),
-            Command::ForgetArtifact { id } => self.claude.forget_artifact(&id),
-            Command::ImportArtifacts => self.claude.import_artifacts(),
             Command::OpenLink { url } => match open_link(&url) {
                 Ok(()) => Vec::new(),
                 Err(why) => vec![notice(why, NoticeLevel::Warn)],
@@ -2908,11 +2822,8 @@ impl Workspace {
             }
         }
 
-        events.extend(self.poll_council());
-
-        // Claude Code's conversations: every one that is running, whether
-        // or not it is on screen.
-        events.extend(self.claude.poll());
+        // What the agents say they offer, when they answer.
+        events.extend(self.engines.poll());
 
         // Research's rounds, the same way: their calls are conversations
         // with the same engines, each one task long. Unless they are the
@@ -5629,23 +5540,6 @@ impl Workspace {
         Ok(proton_library::quote(&hits))
     }
 
-    /// What a new conversation in the Chat tab starts with: the engine, the
-    /// permission mode, and each engine's model and effort.
-    fn follow_claude_settings(&mut self) {
-        let chosen = |text: String| (!text.is_empty()).then_some(text);
-        let mut models = std::collections::HashMap::new();
-        for engine in proton_claude::Engine::ALL {
-            let model = chosen(self.settings.string(&chat_setting(engine, "model"), ""));
-            let effort = chosen(self.settings.string(&chat_setting(engine, "effort"), ""));
-            models.insert(engine, (model, effort));
-        }
-        self.claude.configure(crate::claude::Defaults {
-            engine: proton_claude::Engine::parse(&self.settings.string("chat.engine", "claude")).unwrap_or_default(),
-            mode: self.settings.string("claude.mode", "default"),
-            models,
-        });
-    }
-
     /// Point the agent at whatever the settings name.
     ///
     /// Called on startup and after any `agent.*` change, so switching provider
@@ -5723,143 +5617,6 @@ impl Workspace {
         Event::Settings {
             values: self.settings.all().clone(),
             path: self.settings.path().display().to_string(),
-        }
-    }
-
-    /// Where debates are kept: beside the conversations, for the same reason.
-    /// A debate is a document about this project and belongs with it.
-    fn council_room(&self) -> PathBuf {
-        self.pickers.root().join(".proton").join("council")
-    }
-
-    /// Put a question to every model that has a subscription.
-    fn convene(&mut self, question: &str) -> Vec<Event> {
-        if question.trim().is_empty() {
-            return Vec::new();
-        }
-        if self.council.as_ref().is_some_and(|one| !one.is_done()) {
-            return vec![notice(
-                "a debate is already running, and each one spends three subscriptions".into(),
-                NoticeLevel::Warn,
-            )];
-        }
-
-        // Only members whose CLI is installed, and each handed the library
-        // where its CLI can take one for a single run \u{2014} so the council
-        // argues about this project's notes and cites them.
-        let server = server_beside_us();
-        // On the login shell's PATH: opened from the Dock, Proton has the
-        // system's bare one, and none of the three CLIs is on it.
-        let path = proton_claude::process::login_path();
-        let members: Vec<proton_council::Member> = proton_council::Member::usual()
-            .into_iter()
-            .map(|member| member.with_path(path))
-            .filter_map(proton_council::Member::installed)
-            .map(|member| match &server {
-                Some(server) => member.with_library(server, self.pickers.root()),
-                None => member,
-            })
-            .collect();
-
-        if members.len() < 2 {
-            return vec![notice(
-                format!(
-                    "a council needs at least two of claude, codex and agy on PATH; {} found",
-                    members.len()
-                ),
-                NoticeLevel::Error,
-            )];
-        }
-
-        let room = self.council_room().join(slugged(question));
-        // Said, where there is a library to argue from and no way to it.
-        let unread = server.is_none() && !self.settings.library_roots(self.pickers.root()).is_empty();
-        match proton_council::Running::start(question, members, &room) {
-            Ok(running) => {
-                self.council = Some(running);
-                self.council_progress.clear();
-                self.council_round = 1;
-                self.council_brief.clear();
-                self.council_showing.clear();
-                self.council_problem.clear();
-                let mut events = vec![self.council_event()];
-                if unread {
-                    events.push(notice(
-                        "proton-mcp was not found, so the council argues without your library".into(),
-                        NoticeLevel::Warn,
-                    ));
-                }
-                events
-            }
-            Err(why) => {
-                self.council_problem = why.clone();
-                vec![notice(why, NoticeLevel::Error), self.council_event()]
-            }
-        }
-    }
-
-    /// Drain a debate, on the same heartbeat as everything else that happens
-    /// on a thread the core cannot see.
-    fn poll_council(&mut self) -> Vec<Event> {
-        let Some(running) = self.council.as_mut() else {
-            return Vec::new();
-        };
-        let updates = running.poll();
-        if updates.is_empty() {
-            return Vec::new();
-        }
-        for update in updates {
-            match update {
-                proton_council::Update::Round { round, said } => {
-                    for one in said {
-                        self.council_progress.push(match &one.text {
-                            Ok(text) => format!(
-                                "round {round} \u{2022} {} \u{2022} {} words",
-                                one.member,
-                                text.split_whitespace().count()
-                            ),
-                            Err(why) => format!(
-                                "round {round} \u{2022} {} \u{2022} did not answer: {why}",
-                                one.member
-                            ),
-                        });
-                    }
-                    self.council_round = round + 1;
-                }
-                proton_council::Update::Brief(Ok(brief)) => {
-                    self.council_brief = brief;
-                    self.council_round = 0;
-                }
-                proton_council::Update::Brief(Err(why)) => {
-                    self.council_problem = why;
-                    self.council_round = 0;
-                }
-            }
-        }
-        vec![self.council_event()]
-    }
-
-    fn council_event(&self) -> Event {
-        Event::Council {
-            held: proton_council::held(&self.council_room())
-                .into_iter()
-                .map(|one| crate::bus::DebateSummary {
-                    name: one.name,
-                    question: one.question,
-                    finished: one.finished,
-                })
-                .collect(),
-            running: self
-                .council
-                .as_ref()
-                .filter(|one| !one.is_done())
-                .map(|one| one.question().to_string())
-                .unwrap_or_default(),
-            round: self.council_round,
-            progress: self.council_progress.clone(),
-            brief: self.council_brief.clone(),
-            showing: self.council_showing.clone(),
-            problem: self.council_problem.clone(),
         }
     }
 
@@ -6761,15 +6518,6 @@ impl Workspace {
     }
 }
 
-/// Where an engine's model or effort is saved: Claude Code's where they
-/// always were, the others' beside the engine chosen for new conversations.
-fn chat_setting(engine: proton_claude::Engine, what: &str) -> String {
-    match engine {
-        proton_claude::Engine::Claude => format!("claude.{what}"),
-        other => format!("chat.{}.{what}", other.key()),
-    }
-}
-
 pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {
     Event::Notice { text, level }
 }
@@ -6807,35 +6555,6 @@ fn snippet(text: &str) -> String {
     match out.char_indices().nth(PREVIEW) {
         Some((at, _)) => format!("{}…", out[..at].trim_end()),
         None => out,
-    }
-}
-
-/// Where `proton-mcp` is, so a council member can be handed the library:
-/// see [`proton_council::mcp_server`].
-fn server_beside_us() -> Option<PathBuf> {
-    proton_council::mcp_server(&std::env::current_exe().ok()?)
-}
-
-/// A directory name out of a question.
-///
-/// Windows refuses `?` in a filename and a question usually ends in one, so
-/// this is the difference between keeping the debate and losing it.
-fn slugged(question: &str) -> String {
-    let words: String = question
-        .chars()
-        .map(|c| match c.is_alphanumeric() {
-            true => c.to_ascii_lowercase(),
-            false => '-',
-        })
-        .collect();
-    let short: Vec<&str> = words
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .take(8)
-        .collect();
-    match short.is_empty() {
-        true => "debate".into(),
-        false => short.join("-"),
     }
 }
 

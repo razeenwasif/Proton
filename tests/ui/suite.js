@@ -5,9 +5,7 @@ import {circuitChecks} from './suite-circuit.js';
 import {logicChecks} from './suite-logic.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = [...['chat', 'codex', 'data', 'research', 'study', 'sheet', 'circuit', 'logic'].map((mode) => `proton.panes.${mode}`),
-  // Which artifact each conversation had open.
-  'proton.chat.panes'];
+const layoutKeys = [...['codex', 'data', 'research', 'study', 'sheet', 'circuit', 'logic'].map((mode) => `proton.panes.${mode}`)];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
 layoutKeys.forEach((key) => localStorage.removeItem(key));
 const restoreLayouts = () => savedLayouts.forEach(([key, value]) => {
@@ -151,28 +149,16 @@ await test('Narrow windows show the requested panel without squeezing out the ed
   assert(!section.querySelector('aside').hidden, 'wide layout did not restore sidebar');
 });
 await test('Each mode keeps a usable stage, and every one has a right panel to toggle', async () => {
-  for (const mode of ['chat', 'data', 'research', 'study', 'codex']) {
+  for (const mode of ['data', 'research', 'study', 'codex']) {
     await win.dispatch({type: 'setMode', mode}); await settle();
     const section = $('.workspace.on'), stage = section.querySelector('main');
     assert(stage.clientWidth >= 320, `${mode} lost its stage`);
     assert(stage.getBoundingClientRect().right <= section.getBoundingClientRect().right + 1, `${mode} overflows`);
-    // Chat's is its artifacts pane.
     const toggle = [...doc.querySelectorAll('[data-panel-toggle="right"]')].find((b) => b.getClientRects().length);
     assert(toggle && !toggle.disabled, `${mode} has the wrong panel controls`);
   }
 });
 const shown = (el) => Boolean(el) && win.getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0;
-await test('Chat wears Codex\'s chrome: a title bar for the rails, no statusline, no terminal toggle', async () => {
-  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
-  assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.rail')) && !shown($('.statusline')), 'Chat kept the old chrome');
-  assert(!shown($('.titlebar [data-term-toggle]')), 'Chat offers a terminal it cannot show');
-  const ground = win.getComputedStyle($('.workspace[data-ws="chat"] .cc-main')).backgroundColor;
-  const bg = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim();
-  const probe = doc.createElement('i'); probe.style.color = bg; doc.body.append(probe);
-  const expected = win.getComputedStyle(probe).color; probe.remove();
-  assert(ground === expected, `Chat is not on the theme's ground: ${ground} vs ${expected}`);
-  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
-});
 await test('Codex trades the rails and statusline for a title bar, and Data does too', async () => {
   assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Codex kept the old chrome');
   const bar = $('.titlebar').getBoundingClientRect(), app = $('.app').getBoundingClientRect();
@@ -194,7 +180,7 @@ await test('Codex trades the rails and statusline for a title bar, and Data does
 await test('The rail names only keys that do something, and its plugin button opens the plugin commands', async () => {
   const titles = [...doc.querySelectorAll('.rail button[title]')].map((b) => b.title).join(' | ');
   for (const dead of ['␣aa', '␣cv', '␣dd', '␣px']) assert(!titles.includes(dead), `the rail still names ${dead}: ${titles}`);
-  assert(titles.includes('Chat  ⌃1') && titles.includes('␣ct') && titles.includes('Plugin commands  ␣pc'), `the rail's keys: ${titles}`);
+  assert(titles.includes('␣ct') && titles.includes('Plugin commands  ␣pc'), `the rail's keys: ${titles}`);
   const before = win.commands.length;
   $('.rail [data-picker="pluginCommands"]').click(); await settle();
   assert(win.commands.slice(before).some((c) => c.type === 'openPicker' && c.kind === 'pluginCommands'), 'the plugin button did not open the plugin commands');
@@ -986,422 +972,7 @@ await test('A trackpad scroll is never pulled back by the core answering late, n
   await settle();
   assert(Math.round(editor.scrollTop / line) === 50000, 'the pane did not follow the core to line 50000');
 });
-/* ── Chat: Claude Code ─────────────────────────────────────────────── */
-const ccRun = (text, extra = {}) => ({kind: 'text', id: `t-${text}`, text, done: true, parent: null, ...extra});
-const ccTool = (id, name, input, extra = {}) => ({kind: 'tool', id, name, input, state: 'done', streamed: 0, result: null,
-  detail: null, parent: null, ask: null, artifact: null, ...extra});
-const ccStatus = (extra = {}) => ({session: 's1', title: 'Fix the build', activity: 'idle', doing: '', model: 'claude-opus-5-5',
-  mode: 'default', effort: null, since: null, cost: 0, context: 1200, output: 0, tasks: [], limit: null, error: null, version: '2', ...extra});
-const ccCaps = {models: [{value: 'default', resolved: 'claude-opus-5-5', name: 'Default (recommended)', description: 'Opus', efforts: ['low', 'high']},
-  {value: 'opus', resolved: 'claude-opus-5-5', name: 'Opus 5.5', description: 'Best', efforts: ['low', 'high']},
-  {value: 'haiku', resolved: 'claude-haiku-4-5', name: 'Haiku 4.5', description: 'Fast', efforts: []}],
-  commands: [{name: 'compact', description: 'Summarise the conversation', hint: ''}, {name: 'init', description: 'Write a CLAUDE.md', hint: ''}],
-  plan: 'Claude Max', email: 'someone@example.com'};
-const ccItems = (items, reset = false) => ({type: 'claudeItems', session: 's1', items, reset, earlier: false});
-const ccPush = async (...events) => { await win.pushEvents(events); await settle(); };
 const sentSince = (before, type) => win.commands.slice(before).filter((c) => c.type === type);
-await test('Chat draws Claude Code\'s sessions, prose, tools and status from the core', async () => {
-  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
-  // Paths are shown from the project they are in.
-  await ccPush(fixtureProjects);
-  await ccPush(
-    {type: 'claudeSessions', active: 's1', busy: ['s2'], waiting: [], sessions: [
-      {id: 's1', title: 'Fix the build', updated: Date.now()}, {id: 's2', title: 'Port the parser', updated: Date.now() - 1000}]},
-    {type: 'claudeCapabilities', capabilities: ccCaps},
-    ccItems([
-      {kind: 'user', id: 'u1', text: 'Why does it fail?', images: 0},
-      {kind: 'thinking', id: 'th1', text: '', tokens: 320, done: true, parent: null},
-      ccRun('It fails because **the lockfile** is stale.'),
-      ccTool('e1', 'Edit', {file_path: '/fixture/src/fixture.c', old_string: 'a', new_string: 'b'}, {detail: {structuredPatch: [
-        {oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: ['-int a;', '+int b;']}]}}),
-      ccTool('q1', 'TaskCreate', {subject: 'quiet'}),
-      {kind: 'turn', id: 'turn1', ms: 4200, turns: 2, cost: 0.02, error: null},
-    ], true),
-    {type: 'claudeStatus', status: ccStatus()});
-  const ws = $('.workspace[data-ws="chat"]');
-  const rows = [...ws.querySelectorAll('.cc-session')];
-  assert(rows.length === 2 && rows[0].classList.contains('on') && rows[1].querySelector('.cc-spin'), 'the session list is wrong');
-  assert(ws.querySelector('.cc-bubble')?.textContent.includes('Why does it fail?'), 'your message is not a bubble');
-  assert(ws.querySelector('.cc-prose strong')?.textContent === 'the lockfile', 'the reply was not drawn as markdown');
-  const edit = ws.querySelector('[data-item="e1"]');
-  assert(edit.querySelector('.cc-verb').textContent === 'Update' && edit.querySelector('.cc-target').textContent === 'src/fixture.c', 'the edit row does not say what it did');
-  assert(edit.querySelector('.cc-note-inline').textContent === '+1 −1', 'the edit row does not count its lines');
-  assert(win.getComputedStyle(ws.querySelector('[data-item="q1"]')).display === 'none', 'a task tool has a row of its own');
-  assert(ws.querySelector('[data-claude-title]').textContent === 'Fix the build', 'the header does not name the session');
-  assert(ws.querySelector('[data-claude-model]').textContent.includes('Opus 5.5'), 'the model pill does not name the model');
-  assert(ws.querySelector('[data-claude-mode]').textContent.includes('Ask permissions'), 'the mode pill does not name the mode');
-  assert(ws.querySelector('[data-claude-account]').textContent.includes('Claude Max'), 'the account is not shown');
-  edit.querySelector('[data-toggle]').click(); await settle();
-  assert(edit.querySelector('.cc-diff tr.del') && edit.querySelector('.cc-diff tr.add'), 'the edit did not open into its diff');
-});
-await test('Chat redraws only the rows that changed, and keeps an open diff open', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  const bubble = ws.querySelector('[data-item="u1"]');
-  await ccPush(ccItems([ccRun('Streaming', {id: 't-live', done: false})]));
-  await ccPush(ccItems([ccRun('Streaming more', {id: 't-live', done: false})]));
-  assert(ws.querySelector('[data-item="u1"]') === bubble, 'an unchanged row was rebuilt');
-  assert(ws.querySelector('[data-item="t-live"] .cc-caret'), 'a streaming reply has no caret');
-  assert(ws.querySelector('[data-item="e1"] .cc-diff'), 'the open diff closed under a streaming reply');
-  const items = ws.querySelectorAll('[data-claude-items] > .cc-item');
-  assert(items[items.length - 1].dataset.item === 't-live', 'a new row was not added at the end');
-});
-await test('A streaming reply draws what has settled once, and the whole reply when it is done', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  await ccPush(ccItems([ccRun('First **paragraph**.\n\nSecond', {id: 't-settle', done: false})]));
-  const settledBox = ws.querySelector('[data-item="t-settle"] [data-settled]');
-  const first = settledBox?.firstElementChild;
-  assert(first?.querySelector('strong')?.textContent === 'paragraph', 'the settled paragraph was not drawn');
-  assert(ws.querySelector('[data-item="t-settle"] [data-tail]')?.textContent.includes('Second'), 'the arriving paragraph was not drawn');
-  await ccPush(ccItems([ccRun('First **paragraph**.\n\nSecond one, longer\n\n```\ncode\n\nmore', {id: 't-settle', done: false})]));
-  assert(settledBox.firstElementChild === first, 'what had settled was drawn again');
-  assert(ws.querySelector('[data-item="t-settle"] [data-tail] pre, [data-item="t-settle"] [data-tail] code'), 'an open fence did not stay in the arriving part');
-  await ccPush(ccItems([ccRun('First **paragraph**.\n\nSecond one, longer\n\n```\ncode\n\nmore\n```', {id: 't-settle', done: true})]));
-  const done = ws.querySelector('[data-item="t-settle"]');
-  assert(!done.querySelector('[data-settled]') && !done.querySelector('.cc-caret') && done.querySelector('pre'), 'the finished reply was not drawn whole');
-});
-await test('A permission card answers the request it was asked with, as allow, always or deny', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  const ask = {request: 'req-7', kind: 'permission', description: 'touch x', blocked: null,
-    suggestions: [{type: 'addRules', rules: [{toolName: 'Bash', ruleContent: 'touch:*'}], behavior: 'allow', destination: 'session'}]};
-  await ccPush(ccItems([ccTool('b1', 'Bash', {command: 'touch x', description: 'Make x'}, {state: 'waiting', ask})]),
-    {type: 'claudeStatus', status: ccStatus({activity: 'waiting'})});
-  const card = ws.querySelector('[data-item="b1"] .cc-ask');
-  assert(card && card.textContent.includes('run this command') && card.querySelector('code')?.textContent.includes('touch x'), 'the card does not show the command');
-  let before = win.commands.length;
-  card.querySelector('[data-claude-allow]:not([data-remember])').click(); await settle();
-  let answer = sentSince(before, 'claudeAnswer')[0];
-  assert(answer?.request === 'req-7' && answer.answer.kind === 'allow' && answer.answer.remember === false, `Yes sent ${JSON.stringify(answer)}`);
-  before = win.commands.length;
-  card.querySelector('[data-remember="1"]').click(); await settle();
-  answer = sentSince(before, 'claudeAnswer')[0];
-  assert(answer?.answer.remember === true && card.querySelector('[data-remember="1"]').textContent.includes('Bash(touch:*)'), 'Always did not offer or send the rule');
-  before = win.commands.length;
-  card.querySelector('[data-claude-why]').value = 'Use mktemp instead';
-  card.querySelector('[data-claude-deny]').click(); await settle();
-  answer = sentSince(before, 'claudeAnswer')[0];
-  assert(answer?.answer.kind === 'deny' && answer.answer.message === 'Use mktemp instead', `No sent ${JSON.stringify(answer)}`);
-});
-await test('A question card sends the options chosen, by question', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  const questions = [{question: 'Which database?', header: 'Storage', multiSelect: false,
-    options: [{label: 'SQLite', description: 'One file'}, {label: 'Postgres', description: 'A server'}]}];
-  await ccPush(ccItems([ccTool('a1', 'AskUserQuestion', {questions}, {state: 'waiting', ask: {request: 'req-q', kind: 'question', description: '', suggestions: [], blocked: null}})]));
-  const form = ws.querySelector('[data-item="a1"] form[data-claude-question]');
-  assert(form && form.querySelectorAll('.cc-option').length === 3, 'the options (and something else) are not offered');
-  form.querySelector('input[value="Postgres"]').click();
-  const before = win.commands.length;
-  form.requestSubmit(); await settle();
-  const answer = sentSince(before, 'claudeAnswer')[0];
-  assert(answer?.request === 'req-q' && answer.answer.kind === 'questions' && answer.answer.answers['Which database?'] === 'Postgres', `sent ${JSON.stringify(answer)}`);
-});
-await test('The composer sends, stops, steps the mode, and offers Claude Code\'s commands', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  const input = ws.querySelector('[data-claude-input]');
-  input.focus();
-  input.value = '/co'; input.dispatchEvent(new win.Event('input', {bubbles: true})); await settle();
-  const offered = [...ws.querySelectorAll('[data-claude-command]')].map((r) => r.dataset.claudeCommand);
-  assert(offered.includes('compact') && offered.includes('council'), `slash menu offered ${offered}`);
-  input.value = 'Run the tests'; input.dispatchEvent(new win.Event('input', {bubbles: true}));
-  let before = win.commands.length;
-  input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); await settle();
-  const sent = sentSince(before, 'claudeSend')[0];
-  assert(sent?.text === 'Run the tests' && Array.isArray(sent.images) && input.value === '', `Enter sent ${JSON.stringify(sent)}`);
-  assert(!sentSince(before, 'key').length, 'typing in the composer reached Vim');
-  await ccPush({type: 'claudeStatus', status: ccStatus({activity: 'working', since: Date.now()})});
-  assert(!ws.querySelector('[data-claude-working]').hidden, 'nothing says Claude is working');
-  before = win.commands.length;
-  ws.querySelector('[data-claude-send]').click(); await settle();
-  assert(sentSince(before, 'claudeStop').length === 1, 'the empty send button did not stop the turn');
-  before = win.commands.length;
-  input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Tab', shiftKey: true, bubbles: true, cancelable: true})); await settle();
-  assert(sentSince(before, 'claudeMode')[0]?.mode === 'acceptEdits', 'Shift+Tab did not step to the next mode');
-  await ccPush({type: 'claudeStatus', status: ccStatus()});
-});
-await test('An artifact published while you watch opens beside the chat, sandboxed, from artifact://', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  const artifact = {id: '4a1f9d2e-77b3-4c41-9e0a-5c2d8f1b6a30', seq: 2, title: 'Frame times', url: 'https://claude.ai/artifact/abc', icon: 'chart', file: 'index.html'};
-  await ccPush({type: 'artifacts', artifacts: [{id: artifact.id, url: artifact.url, title: 'Frame times', icon: 'chart', description: '',
-    project: '/fixture', session: 's1', versions: [{seq: 1, file: 'index.html', at: 1}, {seq: 2, file: 'index.html', at: 2}]}]});
-  await ccPush(ccItems([ccTool('art1', 'Artifact', {file_path: '/fixture/index.html'}, {artifact})]));
-  assert(ws.dataset.rightOpen === 'true', 'the artifacts pane did not open');
-  const frame = ws.querySelector('[data-artifact-frame]');
-  assert(frame.getAttribute('src') === `artifact://localhost/${artifact.id}/2/index.html`, `framed ${frame.getAttribute('src')}`);
-  const sandbox = frame.getAttribute('sandbox') ?? '';
-  assert(sandbox.includes('allow-scripts') && !sandbox.includes('allow-same-origin'), 'the artifact can reach the editor');
-  assert(ws.querySelector('[data-item="art1"] .cc-artifact b')?.textContent === 'Frame times', 'the transcript has no card for it');
-  assert(ws.querySelector('[data-artifact-version]').options.length === 2, 'its versions are not offered');
-  let before = win.commands.length;
-  ws.querySelector('[data-artifact-open]').click(); await settle();
-  assert(sentSince(before, 'openLink')[0]?.url === artifact.url, 'Open on claude.ai did not ask for the link');
-  ws.querySelector('[data-artifact-close]').click(); await settle();
-  assert(ws.dataset.rightOpen === 'false', 'the pane did not close');
-});
-await test('Artifacts published before Proton kept them import with one click, and a pageless one opens on claude.ai', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  ws.querySelector('[data-artifact-gallery]').click(); await settle();
-  let before = win.commands.length;
-  ws.querySelector('[data-artifact-import]').click(); await settle();
-  assert(sentSince(before, 'importArtifacts').length === 1, 'the button did not ask for an import');
-  assert(ws.querySelector('.cc-importing')?.textContent.includes('Reading your sessions'), 'nothing says the import is running');
-  await ccPush({type: 'artifacts', importing: false, artifacts: [
-    {id: 'Gone1', url: 'https://claude.ai/artifact/Gone1', title: 'Old chart', icon: 'chart', description: '', project: '/fixture', session: 's0',
-      versions: [{seq: 1, file: '', at: 5}]}]});
-  assert(ws.querySelector('[data-artifact-import]') && ws.querySelectorAll('.cc-gallery-row').length === 1, 'the imported artifact is not listed');
-  ws.querySelector('.cc-gallery-open').click(); await settle();
-  const empty = ws.querySelector('[data-artifact-empty]');
-  assert(!empty.hidden && empty.textContent.includes('no longer on this machine'), 'a pageless artifact did not say where it is');
-  assert(ws.querySelector('[data-artifact-frame]').hidden, 'a pageless artifact framed nothing');
-  before = win.commands.length;
-  empty.querySelector('[data-artifact-open]').click(); await settle();
-  assert(sentSince(before, 'openLink')[0]?.url === 'https://claude.ai/artifact/Gone1', 'it did not open on claude.ai');
-  ws.querySelector('[data-artifact-close]').click(); await settle();
-});
-await test('Replies are markdown that never becomes HTML, and their links open in the browser', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  await ccPush(ccItems([ccRun('<img src=x onerror="window.pwned=1"><script>window.pwned=1</script> see [docs](https://example.com/a?b=1&c=2)', {id: 'evil'})]));
-  const prose = ws.querySelector('[data-item="evil"]');
-  assert(!prose.querySelector('img, script') && prose.textContent.includes('<script>'), 'HTML in a reply was drawn as HTML');
-  assert(!win.pwned, 'a reply ran script');
-  const link = prose.querySelector('a[data-link]');
-  const before = win.commands.length;
-  const click = new win.MouseEvent('click', {bubbles: true, cancelable: true});
-  link.dispatchEvent(click); await settle();
-  assert(click.defaultPrevented && sentSince(before, 'openLink')[0]?.url === 'https://example.com/a?b=1&c=2', 'the link was followed in the window');
-  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
-});
-await test('A tool\'s code is coloured by the file it is in: a read, an edit\'s diff, a command — and its output is not', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
-  const source = 'fn main() {\n    /* a comment\n       over two lines */\n    let n: u32 = 42;\n}';
-  await ccPush(ccItems([
-    ccTool('hl-read', 'Read', {file_path: '/fixture/src/main.rs'}, {detail: {file: {content: source, numLines: 5}}}),
-    ccTool('hl-edit', 'Edit', {file_path: '/fixture/src/main.rs', old_string: 'u32', new_string: 'u64'},
-      {detail: {structuredPatch: [{oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
-        lines: [' /* keep', '-  of this */ let n: u32 = 42;', '+  of this */ let n: u64 = 43;']}]}}),
-    ccTool('hl-bash', 'Bash', {command: 'cargo test --release | grep -v ok'}, {result: 'test result: ok <b>'}),
-  ]));
-  for (const id of ['hl-read', 'hl-edit', 'hl-bash']) { ws.querySelector(`[data-toggle="${id}"]`).click(); await settle(); }
-  const read = ws.querySelector('[data-item="hl-read"] .cc-tool-detail code[data-lang="rust"]');
-  assert(read?.querySelector('.k')?.textContent === 'fn' && read.querySelector('.ty')?.textContent === 'u32', 'the file read is not coloured as Rust');
-  assert(read.querySelector('.cm')?.textContent === '/* a comment\n       over two lines */', 'a comment over two lines is not one');
-  assert(read.textContent === source, 'the code shown is not the code read');
-  const rows = [...ws.querySelectorAll('[data-item="hl-edit"] .cc-diff tr:not(.hunk)')];
-  assert(rows.length === 3, `${rows.length} diff rows`);
-  // The context line opens a comment that the changed lines close.
-  assert(rows[1].classList.contains('del') && rows[1].querySelector('td:last-child .cm')?.textContent === '  of this */', `the comment did not carry into the removed line: ${rows[1].innerHTML}`);
-  assert(rows[2].classList.contains('add') && rows[2].querySelector('.ty')?.textContent === 'u64' && rows[2].querySelector('.num')?.textContent === '43', 'the added line is not coloured');
-  assert(rows[1].lastElementChild.textContent === '  of this */ let n: u32 = 42;', 'the removed line is not what was removed');
-  const bash = ws.querySelector('[data-item="hl-bash"] .cc-tool-detail');
-  assert(bash.querySelector('code[data-lang="bash"] .fn')?.textContent === 'cargo' && bash.querySelector('code .at')?.textContent === '--release', 'the command is not coloured');
-  assert(bash.querySelector('.cc-output').textContent === 'test result: ok <b>' && !bash.querySelector('.cc-output b, .cc-output span'), 'the output was coloured or drawn as HTML');
-  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
-});
-await test('The desktop app\'s sessions from other folders are listed apart, by folder, and one open elsewhere says so', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  await ccPush({type: 'claudeSessions', active: 's1', busy: [], waiting: [], engine: 'claude', sessions: [
-    {id: 's1', title: 'Fix the build', updated: Date.now(), cwd: '', elsewhere: false, engine: 'claude'},
-    {id: 'x1', title: 'Make the poll configurable', updated: Date.now() - 1000, cwd: '', elsewhere: false, engine: 'codex'},
-    {id: 'd1', title: 'Batting averages', updated: Date.now() - 5000, cwd: '/Users/you/Github/Cricket-Analysis', elsewhere: true, engine: 'claude'},
-    {id: 'd2', title: 'Quantisation and SNR', updated: Date.now() - 9000, cwd: '/Users/you/Research/TinyML', elsewhere: false, engine: 'claude'}]});
-  const groups = [...ws.querySelectorAll('.cc-group')].map((g) => g.textContent);
-  assert(groups[groups.length - 1] === 'Claude desktop', `groups are ${groups}`);
-  const row = (id) => ws.querySelector(`[data-claude-session="${id}"]`);
-  assert(row('d1').querySelector('.cc-session-where')?.textContent === 'Cricket-Analysis', 'a desktop session does not name its folder');
-  assert(row('d1').querySelector('.cc-elsewhere') && !row('d2').querySelector('.cc-elsewhere'), 'a session open in another Claude Code is not marked');
-  assert(row('x1').querySelector('.cc-session-where[data-engine="codex"]')?.textContent === 'Codex', 'a Codex conversation does not say so');
-  assert(!row('s1').querySelector('.cc-session-where'), 'a Claude Code session here is tagged');
-  const before = win.commands.length;
-  row('d1').click(); await settle();
-  assert(sentSince(before, 'claudeOpen')[0]?.session === 'd1', 'opening a desktop session did not ask for it');
-});
-await test('The engine picker starts a conversation with Codex, and the composer speaks its language', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  const codexModes = [{value: 'default', name: 'Ask permissions', note: 'Ask before commands and edits', icon: 'eye'},
-    {value: 'acceptEdits', name: 'Auto', note: 'Work in the project; ask to go beyond it', icon: 'pen'},
-    {value: 'plan', name: 'Read only', note: 'Change nothing', icon: 'bulb'}];
-  await ccPush(
-    {type: 'claudeCapabilities', capabilities: {engine: 'codex', plan: 'ChatGPT Plus', email: 'someone@example.com', missing: null, commands: [], modes: codexModes,
-      models: [{value: 'gpt-6.1-sol', resolved: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', description: 'Workhorse', efforts: ['low', 'high']}]}},
-    {type: 'claudeCapabilities', capabilities: {engine: 'gemini', plan: '', email: '', missing: 'The Gemini CLI is not installed.', commands: [], modes: [], models: []}});
-  ws.querySelector('[data-claude-engine]').click(); await settle();
-  const pop = ws.querySelector('[data-claude-pop]');
-  const rows = [...pop.querySelectorAll('[data-claude-set-engine]')];
-  assert(rows.map((r) => r.dataset.claudeSetEngine).join() === 'claude,codex,gemini,antigravity', 'the picker does not offer the four engines');
-  const gemini = pop.querySelector('[data-claude-set-engine="gemini"]');
-  assert(gemini.classList.contains('off') && gemini.textContent.includes('Not installed'), 'an engine that is not installed is not said to be');
-  let before = win.commands.length;
-  pop.querySelector('[data-claude-set-engine="codex"]').click(); await settle();
-  assert(sentSince(before, 'claudeEngine')[0]?.engine === 'codex', 'choosing Codex did not ask for it');
-  await ccPush(ccItems([], true), {type: 'claudeStatus', status: ccStatus({engine: 'codex', model: 'gpt-6.1-sol', title: '', context: 0})});
-  const input = ws.querySelector('[data-claude-input]');
-  assert(ws.querySelector('[data-claude-engine]').textContent.includes('Codex'), 'the engine pill does not name Codex');
-  assert(input.placeholder.startsWith('Ask Codex'), `the placeholder is ${input.placeholder}`);
-  assert(ws.querySelector('[data-claude-welcome-title]').textContent === 'What should Codex work on?', 'the welcome is still Claude\'s');
-  assert(ws.querySelector('[data-claude-model]').textContent.includes('GPT-6.1-Sol'), 'the model pill does not name Codex\'s model');
-  assert(ws.querySelector('[data-claude-account]').textContent.includes('ChatGPT Plus'), 'the account is not Codex\'s');
-  input.focus();
-  before = win.commands.length;
-  input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Tab', shiftKey: true, bubbles: true, cancelable: true})); await settle();
-  assert(sentSince(before, 'claudeMode')[0]?.mode === 'acceptEdits', 'Shift+Tab did not step through Codex\'s modes');
-  await ccPush({type: 'claudeStatus', status: ccStatus({engine: 'codex', model: 'gpt-6.1-sol', mode: 'acceptEdits', title: ''})});
-  assert(ws.querySelector('[data-claude-mode]').textContent.includes('Auto'), 'the mode pill does not use Codex\'s name for the mode');
-});
-await test('A Codex patch reads as an edit of its file, and its approval asks in Codex\'s name', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  const files = [{path: '/fixture/src/poll.ts', kind: 'update', movePath: null,
-    structuredPatch: [{oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: ['-export const POLL_MS = 1000;', '+export const POLL_MS = 2000;']}]}];
-  const ask = {request: 'codex-3', kind: 'permission', description: '', suggestions: [{type: 'session'}], blocked: null};
-  await ccPush(ccItems([ccTool('p1', 'Patch', {files: [{path: files[0].path, kind: 'update'}]}, {state: 'waiting', ask, detail: {files}})]),
-    {type: 'claudeStatus', status: ccStatus({engine: 'codex', model: 'gpt-6.1-sol', activity: 'waiting'})});
-  const row = ws.querySelector('[data-item="p1"]');
-  assert(row.querySelector('.cc-verb').textContent === 'Update' && row.querySelector('.cc-target').textContent === 'src/poll.ts', 'the patch row does not say what it changes');
-  const card = row.querySelector('.cc-ask');
-  assert(card?.textContent.includes('Allow Codex to edit') && card.querySelector('.cc-diff tr.add'), 'the approval is not Codex\'s, or shows no diff');
-  const before = win.commands.length;
-  card.querySelector('[data-remember="1"]').click(); await settle();
-  const answer = sentSince(before, 'claudeAnswer')[0];
-  assert(answer?.request === 'codex-3' && answer.answer.remember === true, `"for this session" sent ${JSON.stringify(answer)}`);
-  await ccPush({type: 'claudeStatus', status: ccStatus()}, {type: 'claudeCapabilities', capabilities: ccCaps});
-});
-const folderEvent = (folders, sessions = []) => ({type: 'claudeSessions', active: 's1', busy: [], waiting: ['f2'], engine: 'claude', folders, sessions});
-const chatRow = (id, title, extra = {}) => ({id, title, updated: Date.now(), cwd: '', elsewhere: false, engine: 'claude', ...extra});
-await test('Chats sit in folders: a folder folds, says what is waiting in it, and its menu renames or deletes it', async () => {
-  // Focus and the pane need the tab on screen.
-  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
-  const ws = $('.workspace[data-ws="chat"]');
-  await ccPush(folderEvent([
-    {id: 'F1', name: 'Research', collapsed: false, sessions: [chatRow('f1', 'Linear Programming'), chatRow('f2', 'Convex Optimization', {cwd: '/Users/you/Github'})]},
-    {id: 'F2', name: 'Empty', collapsed: false, sessions: []},
-  ], [chatRow('s1', 'Fix the build')]));
-  const research = ws.querySelector('[data-folder="F1"]');
-  assert(research.querySelector('.cc-folder-name').textContent === 'Research' && research.querySelector('.cc-folder-count').textContent === '2', 'the folder does not name itself and count its chats');
-  assert(research.querySelectorAll('.cc-session').length === 2 && !ws.querySelector('.cc-loose [data-claude-session="f1"]'), 'a chat in a folder is not drawn there, or is drawn twice');
-  assert(research.querySelector('[data-claude-session="f2"] .cc-session-where')?.textContent === 'Github', 'a chat from another folder does not say which');
-  assert(ws.querySelector('[data-folder="F2"] .cc-folder-empty'), 'an empty folder does not say how to fill it');
-  let before = win.commands.length;
-  research.querySelector('[data-folder-toggle]').click(); await settle();
-  assert(sentSince(before, 'chatFolderCollapse')[0]?.collapsed === true, 'folding was not kept');
-  const folded = ws.querySelector('[data-folder="F1"]');
-  assert(!folded.querySelector('.cc-session') && folded.querySelector('.cc-folder-head .cc-wait'), 'a folded folder shows its chats, or hides that one is waiting');
-  ws.querySelector('[data-folder-menu="F2"]').click(); await settle();
-  const menu = ws.querySelector('.cc-side-menu');
-  assert(!menu.hidden && menu.textContent.includes('Rename') && menu.textContent.includes('Delete folder'), 'the folder menu is wrong');
-  before = win.commands.length;
-  menu.querySelector('[data-folder-delete="F2"]').click(); await settle();
-  assert(sentSince(before, 'chatFolderDelete')[0]?.folder === 'F2' && menu.hidden, 'deleting did not ask the core');
-  ws.querySelector('[data-folder-menu="F1"]').click(); await settle();
-  ws.querySelector('.cc-side-menu [data-folder-rename="F1"]').click(); await settle();
-  const field = ws.querySelector('[data-folder-input="F1"]');
-  assert(field && doc.activeElement === field && field.selectionEnd - field.selectionStart === 'Research'.length, 'renaming does not put the name in a field, selected');
-  before = win.commands.length;
-  field.value = 'Optimisation'; field.dispatchEvent(new win.Event('input', {bubbles: true}));
-  field.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true})); await settle();
-  const renamed = sentSince(before, 'chatFolderRename')[0];
-  assert(renamed?.folder === 'F1' && renamed.name === 'Optimisation', `renaming sent ${JSON.stringify(renamed)}`);
-  assert(!sentSince(before, 'key').length && !sentSince(before, 'claudeStop').length, 'the name reached Vim or stopped the turn');
-});
-await test('A chat moves into a folder by its menu or by being dragged there, and a new folder is named in place', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  await ccPush(folderEvent([{id: 'F1', name: 'Research', collapsed: false, sessions: [chatRow('f1', 'Linear Programming')]}],
-    [chatRow('s1', 'Fix the build'), chatRow('s3', 'Port the parser')]));
-  ws.querySelector('[data-session-menu="s3"]').click(); await settle();
-  const menu = ws.querySelector('.cc-side-menu');
-  assert([...menu.querySelectorAll('[data-move-to]')].map((b) => b.textContent).join() === 'Research' && menu.querySelector('[data-new-folder-with="s3"]'), 'the chat menu does not offer the folders and a new one');
-  let before = win.commands.length;
-  menu.querySelector('[data-move-to="F1"]').click(); await settle();
-  let moved = sentSince(before, 'chatFolderMove')[0];
-  assert(moved?.session === 's3' && moved.folder === 'F1', `the menu moved ${JSON.stringify(moved)}`);
-  // Dragged onto the folder, and a folder's chat dragged back to the list.
-  const drag = async (row, onto) => {
-    const data = new win.DataTransfer();
-    row.dispatchEvent(new win.DragEvent('dragstart', {bubbles: true, cancelable: true, dataTransfer: data}));
-    const over = new win.DragEvent('dragover', {bubbles: true, cancelable: true, dataTransfer: data});
-    onto.dispatchEvent(over);
-    onto.dispatchEvent(new win.DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: data}));
-    row.dispatchEvent(new win.DragEvent('dragend', {bubbles: true, dataTransfer: data}));
-    await settle();
-    return over.defaultPrevented;
-  };
-  before = win.commands.length;
-  assert(await drag(ws.querySelector('[data-claude-session="s1"]'), ws.querySelector('[data-folder="F1"] .cc-folder-toggle')), 'a folder does not take a dragged chat');
-  moved = sentSince(before, 'chatFolderMove')[0];
-  assert(moved?.session === 's1' && moved.folder === 'F1', `dragging in moved ${JSON.stringify(moved)}`);
-  before = win.commands.length;
-  await drag(ws.querySelector('[data-claude-session="f1"]'), ws.querySelector('.cc-loose'));
-  moved = sentSince(before, 'chatFolderMove')[0];
-  assert(moved?.session === 'f1' && moved.folder === null, `dragging out moved ${JSON.stringify(moved)}`);
-  before = win.commands.length;
-  ws.querySelector('[data-claude-new-folder]').click(); await settle();
-  const asked = sentSince(before, 'chatFolderNew')[0];
-  assert(asked && asked.name === '' && asked.sessions.length === 0, `the new folder button sent ${JSON.stringify(asked)}`);
-  await ccPush(folderEvent([{id: 'F1', name: 'Research', collapsed: false, sessions: []}, {id: 'F9', name: 'New folder', collapsed: false, sessions: []}]));
-  const field = ws.querySelector('[data-folder-input="F9"]');
-  assert(field && doc.activeElement === field && field.value === 'New folder', 'a new folder is not waiting to be named');
-  field.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
-  assert(!ws.querySelector('[data-folder-input]'), 'Escape did not leave the name as it was');
-  await ccPush(folderEvent([], [chatRow('s1', 'Fix the build')]));
-});
-await test('A chat is deleted from its menu once you confirm, and one open in another Claude Code cannot be', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  await ccPush(folderEvent([], [chatRow('s1', 'Fix the build'), chatRow('old', 'Old experiment'), chatRow('live', 'Open elsewhere', {cwd: '/Users/you/Github', elsewhere: true})]));
-  ws.querySelector('[data-session-menu="old"]').click(); await settle();
-  const menu = ws.querySelector('.cc-side-menu');
-  let before = win.commands.length;
-  menu.querySelector('[data-delete-ask="old"]').click(); await settle();
-  assert(!sentSince(before, 'claudeDelete').length, 'it was deleted without asking');
-  assert(menu.textContent.includes('Delete “Old experiment”?') && menu.textContent.includes('Trash'), 'the question does not name the chat or say where it goes');
-  assert(doc.activeElement === menu.querySelector('[data-delete-cancel]'), 'Enter would delete rather than cancel');
-  menu.querySelector('[data-delete-cancel]').click(); await settle();
-  assert(menu.hidden && !sentSince(before, 'claudeDelete').length, 'cancelling deleted it');
-  ws.querySelector('[data-session-menu="old"]').click(); await settle();
-  ws.querySelector('.cc-side-menu [data-delete-ask="old"]').click(); await settle();
-  before = win.commands.length;
-  ws.querySelector('.cc-side-menu [data-delete-chat="old"]').click(); await settle();
-  assert(sentSince(before, 'claudeDelete')[0]?.session === 'old', 'confirming did not ask the core to delete it');
-  ws.querySelector('[data-session-menu="live"]').click(); await settle();
-  const offered = ws.querySelector('.cc-side-menu');
-  assert(!offered.querySelector('[data-delete-ask]') && offered.textContent.includes('Close it in the other Claude Code first'), 'a chat open elsewhere could be deleted');
-  offered.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
-  assert(offered.hidden, 'Escape did not close the menu');
-});
-await test('Each chat keeps its own artifacts pane, and one published while you were elsewhere is waiting', async () => {
-  const ws = $('.workspace[data-ws="chat"]');
-  const artifact = (id, session, seq = 1) => ({id, url: `https://claude.ai/artifact/${id}`, title: `Artifact ${id}`, icon: 'chart', description: '',
-    project: '/fixture', session, versions: Array.from({length: seq}, (_, i) => ({seq: i + 1, file: 'index.html', at: Date.now()}))});
-  const open = () => ws.dataset.rightOpen === 'true';
-  const shown = () => ws.dataset.artifact ?? null;
-  const visit = (session) => ccPush({type: 'claudeItems', session, items: [{kind: 'user', id: `u-${session}`, text: session, images: 0}], reset: true, earlier: false});
-  // Brought in as an import is, so neither counts as published while away.
-  await ccPush({type: 'artifacts', importing: true, artifacts: [artifact('A1', 'milp'), artifact('B1', 'cvx')]},
-    {type: 'artifacts', importing: false, artifacts: [artifact('A1', 'milp'), artifact('B1', 'cvx')]});
-  await visit('milp');
-  assert(!open(), 'a chat that never opened an artifact has its pane open');
-  await ccPush({type: 'claudeItems', session: 'milp', reset: false, earlier: false, items: [ccTool('pub', 'Artifact', {title: 'A'}, {
-    artifact: {id: 'A1', seq: 1, title: 'Artifact A1', url: 'https://claude.ai/artifact/A1', icon: 'chart', file: 'index.html'}})]});
-  assert(open() && shown() === 'A1', 'the MILP chat did not open its artifact');
-  await visit('cvx');
-  assert(!open() && shown() === null, 'the CVX chat inherited the MILP chat\'s pane');
-  ws.querySelector('[data-artifacts-toggle]').click(); await settle();
-  const gallery = ws.querySelector('[data-artifact-gallery-list]');
-  assert(gallery.querySelector('.cc-gallery-group')?.textContent === 'In this chat' && gallery.querySelector('.cc-gallery-row [data-claude-artifact="B1"]'), 'the list does not put this chat\'s artifacts first');
-  gallery.querySelector('[data-claude-artifact="B1"]').click(); await settle();
-  assert(open() && shown() === 'B1', 'the CVX chat did not open its own artifact');
-  await visit('milp');
-  assert(open() && shown() === 'A1', 'going back to the MILP chat did not bring back its artifact');
-  ws.querySelector('[data-artifact-close]').click(); await settle();
-  await visit('cvx');
-  assert(open() && shown() === 'B1', 'closing the MILP chat\'s pane closed the CVX chat\'s');
-  await visit('milp');
-  assert(!open(), 'the MILP chat forgot it had closed its pane');
-  // The MILP chat publishes a second version while the CVX chat is on screen.
-  await visit('cvx');
-  await ccPush({type: 'artifacts', importing: false, artifacts: [artifact('A1', 'milp', 2), artifact('B1', 'cvx')]});
-  assert(shown() === 'B1', 'another chat publishing changed this chat\'s pane');
-  await visit('milp');
-  assert(open() && shown() === 'A1' && ws.querySelector('[data-artifact-frame]').getAttribute('src').includes('/A1/2/'), 'what the MILP chat published while away was not waiting open');
-  await ccPush(ccItems([], true), {type: 'claudeStatus', status: ccStatus()});
-  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
-});
 await test('No browser runtime errors', () => {
   assert(win.testErrors.length === 0, win.testErrors.join('; '));
 });
@@ -1409,7 +980,7 @@ await test('Every mode asks for an opaque window in the theme\'s ground, and nev
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
   const before = asked().length;
-  for (const mode of ['chat', 'data', 'research', 'study', 'sheet', 'circuit', 'codex']) {
+  for (const mode of ['data', 'research', 'study', 'sheet', 'circuit', 'codex']) {
     await win.pushEvents([{type: 'modeChanged', mode}]);
   }
   const now = asked().slice(before);
@@ -1847,23 +1418,23 @@ await test('A notebook draws an SVG figure as a picture, whose scripts and style
   assert(win.getComputedStyle(ws).display !== 'none', 'the SVG\'s style reached the window');
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
 });
-await test('Research sits beside Data after Codex: ⌃4 opens it, in Codex\'s chrome and on an opaque ground', async () => {
+await test('Research sits beside Data after Codex: ⌃3 opens it, in Codex\'s chrome and on an opaque ground', async () => {
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
-  await win.dispatch({type: 'setMode', mode: 'chat'}); await settle();
+  await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
   const before = win.commands.length, opaque = asked().length;
   doc.body.focus();
-  key('4', {ctrlKey: true}); await settle();
-  assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'research'), '⌃4 did not ask for Research');
+  key('3', {ctrlKey: true}); await settle();
+  assert(win.commands.slice(before).some((c) => c.type === 'setMode' && c.mode === 'research'), '⌃3 did not ask for Research');
   assert($('.workspace.on')?.dataset.ws === 'research', 'Research is not on screen');
   assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.rail')) && !shown($('.statusline')), 'Research kept the old chrome');
   assert(!shown($('.titlebar [data-term-toggle]')), 'Research offers a terminal it cannot show');
   const tab = $('.titlebar [data-mode="research"]');
-  assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃4'), 'the title bar does not show Research');
+  assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃3'), 'the title bar does not show Research');
   // Codex, Data and Research side by side, in the title bar and on the rail.
   for (const list of ['.tb-modes', '.mode-rail']) {
     const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
-    assert(order === 'chat,codex,data,research,study,sheet,circuit,logic', `${list} is not in the new order: ${order}`);
+    assert(order === 'codex,data,research,study,sheet,circuit,logic', `${list} is not in the new order: ${order}`);
   }
   assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Research is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();

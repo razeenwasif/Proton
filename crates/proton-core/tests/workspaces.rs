@@ -407,15 +407,15 @@ fn a_project_opened_in_codex_is_not_carried_into_data() {
     assert_eq!(names.len(), 2, "{names:?}");
     assert_eq!(names[active], "beta");
 
-    // Every other mode keeps its own too: Chat has the session's first
+    // Every other mode keeps its own too: Logic has the session's first
     // folder, not Codex's latest, and Research its own.
-    mode(&mut session, ModeId::Chat);
-    assert_eq!(here(&session), "alpha", "Codex's latest was carried into Chat");
+    mode(&mut session, ModeId::Logic);
+    assert_eq!(here(&session), "alpha", "Codex's latest was carried into Logic");
     session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
     mode(&mut session, ModeId::Research);
-    assert_eq!(here(&session), "alpha", "Chat's project was carried into Research");
-    mode(&mut session, ModeId::Chat);
-    assert_eq!(here(&session), "beta", "Chat did not bring its own back");
+    assert_eq!(here(&session), "alpha", "Logic's project was carried into Research");
+    mode(&mut session, ModeId::Logic);
+    assert_eq!(here(&session), "beta", "Logic did not bring its own back");
 }
 
 #[test]
@@ -442,7 +442,7 @@ fn research_and_notebook_keep_projects_of_their_own() {
 
 #[test]
 fn a_mode_with_no_project_of_its_own_is_given_a_folder_of_its_own() {
-    // The app's session: Codex has what was open; Chat, the first time, has
+    // The app's session: Codex has what was open; Logic, the first time, has
     // a folder of its own, made then — not Codex's project.
     let scratch = Scratch::new("own-folder");
     let homes = scratch.root.join("homes");
@@ -450,21 +450,21 @@ fn a_mode_with_no_project_of_its_own_is_given_a_folder_of_its_own() {
     {
         let mut session = Session::restore_from(Some(store.clone()), Some(PathBuf::from(scratch.at("alpha"))), None).with_mode_homes(&homes);
         assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
-        let events = mode(&mut session, ModeId::Chat);
-        assert_eq!(session.active().root(), folder_of(&homes.join("Chat")), "Chat was not given its own folder");
-        assert_eq!(tabs(&events).unwrap().0, ["Chat".to_string()], "Codex's project is in Chat's switcher");
+        let events = mode(&mut session, ModeId::Logic);
+        assert_eq!(session.active().root(), folder_of(&homes.join("Logic")), "Logic was not given its own folder");
+        assert_eq!(tabs(&events).unwrap().0, ["Logic".to_string()], "Codex's project is in Logic's switcher");
         session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
         assert_eq!(here(&session), "beta");
         mode(&mut session, ModeId::Codex);
-        assert_eq!(here(&session), "alpha", "Codex lost its project to Chat");
+        assert_eq!(here(&session), "alpha", "Codex lost its project to Logic");
         mode(&mut session, ModeId::Study);
         assert!(session.active().root().ends_with("Notebook"), "Notebook has its own: {:?}", session.active().root());
     }
     // After a restart each mode still has its own.
     let mut session = Session::restore_from(Some(store), None, None).with_mode_homes(&homes);
     assert_eq!(here(&session), "alpha");
-    mode(&mut session, ModeId::Chat);
-    assert_eq!(here(&session), "beta", "Chat's project was not kept");
+    mode(&mut session, ModeId::Logic);
+    assert_eq!(here(&session), "beta", "Logic's project was not kept");
     mode(&mut session, ModeId::Study);
     assert!(session.active().root().ends_with("Notebook"));
 }
@@ -492,14 +492,14 @@ fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes
         mode(&mut session, data_side);
         assert_eq!(here(&session), "beta", "{data_side:?} lost Data's project");
     }
-    mode(&mut session, ModeId::Chat);
-    assert!(session.active().root().ends_with("Chat"), "Chat was given Codex's project: {:?}", session.active().root());
+    mode(&mut session, ModeId::Logic);
+    assert!(session.active().root().ends_with("Logic"), "Logic was given Codex's project: {:?}", session.active().root());
 }
 
 #[test]
 fn a_project_only_a_mode_that_left_listed_is_closed_not_given_to_codex() {
-    // A session from when Game and Diffuse were modes here: their folders
-    // are closed on the way in, out of every list — not handed to Codex.
+    // A session from when Game and Chat were modes here: their folders are
+    // closed on the way in, out of every list — not handed to Codex.
     let scratch = Scratch::new("left-modes");
     let homes = scratch.root.join("homes");
     let store = scratch.root.join("session.json");
@@ -507,25 +507,28 @@ fn a_project_only_a_mode_that_left_listed_is_closed_not_given_to_codex() {
     let beta = folder_of(Path::new(&scratch.at("beta"))).display().to_string();
     std::fs::create_dir_all(scratch.root.join("Game")).unwrap();
     let game = folder_of(&scratch.root.join("Game")).display().to_string();
+    std::fs::create_dir_all(scratch.root.join("Chat")).unwrap();
+    let chat = folder_of(&scratch.root.join("Chat")).display().to_string();
     std::fs::write(
         &store,
-        serde_json::json!({"version": 1, "open": [alpha, game, beta], "active": 0, "recents": [],
+        serde_json::json!({"version": 1, "open": [alpha, game, chat, beta], "active": 0, "recents": [],
                            "modes": [{"mode": "codex", "listed": [alpha], "shown": alpha},
                                      {"mode": "game", "listed": [game, beta], "shown": game},
+                                     {"mode": "chat", "listed": [chat], "shown": chat},
                                      {"mode": "data", "listed": [beta], "shown": beta}]})
         .to_string(),
     )
     .unwrap();
     let mut session = Session::restore_from(Some(store), None, None).with_mode_homes(&homes);
     let open: Vec<String> = session.workspaces().iter().map(|w| folder::name_of(w.root())).collect();
-    assert_eq!(open, ["alpha", "beta"], "Game's folder was kept open");
+    assert_eq!(open, ["alpha", "beta"], "a mode that left kept its folder open");
     assert_eq!(here(&session), "alpha");
     let events = session.apply(Command::Sync);
     assert_eq!(tabs(&events).unwrap().0, ["alpha".to_string()], "Codex was given Game's folder");
     // A project another mode lists stays — Data's, which Game listed too.
     mode(&mut session, ModeId::Data);
     assert_eq!(here(&session), "beta");
-    assert!(Path::new(&game).is_dir(), "the folder itself went");
+    assert!(Path::new(&game).is_dir() && Path::new(&chat).is_dir(), "the folder itself went");
 }
 
 /// A folder as the session roots it: its links followed.
@@ -660,7 +663,7 @@ fn the_prompt_says_which_modes_have_a_project_open() {
     let (_, labels, details) = picker(&events).unwrap();
     assert_eq!(labels[..2], ["beta".to_string(), "alpha".to_string()], "this mode's first");
     assert!(details[0].starts_with("open ·"), "{details:?}");
-    assert!(details[1].starts_with("open in Chat, Codex,") && !details[1].contains("Data"), "{details:?}");
+    assert!(details[1].starts_with("open in Codex,") && !details[1].contains("Data"), "{details:?}");
 }
 
 /* ── the agent's conversation ───────────────────────────────────── */

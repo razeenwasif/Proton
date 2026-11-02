@@ -1,10 +1,9 @@
-//! Chat mode's document: conversations on disk.
+//! The agent dock's threads: conversations on disk.
 //!
 //! `.proton/chats/*.json`, one file per conversation, beside the settings and
-//! the debug config. Chat was the only mode whose document did not exist —
-//! every other mode's is a file that diffs in Git, and a conversation that
-//! died with the process was the one exception to the rule the project is
-//! built on.
+//! the debug config. Every mode's document is a file that diffs in Git, and a
+//! conversation that died with the process would be the one exception to the
+//! rule the project is built on.
 //!
 //! ## The conversation is the document; the transcript is a view
 //!

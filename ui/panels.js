@@ -100,8 +100,8 @@ export function createPanels(root, changed) {
     defaultsOf.set(section, {
       '--col-l': parseFloat(section.style.getPropertyValue('--col-l')) || 232,
       '--col-r': parseFloat(section.style.getPropertyValue('--col-r')) || 280,
-      // A pane can start closed: Chat's artifacts pane opens on the first
-      // thing published rather than standing empty beside every session.
+      // A pane can start closed: Excel's opens on what is asked of it rather
+      // than standing empty beside every sheet.
       leftHidden: false, rightHidden: section.dataset.rightStart === 'hidden', preferred: 'left',
     });
     // Explicit columns keep hidden children from shifting their neighbours.

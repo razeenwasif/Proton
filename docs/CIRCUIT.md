@@ -9,8 +9,8 @@ build circuits too. Asked for on 2026-10-28.
 
 ## Decided (2026-10-28)
 
-- **The label is "Circuit"**, on the rail and the title bar, on **⌃7**, after
-  Excel's ⌃6. In the code it is `circuit`: `ModeId::Circuit`, the crate
+- **The label is "Circuit"**, on the rail and the title bar, on **⌃6**, after
+  Excel's ⌃5. In the code it is `circuit`: `ModeId::Circuit`, the crate
   `proton-circuit`, the core module `circuit`, `ui/circuit*.js`, commands
   `Circuit*` and events `circuit*`.
 - **A project is a folder of text that diffs**, `Name.circuit/`, which is

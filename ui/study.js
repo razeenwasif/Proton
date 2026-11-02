@@ -148,7 +148,7 @@ export function createStudy(host) {
    *   creating: boolean, made: number, moving: string | null, editing: boolean, pasting: false | "text" | "web" | "artifacts" | "folder", removing: string | null,
    *   getting: string[] | null, shown: Shown, back: "chat" | "overview" | "progress", want: string | null,
    *   progress: import("./study-progress.js").ProgressEvent | null, unpicked: Set<string>, hearing: string | null, readable: string | null, digest: string | null,
-   *   artifacts: ArtifactRow[] | null, picked: Set<string>,
+   *   artifacts: ArtifactRow[] | null, importing: boolean, picked: Set<string>,
    *   folded: Set<string>, naming: string | null, unnaming: string | null, filing: string | null,
    *   tabs: SourceEvent[], scrolls: Map<string, number>, topicsOpen: boolean}} */
   const state = {
@@ -190,6 +190,7 @@ export function createStudy(host) {
     digest: null,
     // The artifacts Proton keeps, once asked for, and those ticked to add.
     artifacts: null,
+    importing: false,
     picked: new Set(),
   };
 
@@ -486,7 +487,7 @@ export function createStudy(host) {
   function artifactsHtml() {
     const list = state.artifacts;
     const rows = !list ? `<p class="st-faint"><span class="lab-spin"></span> Looking…</p>`
-      : !list.length ? `<p class="st-faint">No artifacts are kept yet. What Claude publishes from the Chat tab is kept, and can be imported there from Claude.</p>`
+      : !list.length ? `<p class="st-faint">No artifacts are kept yet. Import brings in what Claude published from this machine.</p>`
         : list.map((a) => {
           const can = !a.source && Boolean(a.file);
           const when = a.at ? new Date(a.at).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
@@ -499,6 +500,7 @@ export function createStudy(host) {
         <h2>Add your artifacts</h2>
         <p class="st-faint">Pages Claude published, as Proton keeps them: each is read as its article, its formulas as TeX, and opens as itself in the reader.</p>
         <div class="st-artifact-list">${rows}</div>
+        <p class="st-artifact-import"><button type="button" class="st-link" data-study-artifacts-import${state.importing ? " disabled" : ""} title="Read Claude Code's sessions and the desktop app's records for what they published">${state.importing ? `<span class="lab-spin"></span> Importing…` : "Import from Claude"}</button></p>
         <div class="rs-actions"><button type="button" class="cc-quiet" data-study-paste-cancel>Cancel</button>
           <button type="submit" class="cc-primary"${picked ? "" : " disabled"}>Add ${picked || ""} as ${picked === 1 ? "a source" : "sources"}</button></div>
       </form>`;
@@ -1126,6 +1128,10 @@ export function createStudy(host) {
       state.picked = new Set();
       host.dispatch({ type: "studyArtifacts" });
       return renderStage();
+    }
+    if (at("[data-study-artifacts-import]")) {
+      host.dispatch({ type: "studyImportArtifacts" });
+      return;
     }
     if (at("[data-study-artifact-open]") && state.shown.kind === "source") {
       const source = state.shown.source;
@@ -1774,9 +1780,10 @@ export function createStudy(host) {
     render();
   }
 
-  /** The artifacts Proton keeps, for the list being shown. @param {{artifacts: ArtifactRow[]}} event */
+  /** The artifacts Proton keeps, for the list being shown. @param {{artifacts: ArtifactRow[], importing: boolean}} event */
   function artifactsEvent(event) {
     state.artifacts = event.artifacts;
+    state.importing = event.importing;
     if (state.pasting === "artifacts") redrawArtifacts();
   }
 

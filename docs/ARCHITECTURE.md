@@ -9,7 +9,6 @@ in this document retain historical decisions and measurements.
 
 | Mode | Implemented document and interaction | Remaining limitation |
 |---|---|---|
-| Chat | Claude Code's own sessions, and Codex, Gemini and Antigravity conversations, with permissions, artifacts beside the chat, and council debates | Each engine is its own CLI, signed in by the person |
 | Codex | Text buffers, modal editing, search, splits, LSP/DAP, Git, terminal | Language servers, debuggers, and trace backends are external tools |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views; an agent whose edits are proposed on the cells; unsaved changes kept | Execution requires a Jupyter kernel; no SQL cells, charts or lineage yet |
 | Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures, 3D scenes and molecules drawn in the Lab |
@@ -80,7 +79,7 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-syntax` | Tree-sitter parsing and highlights |
 | `proton-lsp` / `proton-dap` | Language-server / debug-adapter protocols and supervision |
 | `proton-vcs` / `proton-term` | Git state / pseudo-terminal and terminal screen |
-| `proton-agent` / `proton-council` | Model conversations and tools / multi-model debates |
+| `proton-agent` / `proton-council` | Model conversations and tools / multi-model debates, from the terminal |
 | `proton-claude` | Claude Code, Codex and Antigravity as engines: interactive, and unattended with structured answers |
 | `proton-research` | Investigations as files, and the co-scientist round as a pure state machine |
 | `proton-literature` | The literature's sources — arXiv, Semantic Scholar, OpenAlex, Crossref — each host asked no oftener than it asks, on a worker the core polls; open PDFs downloaded, capped and checked |
@@ -759,8 +758,8 @@ surfaced as per-hunk diffs. Nothing touches the user's tree until accepted.
 
 ### Research rounds
 
-Research drives Claude Code, Codex and Antigravity as Chat does — the same
-`proton-claude` conversations — but unattended: each agent task gets a fresh
+Research drives Claude Code, Codex and Antigravity through `proton-claude`'s
+conversations, unattended: each agent task gets a fresh
 conversation that reads and searches and changes nothing, brings none of the
 person's MCP servers, plugins or global instructions, is never asked
 anything, and gives its final answer whole, held to a JSON Schema. Nothing
@@ -1153,8 +1152,7 @@ pictures or links' addresses — made Markdown by pandoc with MathML and MathJax
 video as its English captions, read by yt-dlp without the video
 (`proton-library::formats::web`, `proton-core::study::web`). An **artifact**
 Claude published, as Proton keeps it, is a source too: the latest version's
-page read as its article, and opened as itself — sandboxed as the chat frames
-one — from the reader. A page KaTeX drew keeps no TeX, so its formulas are read
+page read as its article, and opened as itself, sandboxed, from the reader. A page KaTeX drew keeps no TeX, so its formulas are read
 back from the drawing: the glyphs in order, a script by whether it sits above
 or below, a fraction's parts by which is above, a root, a sum's limits, a
 table's cells by column and row, and the glyphs TeX names by their names
@@ -1463,9 +1461,8 @@ trait Mode {
 }
 ```
 
-That is the whole contract. Chat, Codex, Data, Research and Notebook are the
-five that ship; nothing about them is privileged, and Research and Notebook,
-the fourth and fifth, were extensions rather than forks.
+That is the whole contract. Nothing about the modes that ship is privileged,
+and Research and Notebook were extensions rather than forks.
 
 **It is built, in `proton-core::contract`, and it is a struct rather than a
 trait.** Every answer above is data: none of it needs to run, and a mode that
@@ -1477,8 +1474,6 @@ A `Slot` says *what* belongs in a position — the file tree, the editor, a
 notebook's cells — and never how to draw it, because the core still names no
 widget. A closed enum rather than a string, so a front end that has not
 implemented a slot fails to compile instead of rendering a blank rectangle.
-`Slot::Empty` is a real answer: Chat has no dock on purpose, and a mode with
-nothing for a slot should get the space back rather than an empty panel.
 
 The verb table is a question — `supports(action)` — because that is the only
 form of it anything has ever needed, and `ModeId::supports` now asks the
@@ -1500,7 +1495,6 @@ bearing rule of the entire project:
 
 | Mode | Document |
 |---|---|
-| Chat | `.proton/chats/*.json` — messages, tool calls, artifact refs |
 | Codex | Source files |
 | Data | `.ipynb` + `.sql` |
 | Research | `research/<slug>/` — Markdown with TOML front matter, `tournament.jsonl`; papers as `literature/P003.md`, their PDFs beside them and out of Git |

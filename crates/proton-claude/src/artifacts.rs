@@ -5,9 +5,8 @@
 //! this is. The page itself is a file on this machine, and files change —
 //! the next draft overwrites the last — so at the moment it is published
 //! Proton copies it, with any files it brought along, into a folder of its
-//! own. That copy is what the pane beside the chat shows: the version that
-//! was published, offline, with no sign-in, and next to the conversation
-//! that made it.
+//! own. That copy is what a notebook reads and shows: the version that was
+//! published, offline, with no sign-in.
 //!
 //! The copies live under the user's data directory rather than in a project,
 //! because claude.ai keeps one gallery per person, not per folder.
@@ -47,7 +46,6 @@ frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'";
 
 /// One published version.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/", rename = "ArtifactVersion")]
 pub struct Version {
     /// claude.ai's count: 1, 2, 3…
     pub seq: u32,
@@ -60,7 +58,6 @@ pub struct Version {
 
 /// An artifact and every version of it this machine has published.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/")]
 pub struct Artifact {
     /// claude.ai's id for it, a UUID.
     pub id: String,

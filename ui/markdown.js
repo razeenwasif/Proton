@@ -1,4 +1,4 @@
-/* Markdown, as Claude writes it: what a reply in the Chat tab is drawn from.
+/* Markdown, as Claude writes it: what an answer is drawn from.
  *
  * Escaped first and always. The text is the model's, and the page it is drawn
  * into can reach the editor — so nothing in it is ever HTML. Every construct

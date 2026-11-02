@@ -28,7 +28,6 @@ import { createEditorFeedback } from "./editor-feedback.js";
 import { createEditorState, createEditorPaints } from "./editor-state.js";
 import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
-import { createClaude } from "./claude.js";
 import { createResearch } from "./research.js";
 import { createStudy } from "./study.js";
 import { createSheet } from "./sheet.js";
@@ -352,7 +351,6 @@ document.addEventListener("toggle", (e) => {
 
 // In an answer or a notebook's prose, a code block's button copies the code,
 // and a link opens in the browser rather than in the editor's own window.
-// (Chat's answers have the same two, handled in claude.js.)
 document.addEventListener("click", (e) => {
   if (!e.target.closest?.("[data-agent-thread], [data-cells]")) return;
   const undo = e.target.closest("[data-agent-undo]");
@@ -504,7 +502,7 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["chat", "codex", "data", "research", "study", "sheet", "circuit", "logic"];
+const MODES = ["codex", "data", "research", "study", "sheet", "circuit", "logic"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -890,16 +888,6 @@ const displaySettings = createDisplaySettings(document, keep, () => {
     if (editsText()) $$(".workspace.on [data-editor]").forEach((pane) => renderEditor(Number(pane.dataset.view)));
     panels.refresh();
   });
-});
-
-/* Chat: Claude Code. The module draws what the core sends; the council it
-   hands back here, because the council is Proton's, not Claude Code's. */
-const claude = createClaude({
-  root: document,
-  dispatch,
-  panels,
-  shell: HAS_SHELL,
-  convene: (question) => dispatch({ type: "convene", question }),
 });
 
 /* Research: the project's investigations. Drawn from what the core reads
@@ -2302,7 +2290,7 @@ const TERM_WHEEL_ROWS = 3;
 // exactly the rows the core sent, so there is nothing here for the browser to
 // scroll — without this the wheel does nothing at all. On the screen alone:
 // a listener that may cancel the wheel, on the document, sends every scroll
-// in the window — the editor's, a PDF's, the chat's — through this thread.
+// in the window — the editor's, a PDF's, the tutor's — through this thread.
 $("[data-term-screen]")?.addEventListener(
   "wheel",
   (e) => {
@@ -2325,8 +2313,6 @@ $("[data-term-screen]")?.addEventListener(
 function renderLayout(layout) {
   document.documentElement.dataset.stage = layout.stage;
   document.documentElement.dataset.document = layout.document;
-  // A mode with nothing for its dock gets the space back rather than an
-  // empty panel — Chat is the one that means it.
   const workspace = $(`.workspace[data-ws="${wsOf(layout.mode)}"]`);
   if (workspace) workspace.dataset.dock = layout.dock;
   panels.refresh();
@@ -2652,7 +2638,6 @@ function renderWorkspaces(items, active) {
   $("#sl-project").textContent = current?.name ?? "No workspace";
   $("#sl-project").title = current?.path ?? "";
   projectRoot = current?.path ?? "";
-  claude?.setRoot(projectRoot);
   renderBufferBars();
   // Every rail that lists them: the chrome rail's, and Codex's title bar.
   const html = items
@@ -3362,25 +3347,8 @@ function renderEvent(event) {
       selectCell(event.index);
       break;
 
-    case "claudeSessions":
-      claude?.sessions(event);
-      break;
-
-    case "claudeItems":
-      claude?.items(event);
-      break;
-
-    case "claudeStatus":
-      claude?.status(event.status);
-      break;
-
     case "claudeCapabilities":
-      claude?.capabilities(event.capabilities);
       study?.capabilities(event.capabilities);
-      break;
-
-    case "artifacts":
-      claude?.artifacts(event);
       break;
 
     case "researchList":
@@ -3616,10 +3584,6 @@ function renderEvent(event) {
 
     case "library":
       renderLibrary(event);
-      break;
-
-    case "council":
-      renderCouncil(event);
       break;
 
     case "layout":
@@ -3864,7 +3828,7 @@ document.addEventListener("keydown", (e) => {
   // below (⌃-prefixed commands are exactly what a Vim keymap is made of,
   // and on macOS ⌃K in particular already means "kill to end of line"
   // everywhere else on the system).
-  if (e.ctrlKey && /^[1-8]$/.test(e.key)) {
+  if (e.ctrlKey && /^[1-7]$/.test(e.key)) {
     e.preventDefault();
     coreSetMode(MODES[Number(e.key) - 1]);
     return;
@@ -4248,83 +4212,6 @@ Object.assign(window, {
   logicDebug: () => logic?.debug(),
 });
 
-/* ── the council ───────────────────────────────────
-   A debate is a question put to every model with a subscription: each
-   answers alone, then having read the others, then one writes the brief.
-   It takes about two minutes and spends three subscriptions, so the rounds
-   are drawn as they land rather than behind a spinner. */
-
-function renderCouncil(event) {
-  const list = $("[data-council-list]");
-  if (list) {
-    const running = event.running
-      ? `<div class="row council on"><span class="ic spin"><svg class="i"><use href="#i-users"/></svg></span>` +
-        `<span class="chat-name">${escapeHtml(event.running)}</span>` +
-        `<span class="chat-when">${
-          event.round === 3 ? "writing the brief" : `round ${event.round}`
-        }</span></div>`
-      : "";
-    const past = event.held
-      .map(
-        (one) =>
-          `<div class="row council${one.name === event.showing ? " sel" : ""}" data-debate="${escapeHtml(one.name)}">` +
-          `<span class="chat-name">${escapeHtml(one.question)}</span>` +
-          `<span class="chat-when">${one.finished ? "brief" : "no brief"}</span></div>`,
-      )
-      .join("");
-    list.innerHTML =
-      running + past ||
-      `<div class="empty-note">No debates yet. Type a question and press Convene.</div>`;
-  }
-
-  // The stage shows a debate when there is one to show, and the conversation
-  // otherwise — one place to look rather than two panes competing.
-  const view = $("[data-council-view]");
-  const thread = $("[data-claude-thread]");
-  if (!view || !thread) return;
-  const showing = Boolean(event.running || event.brief || event.problem);
-  view.hidden = !showing;
-  thread.hidden = showing;
-  if (!showing) return;
-
-  const problem = event.problem
-    ? `<p class="council-problem">${escapeHtml(event.problem)}</p>`
-    : "";
-  // Progress is a list of what each member did, so a member that failed is as
-  // visible as one that answered — a round that quietly loses a voice
-  // reads as agreement.
-  const progress = event.progress.length
-    ? `<ul class="council-progress">${event.progress
-        .map((line) => `<li>${escapeHtml(line)}</li>`)
-        .join("")}</ul>`
-    : "";
-  const heading = event.running
-    ? `<div class="council-head">${escapeHtml(event.running)}<span class="chip spin-chip">${
-        event.round === 3 ? "writing the brief" : `round ${event.round} of 2`
-      }</span></div>`
-    : "";
-
-  view.innerHTML = heading + problem + progress + proseHtml(event.brief);
-}
-
-/* Convene, from the button or the side pane's +. The question is whatever is
-   in the composer, because that is where a question already is. */
-document.addEventListener("click", (e) => {
-  if (e.target.closest?.("[data-council-new]")) {
-    const question = (claude?.question() ?? "").replace(/^\/council\s+/, "").trim();
-    if (!question) {
-      flashMessage?.("Type the question in the composer, then press the council button.");
-      claude?.focus();
-      return;
-    }
-    dispatch({ type: "convene", question });
-    claude?.clearQuestion();
-    return;
-  }
-  const row = e.target.closest?.("[data-debate]");
-  if (row) dispatch({ type: "openDebate", name: row.dataset.debate });
-});
-
 /* ── the agent ────────────────────────────────────────────────────────
    The core owns the conversation; this draws it. The whole transcript
    arrives on every change rather than as deltas — a turn is at most a few
@@ -4404,7 +4291,7 @@ function toolHtml(call) {
 
 
 /** Minimal inline markup: backticks, citations and paragraphs — for what you
- *  wrote, and for the council's brief. An answer is markdown (`answerHtml`).
+ *  wrote. An answer is markdown (`answerHtml`).
  *
  *  A citation is `[[path § heading L12-34]]`, which is what `search_library`
  *  hands the model and what it is asked to quote back. The brackets are worth
@@ -4431,7 +4318,7 @@ function proseHtml(text) {
 
 /** An answer as the agent wrote it: markdown, its code coloured the way the
  *  editor colours code and its TeX drawn as equations, with citations kept.
- *  The same renderer as the Chat tab's, so an answer reads alike in both. */
+ *  The same renderer as the tutor's, so an answer reads alike in both. */
 function answerHtml(text, streaming) {
   return text.trim() ? `<div class="md">${markdown(text, {streaming, cite: true})}</div>` : "";
 }
@@ -4984,9 +4871,9 @@ function renderAgent(event) {
 
 /** Every copy of the conversation on screen, as it now is. */
 const agentFrame = framePainter(() => {
-  // Every thread: Codex's dock and Chat's stage show the same conversation,
-  // and one of them is always off screen. Painting only the visible one would
-  // leave the other showing whatever it had when it was last looked at.
+  // Every thread, in every dock that shows the conversation: painting only
+  // the visible one would leave another showing whatever it had when it was
+  // last looked at.
   // Entry by entry: what has not changed is not drawn again — while a turn
   // streams, only its last entry grows.
   const transcript = agentTranscript;
@@ -5056,7 +4943,7 @@ function paintAgent(event) {
   for (const send of $$("[data-agent-send]")) {
     send.classList.toggle("stop", event.activity !== "idle");
     send.setAttribute("aria-label", event.activity === "idle" ? "Send" : "Stop");
-    // Codex's composer sends with Zed's paper plane; Chat keeps its arrow.
+    // Codex's composer sends with Zed's paper plane.
     const idle = send.closest("#codex-dock") ? "send" : "arrow-up";
     send.innerHTML = `<svg class="i"><use href="#i-${
       event.activity === "idle" ? idle : "stop"
@@ -5106,11 +4993,11 @@ document.addEventListener("click", (e) => {
   chip.classList.toggle("on", !has);
 });
 
-/* There is more than one composer — Codex has one in its dock and Chat has
-   one as its whole stage — and they are the same conversation seen twice. So
-   everything here works from the composer the event came from rather than
-   from the first one in the document, which would send Chat's question from
-   Codex's empty box. */
+/* There is more than one composer — every mode with the agent in its dock has
+   one — and they are the same conversation seen more than once. So everything
+   here works from the composer the event came from rather than from the first
+   one in the document, which would send another dock's question from Codex's
+   empty box. */
 
 function askAgent(from) {
   const input = from?.querySelector("[data-agent-input]") ?? $("[data-agent-input]");
@@ -5132,7 +5019,7 @@ document.addEventListener("click", (e) => {
 
 // Enter sends, Shift-Enter makes a newline. The composer is not the buffer, so
 // these keys never reach the modal engine. Delegated rather than bound to one
-// input, because Chat's composer does not exist when this file is read.
+// input, because a dock's composer may not exist when this file is read.
 document.addEventListener("keydown", (e) => {
   const input = e.target.closest?.("[data-agent-input]");
   if (!input) return;

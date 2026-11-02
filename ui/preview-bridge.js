@@ -1,7 +1,6 @@
 /* Legacy browser-only fixtures. The native bridge never loads this module.
  * Its public boundary is described in preview-bridge.d.ts; the fixture
  * implementation remains outside the incremental strict-check boundary. */
-import {createClaudePreview} from './preview-claude.js';
 import {createResearchPreview} from './preview-research.js';
 import {createStudyPreview} from './preview-study.js';
 import {createSheetPreview} from './preview-sheet.js';
@@ -10,7 +9,6 @@ import {createLogicPreview} from './preview-logic.js';
 
 export function createPreview(deliver) {
   let send;
-  const claude = createClaudePreview(deliver);
   const research = createResearchPreview(deliver);
   const study = createStudyPreview(deliver);
   const sheet = createSheetPreview(deliver);
@@ -128,7 +126,7 @@ export function createPreview(deliver) {
      Starts empty on purpose: the panels have to render correctly when nothing
      has been chosen, which is every first run. */
   const settings = {};
-  /* Conversations, so Chat has a list to click without a core behind it.
+  /* Conversations, so the dock has a list to click without a core behind it.
      Two of them, one from each provider, because the row shows which. */
   const chats = {
     current: ".proton/chats/why-the-grid-janks.json",
@@ -394,16 +392,12 @@ export function createPreview(deliver) {
         notebookEvent(),
         settingsEvent(),
         chatsEvent(),
-        ...claude.sync(),
         ...research.sync(),
         ...study.sync(),
         ...sheet.sync(),
         ...circuit.sync(),
         ...logic.sync(),
       ];
-    }
-    if (command.type.startsWith("claude") || command.type.startsWith("chatFolder") || command.type === "forgetArtifact" || command.type === "openLink") {
-      return claude.command(command);
     }
     if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
     if (command.type.startsWith("study")) return study.command(command);

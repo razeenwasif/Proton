@@ -1,5 +1,5 @@
-//! Claude Code — and Codex, Gemini and Antigravity beside it — in Proton's
-//! Chat tab.
+//! Claude Code — and Codex, Gemini and Antigravity beside it — as the engines
+//! Research and Notebook run on.
 //!
 //! Not a harness written to resemble Claude Code: Claude Code itself. The
 //! `claude` command already is the harness — its tools, its permission rules,
@@ -21,13 +21,13 @@
 //!   them — started here, in a terminal or in the desktop app — can be picked
 //!   up again.
 //! - [`artifacts`] keeps what the Artifact tool publishes, a version at a time,
-//!   so it can be shown beside the chat without a round trip to claude.ai.
+//!   so a notebook can read and show it without a round trip to claude.ai.
 //! - [`import`] finds what was published before Proton was keeping it: in
 //!   the desktop app's records and in every session's own file.
 //!
 //! The other engines are each the real CLI, driven over the protocol it
-//! offers a host and folded into the same rows — so one transcript, one set
-//! of questions and one composer serve all four:
+//! offers a host and folded into the same rows — so one transcript and one
+//! set of questions serve all four:
 //!
 //! - [`engine`] names them and says what any conversation can be asked to
 //!   do; [`pipe`] and [`rpc`] are the plumbing they share.
@@ -36,8 +36,6 @@
 //! - [`patch`] turns what each says about an edit into the hunks Claude
 //!   Code's edits are drawn with, and [`saved`] keeps the conversations
 //!   whose own files Proton does not read.
-//! - [`folders`] keeps the folders conversations are grouped into, across
-//!   every project and engine.
 //!
 //! Nothing here blocks the caller, and nothing here knows what Proton looks
 //! like.
@@ -48,7 +46,6 @@ pub mod chat;
 pub mod codex;
 pub mod engine;
 pub mod fold;
-pub mod folders;
 pub mod gemini;
 pub mod history;
 pub mod import;

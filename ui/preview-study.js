@@ -390,7 +390,7 @@ export function createStudyPreview(deliver) {
     { id: "9c3b7e21-4d8a-4f6b-a1e2-7b5c0d9e8f14", title: "Telemetry glossary", description: "Terms, defined", icon: "book", seq: 1, at: Date.now() - 3 * 86400000, file: "index.html" },
     { id: "0b7e5a10-1c2d-4e3f-8a9b-0c1d2e3f4a5b", title: "Published elsewhere", description: "", icon: "", seq: 2, at: Date.now() - 9 * 86400000, file: "" },
   ];
-  const artifactsEvent = () => ({ type: "studyArtifacts", artifacts: ARTIFACTS.map((a) => ({ ...a,
+  const artifactsEvent = () => ({ type: "studyArtifacts", importing: false, artifacts: ARTIFACTS.map((a) => ({ ...a,
     source: (state.sources[state.open ?? ""] ?? []).find((s) => s.origin.from === "artifact" && s.origin.id === a.id)?.id ?? null })) });
 
   /** Sources' guides, by id, once asked for. @type {Record<string, any>} */
@@ -537,6 +537,8 @@ export function createStudyPreview(deliver) {
         }
         case "studyArtifacts":
           return [artifactsEvent()];
+        case "studyImportArtifacts":
+          return [artifactsEvent(), { type: "notice", level: "info", text: "No artifacts to import: every one published from this machine is already here." }];
         case "studyAddArtifacts": {
           const slug = state.open ?? "";
           for (const id of command.ids) {

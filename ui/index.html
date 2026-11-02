@@ -194,7 +194,6 @@
       <div class="rail-sep" aria-hidden="true"></div>
 
       <div class="mode-rail" role="tablist" aria-label="Mode">
-      <button class="mode" role="tab" aria-selected="false" data-mode="chat"><svg class="i"><use href="#i-chat"/></svg><span>Chat</span></button>
       <button class="mode" role="tab" aria-selected="true"  data-mode="codex"><svg class="i"><use href="#i-code"/></svg><span>Codex</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="data"><svg class="i"><use href="#i-chart"/></svg><span>Data</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="research"><svg class="i"><use href="#i-flask"/></svg><span>Research</span></button>
@@ -214,7 +213,6 @@
     </nav>
 
     <nav class="rail" aria-label="Panels">
-      <button title="Chat  ⌃1" data-mode-go="chat"><svg class="i"><use href="#i-chat"/></svg></button>
       <button class="on" data-panel-toggle="left" title="Hide sidebar" aria-label="Hide sidebar" aria-expanded="true"><svg class="i"><use href="#i-files"/></svg></button>
       <button data-panel-toggle="right" title="Hide right panel" aria-label="Hide right panel" aria-expanded="true"><svg class="i"><use href="#i-sliders"/></svg></button>
       <button title="Telescope  ␣ff" data-open="telescope"><svg class="i"><use href="#i-search"/></svg></button>
@@ -226,116 +224,6 @@
       <button title="Docs"><svg class="i"><use href="#i-book"/></svg></button>
       <button title="Settings" data-open="settings"><svg class="i"><use href="#i-gear"/></svg></button>
     </nav>
-
-    <!-- ══ CHAT ══════════════════════════════════════════════════ -->
-    <!-- Claude Code, as its own app draws it: sessions down the left, the
-         conversation in a column, and what it publishes in a pane on the
-         right. The engine is the real `claude` (proton-claude); this is the
-         window onto it. The artifacts pane starts closed and opens on the
-         first thing published. -->
-    <section class="workspace cc" data-ws="chat" data-right-start="hidden"
-             style="--col-l:264px; --col-r:480px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
-      <aside class="pane side cc-side">
-        <div class="cc-side-head">
-          <button class="cc-new" data-claude-new title="New session"><svg class="i"><use href="#i-plus"/></svg>New session</button>
-          <button class="cc-new-folder" data-claude-new-folder title="New folder" aria-label="New folder"><svg class="i"><use href="#i-folder"/></svg></button>
-        </div>
-        <!-- From Event::ClaudeSessions: your folders, then the sessions Claude
-             Code keeps for this folder — started here, in a terminal or in its
-             own app — and the other engines' conversations, newest first. -->
-        <div class="scroll cc-sessions" data-claude-sessions></div>
-
-        <!-- The council: one question put to every model with a
-             subscription, answered as a brief. `/council` in the composer
-             convenes it. -->
-        <div class="cc-council">
-          <header>Council <span class="grow"></span>
-            <button class="hbtn" data-council-new title="Put the question in the composer to the council"><svg class="i"><use href="#i-users"/></svg></button>
-          </header>
-          <div class="scroll tree" data-council-list></div>
-        </div>
-        <div class="cc-account-box" data-claude-account></div>
-      </aside>
-
-      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
-
-      <main class="pane cc-main">
-        <header class="cc-head">
-          <div class="cc-title" data-claude-title>New session</div>
-          <span class="grow"></span>
-          <button class="hbtn cc-art-toggle" data-artifacts-toggle title="Artifacts"><svg class="i"><use href="#i-layers"/></svg><span class="cc-count" data-artifacts-count hidden></span></button>
-        </header>
-
-        <div class="scroll cc-thread" data-claude-thread>
-          <div class="cc-col">
-            <div class="cc-welcome" data-claude-welcome>
-              <div class="cc-welcome-star">✻</div>
-              <h2 data-claude-welcome-title>What should Claude work on?</h2>
-              <p data-claude-welcome-text>Claude Code, in this project. It reads, edits and runs things here, asks before anything you have not allowed, and what it publishes opens beside the chat.</p>
-            </div>
-            <div class="cc-earlier" data-claude-earlier hidden>Earlier messages in this session are not shown.</div>
-            <div class="cc-items" data-claude-items></div>
-            <div class="cc-working" data-claude-working hidden></div>
-          </div>
-        </div>
-
-        <!-- Shown instead of the conversation while a debate is on screen. -->
-        <div class="scroll cc-council-view" data-council-view hidden></div>
-
-        <div class="cc-dock">
-          <div class="cc-tasks" data-claude-tasks hidden></div>
-          <div class="cc-composer">
-            <div class="cc-menu" data-claude-menu hidden></div>
-            <div class="cc-attachments" data-claude-attachments hidden></div>
-            <textarea class="cc-input" data-claude-input rows="1" spellcheck="true" aria-label="Message Claude"
-                      placeholder="Ask Claude to build, fix or explain something…"></textarea>
-            <div class="cc-foot">
-              <button class="cc-pill icon" data-claude-attach title="Attach an image"><svg class="i"><use href="#i-plus"/></svg></button>
-              <button class="cc-pill" data-claude-engine data-pop="engine" title="Which agent answers"></button>
-              <button class="cc-pill" data-claude-mode data-pop="mode" title="Permissions  ⇧⇥"></button>
-              <span class="grow"></span>
-              <span class="cc-meter" data-claude-meter></span>
-              <button class="cc-pill" data-claude-model data-pop="model" title="Model and effort"></button>
-              <button class="cc-send" data-claude-send title="Send  ⏎" aria-label="Send" disabled><svg class="i"><use href="#i-arrow-up"/></svg></button>
-            </div>
-            <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden data-claude-file>
-          </div>
-        </div>
-        <div class="cc-pop" data-claude-pop hidden></div>
-      </main>
-
-      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
-
-      <!-- What Claude publishes with its Artifact tool, kept here a version at
-           a time and served from artifact://, a scheme of its own: the page
-           runs in a sandbox with an origin that is not the editor's, under a
-           policy that lets it load what claude.ai lets it load and reach
-           nothing of Proton's. -->
-      <aside class="pane cc-artifacts" data-claude-artifacts>
-        <header class="cc-art-head">
-          <span class="cc-art-icon" data-artifact-icon><svg class="i"><use href="#i-layers"/></svg></span>
-          <div class="cc-art-title" data-artifact-title>Artifacts</div>
-          <select class="cc-art-version" data-artifact-version hidden aria-label="Version"></select>
-          <span class="grow"></span>
-          <button class="hbtn" data-artifact-reload title="Reload"><svg class="i"><use href="#i-redo"/></svg></button>
-          <button class="hbtn" data-artifact-open title="Open on claude.ai"><svg class="i"><use href="#i-ext"/></svg></button>
-          <button class="hbtn" data-artifact-gallery title="All artifacts"><svg class="i"><use href="#i-grid"/></svg></button>
-          <button class="hbtn" data-artifact-close title="Close"><svg class="i"><use href="#i-close"/></svg></button>
-        </header>
-        <div class="cc-art-body">
-          <iframe class="cc-art-frame" data-artifact-frame hidden title="Artifact"
-                  sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"
-                  allow="fullscreen; picture-in-picture; autoplay" allowfullscreen
-                  referrerpolicy="no-referrer"></iframe>
-          <div class="scroll cc-art-doc" data-artifact-doc hidden></div>
-          <div class="cc-art-empty" data-artifact-empty>
-            <p>Nothing is open. Artifacts Claude publishes open here, and every one it has published is in the list.</p>
-            <button class="cc-secondary" data-artifact-gallery>Show artifacts</button>
-          </div>
-          <div class="scroll cc-gallery" data-artifact-gallery-list hidden></div>
-        </div>
-      </aside>
-    </section>
 
     <!-- ══ CODEX ═════════════════════════════════════════════════ -->
     <section class="workspace on" data-ws="codex" style="--col-l:200px; --col-r:330px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
@@ -423,7 +311,6 @@
           <span class="dock-title" data-dock-title>New Thread</span>
           <button class="hbtn" data-chat-new data-dock-only="agent" title="New thread" aria-label="New thread"><svg class="i"><use href="#i-plus"/></svg></button>
           <button class="hbtn" data-chat-history data-dock-only="agent" title="Past threads" aria-label="Past threads" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-clock"/></svg></button>
-          <button class="hbtn" data-mode-go="chat" data-dock-only="agent" title="Claude Code, in the Chat tab" aria-label="Open in Chat"><svg class="i"><use href="#i-expand"/></svg></button>
           <button class="hbtn" data-dock-menu title="Panels" aria-label="Panels" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-dots"/></svg><span class="dot" data-task-dot hidden></span></button>
           <!-- This project's threads, newest first: each is a file in
                .proton/chats/, and the one open comes back after a restart. -->
@@ -672,7 +559,7 @@
          reviewed by the others, ranked by a tournament judged blind, evolved
          — with the Lab to run what is worth running. Each is a folder under
          the project's research/, and this draws what the core reads from it
-         (ui/research.js). Drawn as Chat is: Codex's ground and type. -->
+         (ui/research.js). Codex's ground and type. -->
     <section class="workspace cc rs" data-ws="research"
              style="--col-l:240px; --col-r:320px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side cc-side rs-side">
@@ -1158,14 +1045,13 @@
     <div class="tb-projects" role="tablist" aria-label="Project" aria-orientation="vertical" data-workspaces></div>
     <button class="tb-btn" data-open-workspace title="Open a folder  ⌘O · ␣fp · :cd" aria-label="Open a folder"><svg class="i"><use href="#i-plus"/></svg></button>
     <div class="tb-modes" role="tablist" aria-label="Mode" aria-orientation="vertical">
-      <button class="mode" role="tab" aria-selected="false" data-mode="chat" title="Chat  ⌃1"><span>Chat</span></button>
-      <button class="mode" role="tab" aria-selected="true"  data-mode="codex" title="Codex  ⌃2"><span>Codex</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="data" title="Data  ⌃3"><span>Data</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="research" title="Research  ⌃4"><span>Research</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="study" title="Notebook  ⌃5"><span>Notebook</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="sheet" title="Excel  ⌃6"><span>Excel</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="circuit" title="Circuit  ⌃7"><span>Circuit</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="logic" title="Logic  ⌃8"><span>Logic</span></button>
+      <button class="mode" role="tab" aria-selected="true"  data-mode="codex" title="Codex  ⌃1"><span>Codex</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="data" title="Data  ⌃2"><span>Data</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="research" title="Research  ⌃3"><span>Research</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="study" title="Notebook  ⌃4"><span>Notebook</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="sheet" title="Excel  ⌃5"><span>Excel</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="circuit" title="Circuit  ⌃6"><span>Circuit</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="logic" title="Logic  ⌃7"><span>Logic</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">
@@ -1465,7 +1351,7 @@
   <button class="hint-toggle" title="Keyboard hints"><svg class="i"><use href="#i-keyboard"/></svg></button>
   <div class="hint-keys">
   <span>Try</span>
-  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃5</kbd><span style="color:var(--ink-3)">modes</span>
+  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃7</kbd><span style="color:var(--ink-3)">modes</span>
   <kbd>␣</kbd><span style="color:var(--ink-3)">leader</span>
   <kbd>⌘K</kbd><span style="color:var(--ink-3)">telescope</span>
   <kbd>:</kbd><span style="color:var(--ink-3)">cmd</span>

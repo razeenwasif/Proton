@@ -1,4 +1,4 @@
-//! The real `claude`, driven the way the Chat tab drives it.
+//! The real `claude`, driven as a person's conversation is.
 //!
 //! Ignored by default: each run is a few short turns on Haiku against the
 //! signed-in account. Run with

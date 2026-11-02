@@ -26,7 +26,6 @@ use crate::fold::title_of;
 
 /// One session, as the list shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../ui/bindings/", rename = "ClaudeSession")]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     pub id: String,
@@ -156,39 +155,6 @@ pub fn summary(cwd: &Path, id: &str, titles: &mut Titles) -> Option<SessionSumma
     Some(SessionSummary { id: id.to_string(), title, updated, cwd: String::new(), elsewhere: false, engine: crate::engine::Engine::Claude })
 }
 
-/// What a session is on disk: its transcript, and the folder beside it
-/// where Claude Code keeps what its subagents and its longest tool results
-/// wrote. Never anything else of the project's — not its memory.
-pub fn session_files(cwd: &Path, id: &str) -> Vec<PathBuf> {
-    files_in(&project_dirs(cwd), id)
-}
-
-/// A session's files, among some of Claude Code's project folders.
-fn files_in(dirs: &[PathBuf], id: &str) -> Vec<PathBuf> {
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return Vec::new();
-    }
-    let Some(transcript) = dirs.iter().map(|dir| dir.join(format!("{id}.jsonl"))).find(|path| path.is_file()) else {
-        return Vec::new();
-    };
-    let beside = transcript.with_extension("");
-    let mut files = vec![transcript];
-    if beside.is_dir() && beside.file_name().and_then(|n| n.to_str()) == Some(id) {
-        files.push(beside);
-    }
-    files
-}
-
-/// Move a session to the Trash. `false` if there was nothing to move.
-pub fn trash(cwd: &Path, id: &str) -> Result<bool, String> {
-    let files = session_files(cwd, id);
-    if files.is_empty() {
-        return Ok(false);
-    }
-    trash::delete_all(&files).map_err(|e| format!("Could not move the conversation to the Trash: {e}"))?;
-    Ok(true)
-}
-
 /// The file a session is in.
 pub fn file(root: &Path, id: &str) -> Option<PathBuf> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
@@ -276,102 +242,6 @@ fn prompt(value: &Value) -> Option<String> {
         return None;
     }
     Some(text.to_string())
-}
-
-/// A Claude Code session the desktop app keeps a record of: its title, the
-/// folder it runs in, and when it was last used.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DesktopSession {
-    pub id: String,
-    pub title: String,
-    pub cwd: PathBuf,
-    pub updated: u64,
-    pub archived: bool,
-}
-
-/// The desktop app's Claude Code sessions, from every folder, newest first.
-pub fn desktop_sessions() -> Vec<DesktopSession> {
-    let Some(root) = crate::import::desktop_dir() else { return Vec::new() };
-    let mut sessions = Vec::new();
-    let dirs = |dir: &Path| -> Vec<PathBuf> {
-        std::fs::read_dir(dir)
-            .map(|e| e.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
-            .unwrap_or_default()
-    };
-    for org in dirs(&root) {
-        for account in dirs(&org) {
-            let Ok(entries) = std::fs::read_dir(&account) else { continue };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-                if !name.starts_with("local_") || !name.ends_with(".json") {
-                    continue;
-                }
-                let Some(record) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else {
-                    continue;
-                };
-                let text = |k: &str| record.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
-                let id = text("cliSessionId");
-                let cwd = text("cwd");
-                if id.is_empty() || cwd.is_empty() {
-                    continue;
-                }
-                let updated = ["lastActivityAt", "lastFocusedAt", "createdAt"]
-                    .iter()
-                    .find_map(|k| record.get(*k).and_then(Value::as_u64))
-                    .unwrap_or_default();
-                sessions.push(DesktopSession {
-                    id,
-                    title: match text("title") {
-                        t if t.is_empty() => "Untitled session".into(),
-                        t => t,
-                    },
-                    cwd: PathBuf::from(cwd),
-                    updated,
-                    archived: record.get("isArchived").and_then(Value::as_bool).unwrap_or(false),
-                });
-            }
-        }
-    }
-    sessions.sort_by(|a, b| b.updated.cmp(&a.updated));
-    sessions
-}
-
-/// The sessions a Claude Code process is running right now, anywhere on this
-/// machine: each registers itself in `~/.claude/sessions` by process id, and
-/// a process id that is no longer alive is a record left behind.
-pub fn running_sessions() -> std::collections::HashSet<String> {
-    let mut running = std::collections::HashSet::new();
-    let Some(config) = config_dir() else { return running };
-    let Ok(entries) = std::fs::read_dir(config.join("sessions")) else { return running };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(record) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else {
-            continue;
-        };
-        let pid = record.get("pid").and_then(|p| p.as_u64().or_else(|| p.as_str().and_then(|s| s.parse().ok())));
-        let id = record.get("sessionId").and_then(Value::as_str);
-        if let (Some(pid), Some(id)) = (pid, id) {
-            if alive(pid as u32) {
-                running.insert(id.to_string());
-            }
-        }
-    }
-    running
-}
-
-#[cfg(unix)]
-fn alive(pid: u32) -> bool {
-    // Signal 0 delivers nothing; it only asks whether the process is there.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn alive(_pid: u32) -> bool {
-    false
 }
 
 /// The kinds of line a transcript is drawn from.
@@ -471,24 +341,6 @@ mod tests {
         let result = serde_json::json!({ "type": "user", "message": { "content": [{ "type": "tool_result", "content": "ok" }] } });
         assert_eq!(prompt(&typed).as_deref(), Some("Fix the build"));
         assert!(prompt(&meta).is_none() && prompt(&command).is_none() && prompt(&result).is_none());
-    }
-
-    #[test]
-    fn a_session_is_its_transcript_and_the_folder_beside_it_and_nothing_else() {
-        let dir = std::env::temp_dir().join(format!("proton-history-files-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
-        std::fs::create_dir_all(dir.join(id).join("subagents")).unwrap();
-        std::fs::create_dir_all(dir.join("memory")).unwrap();
-        std::fs::write(dir.join(format!("{id}.jsonl")), "{}\n").unwrap();
-        std::fs::write(dir.join("other.jsonl"), "{}\n").unwrap();
-        let dirs = vec![dir.join("elsewhere"), dir.clone()];
-        assert_eq!(files_in(&dirs, id), [dir.join(format!("{id}.jsonl")), dir.join(id)]);
-        assert!(files_in(&dirs, "memory").is_empty(), "the project's memory is not a session");
-        assert!(files_in(&dirs, "../other").is_empty());
-        std::fs::remove_file(dir.join(format!("{id}.jsonl"))).unwrap();
-        assert!(files_in(&dirs, id).is_empty(), "a folder with no transcript is not a session");
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

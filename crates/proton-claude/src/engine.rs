@@ -1,7 +1,7 @@
-//! The agents the Chat tab talks to, and what a conversation with any of
+//! The agents Proton talks to, and what a conversation with any of
 //! them can be asked to do.
 //!
-//! Claude Code is the one the tab was built around; Codex, Gemini and
+//! Claude Code is the one this was built around; Codex, Gemini and
 //! Antigravity sit beside it. Each is the real CLI, signed in with its own
 //! account — Proton never holds a key — driven over the protocol that CLI
 //! offers a host, and folded into the same rows. So the transcript, the
@@ -180,7 +180,7 @@ pub fn unattended(engine: Engine, cwd: PathBuf, settings: Settings, how: &Unatte
     })
 }
 
-/// A conversation with any of the engines, as the Chat tab drives it.
+/// A conversation with any of the engines, as Research and Notebook drive it.
 ///
 /// Each keeps a [`Fold`]: the rows it draws and where it stands. Saying
 /// something starts the engine's process if it is not running; a process

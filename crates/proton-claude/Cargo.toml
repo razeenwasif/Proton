@@ -1,6 +1,6 @@
 [package]
 name = "proton-claude"
-description = "The Chat tab's engines: the real `claude`, `codex`, `gemini` and `agy`, each driven over the protocol it offers a host, their sessions, and what they publish."
+description = "The engines Research and Notebook run on: the real `claude`, `codex`, `gemini` and `agy`, each driven over the protocol it offers a host, their sessions, and what they publish."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -20,12 +20,6 @@ dirs = "6"
 memchr = "2"
 # The hunks of an edit an engine describes only as before and after.
 gix-imara-diff = { workspace = true }
-# A deleted conversation goes to the Trash, from where it can be put back.
-trash = "5"
 # Codex's config, read for the MCP servers and plugins an unattended thread
 # must not start.
 toml = "0.9"
-
-# Whether the process a session registered is still alive.
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"

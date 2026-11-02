@@ -13,7 +13,6 @@ use crate::action::Action;
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "lowercase")]
 pub enum ModeId {
-    Chat,
     #[default]
     Codex,
     Data,
@@ -40,14 +39,14 @@ pub enum ModeId {
 impl ModeId {
     /// Ordered as the keys bind them, `1`–`7`: Data and Research beside
     /// Codex, the three a working day moves between, Notebook after
-    /// Research, Excel sixth, Circuit seventh and Logic eighth. (Design, Model, Game, Video, Canvas and
-    /// Diffuse were the sixth to the eleventh, and LaTeX and the Reader once
-    /// among them, until they moved to apps of their own.)
-    pub const ALL: [ModeId; 8] = [ModeId::Chat, ModeId::Codex, ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Sheet, ModeId::Circuit, ModeId::Logic];
+    /// Research, Excel fifth, Circuit sixth and Logic seventh. (Chat was the
+    /// first, until Fairy took conversations over; Design, Model, Game, Video,
+    /// Canvas and Diffuse, and LaTeX and the Reader once among them, followed
+    /// Notebook until they moved to apps of their own.)
+    pub const ALL: [ModeId; 7] = [ModeId::Codex, ModeId::Data, ModeId::Research, ModeId::Study, ModeId::Sheet, ModeId::Circuit, ModeId::Logic];
 
     pub fn slug(self) -> &'static str {
         match self {
-            ModeId::Chat => "chat",
             ModeId::Codex => "codex",
             ModeId::Data => "data",
             ModeId::Research => "research",
@@ -66,7 +65,6 @@ impl ModeId {
     /// What the rail calls it.
     pub fn label(self) -> &'static str {
         match self {
-            ModeId::Chat => "Chat",
             ModeId::Codex => "Codex",
             ModeId::Data => "Data",
             ModeId::Research => "Research",
@@ -86,7 +84,7 @@ impl ModeId {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`8`, one-indexed as the user sees them.
+    /// `1`–`7`, one-indexed as the user sees them.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }
@@ -95,8 +93,6 @@ impl ModeId {
     ///
     /// A mode that cannot implement a verb must say so — the statusline reports
     /// it, because silently doing nothing is the failure users cannot debug.
-    /// Chat is the deliberate outlier: its noun is prose, so the editing verbs
-    /// belong to the composer rather than to the mode.
     /// Asked of the mode's own contract rather than answered here, so there is
     /// one verb table and not two that can drift apart.
     pub fn supports(self, action: &Action) -> bool {

@@ -737,7 +737,7 @@ mod tests {
         // With no server of ours, none of the person's either.
         let bare = Gemini::unattended(PathBuf::from("/n"), Settings::default(), &Unattended::default()).args();
         assert!(bare.windows(2).any(|w| w[0] == "--allowed-mcp-server-names" && w[1] == "none"), "{bare:?}");
-        // The Chat tab's Gemini is untouched.
+        // A conversation with a person's Gemini is untouched.
         let chat = Gemini::new(PathBuf::from("/n"), Settings::default());
         assert_eq!(chat.args(), ["--experimental-acp"]);
         assert_eq!(chat.mcp_servers(), json!([]));
