@@ -101,7 +101,7 @@ Name.sheet/
   - `x` clears.
   - `dd` deletes rows, and `o` and `O` insert them.
   - `u` and `⌃r` undo and redo.
-  - `/` searches.
+  - `/` and `⌘F` search, `n` and `N` walk what is found; `⌘⌥F` replaces.
   - `:sort`, `:filter` and `:freeze` are the `:` commands.
 - **Mouse and keys as a spreadsheet's:**
   - Clicking and dragging selects.
@@ -168,6 +168,8 @@ scale -- --ignored --nocapture`):
 | Read the folder back | 0.32 s | 4 s |
 | Save as `.xlsx` (15 MB) | 3.7 s | 15 s |
 | Open the `.xlsx` | 2.2 s | 15 s |
+| Find words in the two million cells | 0.42 s | 0.8 s |
+| Find digits, every number written out | 0.93 s | 1.5 s |
 
 The test's process peaked at 1.9 GB holding the workbook several times
 over (built, opened, read back from the folder and from the `.xlsx`); one

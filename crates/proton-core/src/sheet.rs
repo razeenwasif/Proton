@@ -19,7 +19,8 @@
 use std::path::{Path, PathBuf};
 
 use proton_sheet::edit::{self, Axis};
-use proton_sheet::{numfmt, Book, Cell, CellRef, Range, Value, Workbook};
+use proton_sheet::find::{self, Query};
+use proton_sheet::{formula, numfmt, Book, Cell, CellRef, Range, Value, Workbook};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -35,6 +36,9 @@ const MOST_ROWS: u32 = 400;
 const MOST_COLS: u32 = 120;
 /// No more cells than this are copied, filled or formatted in one go.
 const MOST_CLIP: u64 = 250_000;
+/// No more cells than this are sent for a search to walk: the count says
+/// how many there are, and a replace reaches them all.
+const MOST_MATCHES: usize = 10_000;
 
 /// What a workbook is kept as on disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -492,6 +496,10 @@ impl Sheets {
                 }
                 Vec::new()
             }
+            Command::SheetFind { generation, sheet, ask, text, whole, within } => self.find(generation, sheet as usize, ask, &text, whole, within.as_deref()),
+            Command::SheetReplace { generation, sheet, text, with, whole, within, at } => {
+                self.replace(generation, sheet as usize, &Query::new(&text, whole), &with, within.as_deref(), at.as_deref())
+            }
             Command::SheetCopy { generation, sheet, range, cut } => self.copy(generation, sheet as usize, &range, cut),
             Command::SheetPaste { generation, sheet, at, text } => self.paste(generation, sheet as usize, &at, &text),
             Command::SheetFill { generation, sheet, from, to } => self.fill(generation, sheet as usize, &from, &to),
@@ -761,6 +769,93 @@ impl Sheets {
         record(open, Step::Cells { sheet, before, after });
         let mut events = vec![self.book_event()];
         events.extend(self.moved_event(moved));
+        events
+    }
+
+    /// The cells that have some text, for the window to mark and walk.
+    fn find(&mut self, generation: u32, sheet: usize, ask: u32, text: &str, whole: bool, within: Option<&str>) -> Vec<Event> {
+        let open = match self.checked(generation, sheet) {
+            Ok(open) => open,
+            Err(events) => return events,
+        };
+        let Some(within) = within.map(range_of).map_or(Some(None), |r| r.map(Some)) else {
+            return vec![notice("that is not a range to search in".into(), NoticeLevel::Warn)];
+        };
+        let found = find::search(&open.book, sheet, within, &Query::new(text, whole), MOST_MATCHES);
+        vec![Event::SheetMatches {
+            generation,
+            sheet: sheet as u32,
+            ask,
+            matches: found.hits.iter().map(|h| [h.at.row, h.at.col]).collect(),
+            total: found.total,
+            shown_only: found.shown_only,
+            hidden: found.hidden,
+        }]
+    }
+
+    /// Text replaced in what cells hold, as one step: one cell's, or those a
+    /// search finds. A formula it would leave unreadable is left as it was,
+    /// and what was not changed is said.
+    fn replace(&mut self, generation: u32, sheet: usize, query: &Query, with: &str, within: Option<&str>, at: Option<&str>) -> Vec<Event> {
+        let open = match self.checked(generation, sheet) {
+            Ok(open) => open,
+            Err(events) => return events,
+        };
+        let Some(within) = within.map(range_of).map_or(Some(None), |r| r.map(Some)) else {
+            return vec![notice("that is not a range to replace in".into(), NoticeLevel::Warn)];
+        };
+        let one = match at.map(CellRef::parse) {
+            Some(None) => return vec![notice(format!("{} is not a cell", at.unwrap_or_default()), NoticeLevel::Warn)],
+            Some(Some(cell)) => Some(cell),
+            None => None,
+        };
+        let (targets, shown_only, hidden) = match one {
+            Some(cell) => (vec![cell], 0, 0),
+            None => {
+                let found = find::search(&open.book, sheet, within, query, usize::MAX);
+                (found.hits.iter().filter(|h| h.held).map(|h| h.at).collect(), found.shown_only, found.hidden)
+            }
+        };
+        let mut after = Vec::new();
+        let mut unreadable = 0;
+        for at in targets {
+            let cell = cell_at(&open.book, sheet, at);
+            let Some(input) = query.replaced(&cell.input, with) else { continue };
+            if input.starts_with('=') && input.len() > 1 && formula::parse(&input[1..]).is_err() {
+                unreadable += 1;
+            } else if input != cell.input {
+                after.push((at, Cell { input, style: cell.style }));
+            }
+        }
+        if after.len() as u64 > MOST_CLIP {
+            return vec![notice(format!("that would change {} cells; no more than {MOST_CLIP} go at once", after.len()), NoticeLevel::Warn)];
+        }
+        let changed = after.len();
+        let mut events = self.change(sheet, after);
+        if let Some(cell) = one {
+            if changed == 0 {
+                let why = if unreadable > 0 { "the formula would no longer read" } else { "it only shows that: what it holds does not have it" };
+                events.push(notice(format!("{} was left as it was: {why}", cell.name()), NoticeLevel::Warn));
+            }
+            return events;
+        }
+        let mut said = if changed == 0 { "Nothing was replaced".to_string() } else { format!("Replaced in {}", count_cells(changed)) };
+        let mut left = Vec::new();
+        if unreadable > 0 {
+            left.push(format!("{} whose formula would no longer read", count_cells(unreadable)));
+        }
+        if shown_only > 0 {
+            left.push(format!("{} that only show it", count_cells(shown_only as usize)));
+        }
+        if hidden > 0 {
+            left.push(format!("{} in rows a filter hides", count_cells(hidden as usize)));
+        }
+        if !left.is_empty() {
+            said.push_str("; left: ");
+            said.push_str(&left.join(", "));
+        }
+        let level = if left.is_empty() && changed > 0 { NoticeLevel::Info } else { NoticeLevel::Warn };
+        events.push(notice(said, level));
         events
     }
 
@@ -1418,6 +1513,10 @@ fn cell_at(book: &Book, sheet: usize, at: CellRef) -> Cell {
 }
 
 /// `B7` or `A1:C9`.
+fn count_cells(n: usize) -> String {
+    format!("{n} cell{}", if n == 1 { "" } else { "s" })
+}
+
 fn range_of(s: &str) -> Option<Range> {
     Range::parse(s.trim()).or_else(|| CellRef::parse(s.trim()).map(Range::cell))
 }
@@ -1788,6 +1887,69 @@ mod tests {
         let back = proton_sheet::folder::read(&root.join("edit.sheet")).unwrap();
         assert_eq!((back.sheets[0].widths.get(&2), back.sheets[0].frozen.rows), (Some(&120.0), 1));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn text_is_found_and_replaced_as_one_step_and_what_cannot_change_is_said() {
+        let root = scratch("find");
+        let mut sheets = Sheets::default();
+        let g = book_of(&sheets.apply(&root, Command::SheetNew { name: "Find".into(), folder: None })).unwrap().generation;
+        sheets.apply(&root, Command::SheetView { generation: g, sheet: 0, rows: [0, 40], cols: [0, 10] });
+        let cells = [("A1", "Rent"), ("B1", "rent due"), ("A2", "=SUM(C1:C2)"), ("C1", "2"), ("C2", "3"), ("D1", "=\"rent\"&\"!\"")];
+        sheets.apply(&root, Command::SheetSet { generation: g, sheet: 0, cells: cells.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() });
+        let matches = |sheets: &mut Sheets, text: &str, within: Option<&str>| -> (Vec<[u32; 2]>, u32, u32, u32) {
+            let events = sheets.apply(&root, Command::SheetFind { generation: g, sheet: 0, ask: 7, text: text.into(), whole: false, within: within.map(str::to_string) });
+            events
+                .iter()
+                .find_map(|e| match e {
+                    Event::SheetMatches { ask: 7, matches, total, shown_only, hidden, .. } => Some((matches.clone(), *total, *shown_only, *hidden)),
+                    _ => None,
+                })
+                .expect("no answer")
+        };
+        let (found, total, only, hidden) = matches(&mut sheets, "rent", None);
+        assert_eq!(found, [[0, 0], [0, 1], [0, 3]]);
+        assert_eq!((total, only, hidden), (3, 0, 0));
+        assert_eq!(matches(&mut sheets, "Rent", None).0, [[0, 0]], "a capital is exact");
+        assert_eq!(matches(&mut sheets, "rent", Some("B1:D1")).0, [[0, 1], [0, 3]]);
+        let (found, _, only, _) = matches(&mut sheets, "5", None);
+        assert_eq!((found, only), (vec![[1, 0]], 1), "what the formula comes to");
+
+        let input = |sheets: &Sheets, at: &str| sheets.open.as_ref().unwrap().book.input(0, CellRef::parse(at).unwrap()).to_string();
+        let replace = |text: &str, with: &str, at: Option<&str>, within: Option<&str>| Command::SheetReplace { generation: g, sheet: 0, text: text.into(), with: with.into(), whole: false, within: within.map(str::to_string), at: at.map(str::to_string) };
+
+        // One cell.
+        sheets.apply(&root, replace("rent", "rates", Some("B1"), None));
+        assert_eq!(input(&sheets, "B1"), "rates due");
+        assert_eq!(input(&sheets, "A1"), "Rent");
+        sheets.apply(&root, Command::SheetUndo);
+        assert_eq!(input(&sheets, "B1"), "rent due");
+
+        // All of them, as one step, formulas too, and their values follow.
+        let all = sheets.apply(&root, replace("rent", "rates", None, None));
+        assert!(all.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "Replaced in 3 cells")), "{all:?}");
+        assert_eq!((input(&sheets, "A1"), input(&sheets, "B1"), input(&sheets, "D1")), ("rates".to_string(), "rates due".to_string(), "=\"rates\"&\"!\"".to_string()));
+        assert_eq!(sheets.open.as_ref().unwrap().book.value(0, CellRef::parse("D1").unwrap()), Value::text("rates!"));
+        sheets.apply(&root, Command::SheetUndo);
+        assert_eq!((input(&sheets, "A1"), input(&sheets, "B1")), ("Rent".to_string(), "rent due".to_string()), "one undo brings them all back");
+
+        // Inside a range only.
+        sheets.apply(&root, replace("rent", "rates", None, Some("A1:A1")));
+        assert_eq!((input(&sheets, "A1"), input(&sheets, "B1")), ("rates".to_string(), "rent due".to_string()));
+        sheets.apply(&root, Command::SheetUndo);
+
+        // What only shows it is said, and a formula is never left unreadable.
+        let shown = sheets.apply(&root, replace("5", "6", None, None));
+        assert!(shown.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("Nothing was replaced") && text.contains("1 cell that only show"))), "{shown:?}");
+        let broke = sheets.apply(&root, replace("SUM(", "SUM((", None, None));
+        assert!(broke.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("1 cell whose formula would no longer read"))), "{broke:?}");
+        assert_eq!(input(&sheets, "A2"), "=SUM(C1:C2)");
+        let one = sheets.apply(&root, replace("5", "6", Some("A2"), None));
+        assert!(one.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.starts_with("A2 was left"))), "{one:?}");
+
+        // Another workbook's search is not answered.
+        let wrong = sheets.apply(&root, Command::SheetFind { generation: g + 1, sheet: 0, ask: 8, text: "x".into(), whole: false, within: None });
+        assert!(!wrong.iter().any(|e| matches!(e, Event::SheetMatches { .. })));
     }
 
     #[test]

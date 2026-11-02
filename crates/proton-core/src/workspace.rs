@@ -1527,6 +1527,8 @@ impl Workspace {
             | Command::SheetView { .. }
             | Command::SheetSet { .. }
             | Command::SheetSelect { .. }
+            | Command::SheetFind { .. }
+            | Command::SheetReplace { .. }
             | Command::SheetCopy { .. }
             | Command::SheetPaste { .. }
             | Command::SheetFill { .. }

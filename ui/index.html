@@ -845,6 +845,25 @@
             <!-- `:` and a command: :freeze, :width 90, :format 0.00, :w … -->
             <input class="xl-cmd" data-sheet-cmd aria-label="Sheet command" spellcheck="false" placeholder=":" hidden>
           </div>
+          <!-- / or ⌘F: text found in the sheet, its cells marked and walked with n and N. -->
+          <div class="xl-find" data-sheet-find role="search" aria-label="Find in this sheet" hidden>
+            <div class="xl-find-row">
+              <input class="xl-find-text" data-sheet-find-text aria-label="Find" placeholder="Find" spellcheck="false">
+              <span class="xl-find-count" data-sheet-find-count role="status"></span>
+              <button class="xl-tool" data-sheet-find-step="-1" title="Previous  ⇧↩ or N" aria-label="Previous match">↑</button>
+              <button class="xl-tool" data-sheet-find-step="1" title="Next  ↩ or n" aria-label="Next match">↓</button>
+              <button class="xl-tool xl-find-word" data-sheet-find-whole title="All of what a cell holds or shows, not a part of it" aria-pressed="false">Whole cell</button>
+              <button class="xl-tool xl-find-word" data-sheet-find-within title="Searching this range: click to search the whole sheet" hidden></button>
+              <button class="xl-tool xl-find-word" data-sheet-find-more title="Replace  ⌘⌥F" aria-expanded="false">Replace</button>
+              <span class="grow"></span>
+              <button class="tb-btn" data-sheet-find-close title="Close  ⎋" aria-label="Close find"><svg class="i"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="xl-find-row" data-sheet-replace-row hidden>
+              <input class="xl-find-text" data-sheet-replace-text aria-label="Replace with" placeholder="Replace with" spellcheck="false">
+              <button class="xl-tool xl-find-word" data-sheet-replace-one title="Replace in this cell and go on  ↩">Replace</button>
+              <button class="xl-tool xl-find-word" data-sheet-replace-all title="Replace in every cell found, as one step to undo">Replace all</button>
+            </div>
+          </div>
           <div class="xl-grid">
             <div class="xl-colhead" data-sheet-colhead></div>
             <div class="xl-rowhead" data-sheet-rowhead></div>

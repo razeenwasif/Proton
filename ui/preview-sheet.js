@@ -169,6 +169,33 @@ export function createSheetPreview(deliver) {
     book.version++;
   }
 
+  /** Smartcase and literal, as crates/proton-sheet/src/find.rs. @param {string} text @param {boolean} whole */
+  function finder(text, whole) {
+    const flags = text !== text.toLowerCase() ? "g" : "gi";
+    const literal = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(whole ? `^${literal}$` : literal, flags);
+    return {
+      has: (/** @type {string} */ s) => s.search(re) >= 0,
+      replace: (/** @type {string} */ s, /** @type {string} */ to) => s.replace(re, () => to),
+    };
+  }
+
+  /** @param {number} s @param {string} text @param {boolean} whole @param {string | null} within */
+  function findCells(s, text, whole, within) {
+    if (!text) return [];
+    const test = finder(text, whole);
+    const [a, b = a] = (within ?? "").split(":");
+    const from = parse(a ?? ""), to = parse(b ?? "");
+    const hits = [];
+    for (const name of book?.sheets[s]?.cells.keys() ?? []) {
+      const v = cellView(s, name);
+      const inside = !from || !to || (v.row >= from[0] && v.row <= to[0] && v.col >= from[1] && v.col <= to[1]);
+      const held = test.has(v.input);
+      if (inside && (held || test.has(String(v.text)))) hits.push({ name, row: v.row, col: v.col, held });
+    }
+    return hits.sort((x, y) => x.row - y.row || x.col - y.col);
+  }
+
   open("budget.sheet", BUDGET);
   // A chart on the budget, to design against.
   if (book) /** @type {any} */ (book.sheets[0]).charts = [{ kind: "bar", range: "A1:B5", title: "Monthly costs", at: "E2", width: 420, height: 260 }];
@@ -210,6 +237,17 @@ export function createSheetPreview(deliver) {
           if (!book || command.generation !== book.generation) return [{ type: "notice", text: "that workbook is no longer open", level: "warn" }];
           put(command.sheet, command.cells);
           return [bookEvent(), cellsEvent()].filter(Boolean);
+        case "sheetFind": {
+          const hits = findCells(command.sheet, command.text, command.whole, command.within);
+          return [{ type: "sheetMatches", generation: command.generation, sheet: command.sheet, ask: command.ask,
+            matches: hits.map((h) => [h.row, h.col]), total: hits.length, shownOnly: hits.filter((h) => !h.held).length, hidden: 0 }];
+        }
+        case "sheetReplace": {
+          const hits = findCells(command.sheet, command.text, command.whole, command.within).filter((h) => h.held && (!command.at || h.name === command.at));
+          const test = finder(command.text, command.whole);
+          if (hits.length) put(command.sheet, hits.map((h) => [h.name, test.replace(book?.sheets[command.sheet]?.cells.get(h.name) ?? "", command.with)]));
+          return [bookEvent(), cellsEvent(), command.at ? null : { type: "notice", text: `Replaced in ${hits.length} cells`, level: "info" }].filter(Boolean);
+        }
         case "sheetUndo":
         case "sheetRedo": {
           if (!book) return [];

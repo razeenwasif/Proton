@@ -240,6 +240,9 @@ cycles shown as `#CYCLE!`. The grid draws the rows on screen and no more;
 Vim's keys move and act (`v`, `V`, `y`, `d`, `p`, `dd`, `o`, `:sort`,
 `:filter`, `:freeze`), and a spreadsheet's keys and mouse do too — typing
 starts a cell, the fill handle fills, a letter's edge widens its column.
+`/` or `⌘F` finds text in what cells hold or show, its cells marked and
+walked with `n` and `N`, and `⌘⌥F` replaces it, one cell or all as one undo;
+a formula it would leave unreadable is left as it was, and said.
 Number formats, bold and colour, frozen panes, sorting, filters, colour
 rules, and line, bar, scatter and pie charts drawn over the cells and kept
 in `.xlsx`. The agent reads, writes and charts the workbook with its sheet

@@ -521,6 +521,28 @@ pub enum Command {
         sheet: u32,
         cells: Vec<(String, String)>,
     },
+    /// The cells of a sheet, or of `within`, that have this text: answered
+    /// with `SheetMatches` carrying the same `ask`. A capital in it makes it
+    /// case-sensitive; `whole` asks for all of what a cell holds or shows.
+    SheetFind {
+        generation: u32,
+        sheet: u32,
+        ask: u32,
+        text: String,
+        whole: bool,
+        within: Option<String>,
+    },
+    /// That text replaced in what cells hold, as one step: in the cell `at`,
+    /// or in every cell a search finds.
+    SheetReplace {
+        generation: u32,
+        sheet: u32,
+        text: String,
+        with: String,
+        whole: bool,
+        within: Option<String>,
+        at: Option<String>,
+    },
     /// The cells of a range onto the clipboard, as tab-separated values;
     /// kept here too, so pasting them brings their formulas. A cut is
     /// emptied when it is pasted.
@@ -1851,6 +1873,19 @@ pub enum Event {
         values: Vec<(String, u32)>,
         ticked: Option<Vec<String>>,
         criteria: String,
+    },
+    /// What a `SheetFind` found: its first cells as `[row, col]`, row by row;
+    /// how many in all, how many of those only show the text, and how many
+    /// more are in rows a filter hides.
+    #[serde(rename_all = "camelCase")]
+    SheetMatches {
+        generation: u32,
+        sheet: u32,
+        ask: u32,
+        matches: Vec<[u32; 2]>,
+        total: u32,
+        shown_only: u32,
+        hidden: u32,
     },
     /// What was copied, for the system clipboard.
     SheetClip {

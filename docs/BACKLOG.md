@@ -111,9 +111,8 @@ installed on 2026-10-28. What is left of it.
   colours, alignment, wrapping and a number format.
 - **Merging, and hiding rows and columns.** Cells merged across a range; rows
   and columns hidden and shown again by hand, not only by a filter.
-- **Find and replace in the grid.** `/` to search the sheet's values and
-  formulas, `n` and `N` between matches, and a replace; the plan names `/`,
-  which is not wired yet.
+- **Finding across a workbook.** `/` searches the sheet shown, or a range of
+  it; every sheet at once, and patterns, are not there yet.
 - **Formula completion.** Function names and their arguments offered as a
   formula is typed, and the cells a formula reads outlined in the grid.
 - **Spilled arrays and dynamic-array functions.** A formula's array result

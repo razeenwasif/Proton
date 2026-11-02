@@ -56,6 +56,12 @@ fn a_million_rows_open_recalculate_draw_and_save_in_time() {
         shown
     });
 
+    let query = proton_sheet::find::Query::new("no such text", false);
+    timed("a search of two million cells for words", 800, || proton_sheet::find::search(&book, 0, None, &query, 10_000));
+    let query = proton_sheet::find::Query::new("99", false);
+    let found = timed("a search for digits, every number written out", 1_500, || proton_sheet::find::search(&book, 0, None, &query, 10_000));
+    println!("  found {} cells, {} kept", found.total, found.hits.len());
+
     let dir = std::env::temp_dir().join(format!("proton-sheet-scale-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     timed("save as a .sheet folder", 4_000, || proton_sheet::folder::write(&dir, book.workbook()).unwrap());

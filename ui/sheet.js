@@ -38,6 +38,11 @@ const SPARE_ROWS = 200;
 const SPARE_COLS = 26;
 const MAX_ROW = 1_048_575;
 const MAX_COL = 16_383;
+/** How long typing in the find bar waits before asking the core, in ms:
+ *  longer on a sheet so long that each search is felt. */
+const FIND_WAIT = 120;
+const FIND_WAIT_LONG = 500;
+const LONG_SHEET = 100_000;
 
 /** The number formats offered, as Excel writes them. */
 export const FORMATS = /** @type {[string, string][]} */ ([
@@ -100,6 +105,14 @@ export function createSheet(host) {
     tools: q("[data-sheet-tools]"),
     editor: /** @type {HTMLInputElement} */ (q("[data-sheet-editor]")),
     charts: q("[data-sheet-charts]"),
+    find: q("[data-sheet-find]"),
+    findText: /** @type {HTMLInputElement} */ (q("[data-sheet-find-text]")),
+    findCount: q("[data-sheet-find-count]"),
+    findWhole: q("[data-sheet-find-whole]"),
+    findWithin: q("[data-sheet-find-within]"),
+    findMore: q("[data-sheet-find-more]"),
+    replaceRow: q("[data-sheet-replace-row]"),
+    replaceText: /** @type {HTMLInputElement} */ (q("[data-sheet-replace-text]")),
   };
 
   const state = {
@@ -124,6 +137,30 @@ export function createSheet(host) {
     extent: /** @type {[number, number]} */ ([SPARE_ROWS, SPARE_COLS]),
     /** Editing a cell: in it, or in the formula bar. */
     editing: /** @type {"" | "cell" | "bar"} */ (""),
+    /** The find bar, and what the core last found for it. */
+    find: {
+      open: false,
+      /** Opened with `/`: Enter goes back to the grid, where `n` and `N` walk. */
+      vim: false,
+      whole: false,
+      /** The range searched, kept from when the bar opened. @type {Sel | null} */
+      within: null,
+      /** Each search's number, so an answer to an older one is dropped. */
+      ask: 0,
+      /** The core's answer is the one for the bar as it stands. */
+      current: false,
+      /** A step to take when it is: Enter pressed ahead of the answer. */
+      then: 0,
+      /** Row by row, as `[row, col]`; the same as `row,col`, to mark them. */
+      matches: /** @type {[number, number][]} */ ([]),
+      marked: /** @type {Set<string>} */ (new Set()),
+      total: 0,
+      shownOnly: 0,
+      hidden: 0,
+      /** What the search was last made against: another means search again. */
+      version: -1,
+      sheet: -1,
+    },
   };
 
   const key = (/** @type {number} */ r, /** @type {number} */ c) => `${r},${c}`;
@@ -365,7 +402,7 @@ export function createSheet(host) {
       if (isHidden(cell.row)) continue;
       if (fr && cell.row >= fr && rowY(cell.row) + ROW <= s.scrollTop + fr * ROW) continue;
       if (fc && cell.col >= fc && colX(cell.col + 1) <= s.scrollLeft + colX(fc)) continue;
-      cells += cellHtml(cell, cell.row < fr || cell.col < fc ? " fz" : "");
+      cells += cellHtml(cell, `${cell.row < fr || cell.col < fc ? " fz" : ""}${state.find.marked.has(key(cell.row, cell.col)) ? " hit" : ""}`);
     }
     cells += filterButtons(v);
     els.colHead.innerHTML = cols;
@@ -450,6 +487,7 @@ export function createSheet(host) {
     }
     const fmt = /** @type {HTMLSelectElement | null} */ (els.tools.querySelector("[data-sheet-format]"));
     if (fmt) fmt.value = FORMATS.some(([f]) => f === (st?.format ?? "")) ? st?.format ?? "" : "";
+    if (state.find.open) findCount();
   }
 
   /** Move the cursor, keeping it on screen; with `extend`, the range's far corner.
@@ -621,6 +659,8 @@ export function createSheet(host) {
       case "chart": addChart(["line", "bar", "scatter", "pie"].includes(arg) ? arg : "bar"); return;
       case "data": send({ type: "sheetToData", range: arg || rangeName(region(true)) }); return;
       case "delete": deleteLines(arg.startsWith("col")); return;
+      case "find": openFind({ text: arg }); return;
+      case "replace": openFind({ text: arg, replacing: true }); return;
       default: {
         // `:B7` goes there.
         const to = parseCell(word);
@@ -746,6 +786,223 @@ export function createSheet(host) {
     els.cmd.hidden = true;
   });
 
+  /* ── find and replace ──────────────────────────────────────────────── */
+
+  let finding = 0;
+
+  /** The grid gets taller or shorter when the bar comes and goes. */
+  function findResized() {
+    layout();
+    draw();
+    ask();
+  }
+
+  /** @param {{vim?: boolean, replacing?: boolean, text?: string}} [how] */
+  function openFind({ vim = false, replacing = false, text = "" } = {}) {
+    if (!state.book) return;
+    const f = state.find;
+    const opening = !f.open;
+    f.open = true;
+    f.vim = vim;
+    // A range selected when the bar opens is what is searched, as in Excel,
+    // and stays so as the cursor walks out of it.
+    if (opening) {
+      const sel = selection();
+      f.within = sel.r0 !== sel.r1 || sel.c0 !== sel.c1 ? sel : null;
+      state.visual = "";
+    }
+    if (text) els.findText.value = text;
+    els.find.hidden = false;
+    if (replacing) showReplace(true);
+    findWithinShown();
+    if (opening) findResized();
+    const field = replacing && els.findText.value ? els.replaceText : els.findText;
+    field.focus();
+    field.select();
+    seek();
+  }
+
+  function closeFind() {
+    const f = state.find;
+    clearTimeout(finding);
+    f.open = false;
+    f.within = null;
+    f.then = 0;
+    f.current = false;
+    f.ask++;
+    setMatches([], 0, 0, 0);
+    els.find.hidden = true;
+    showReplace(false);
+    findResized();
+    els.scroll.focus({ preventScroll: true });
+  }
+
+  /** @param {boolean} on */
+  function showReplace(on) {
+    els.replaceRow.hidden = !on;
+    els.findMore.setAttribute("aria-expanded", String(on));
+    findCount();
+  }
+
+  function findWithinShown() {
+    const within = state.find.within;
+    els.findWithin.hidden = !within;
+    els.findWithin.textContent = within ? `In ${rangeName(within)} ×` : "";
+  }
+
+  /** What the bar asks for, in the command's words. */
+  const findWords = () => ({ text: els.findText.value, whole: state.find.whole, within: state.find.within && rangeName(state.find.within) });
+
+  /** Ask for what the bar says, soon or `now`. @param {boolean} [now] */
+  function seek(now = false) {
+    const f = state.find;
+    clearTimeout(finding);
+    f.current = false;
+    const go = () => {
+      const b = state.book;
+      if (!b || !f.open) return;
+      if (!els.findText.value) {
+        f.ask++;
+        f.current = true;
+        f.then = 0;
+        setMatches([], 0, 0, 0);
+        return;
+      }
+      f.version = b.version;
+      f.sheet = b.active;
+      send({ type: "sheetFind", ask: ++f.ask, ...findWords() });
+    };
+    if (now) go();
+    else finding = window.setTimeout(go, (tab()?.rows ?? 0) > LONG_SHEET ? FIND_WAIT_LONG : FIND_WAIT);
+  }
+
+  /** @param {[number, number][]} matches @param {number} total @param {number} shownOnly @param {number} hidden */
+  function setMatches(matches, total, shownOnly, hidden) {
+    const f = state.find;
+    f.matches = matches;
+    f.marked = new Set(matches.map(([r, c]) => key(r, c)));
+    f.total = total;
+    f.shownOnly = shownOnly;
+    f.hidden = hidden;
+    findCount();
+    redraw();
+  }
+
+  /** The cursor's place among the matches, by a binary search: the first at
+   *  or past it, and whether it is on that one. */
+  function matchPlace() {
+    const list = state.find.matches;
+    const [r, c] = state.at;
+    let lo = 0, hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const [mr, mc] = list[mid];
+      if (mr < r || (mr === r && mc < c)) lo = mid + 1;
+      else hi = mid;
+    }
+    return { index: lo, on: lo < list.length && list[lo][0] === r && list[lo][1] === c };
+  }
+
+  /** Where the search stands, under the words typed. */
+  function findCount() {
+    const f = state.find;
+    const parts = [];
+    if (els.findText.value) {
+      const place = matchPlace();
+      if (!f.total) parts.push("No matches");
+      else parts.push(place.on ? `${(place.index + 1).toLocaleString()} of ${f.total.toLocaleString()}` : `${f.total.toLocaleString()} found`);
+      if (f.total > f.matches.length) parts.push(`the first ${f.matches.length.toLocaleString()} walked`);
+      if (!els.replaceRow.hidden && f.shownOnly) parts.push(`${f.shownOnly.toLocaleString()} only show it`);
+      if (f.hidden) parts.push(`${f.hidden.toLocaleString()} hidden by a filter`);
+    }
+    els.findCount.textContent = parts.join(" · ");
+    els.findCount.classList.toggle("none", !!els.findText.value && !f.total);
+  }
+
+  /** Go to the next match past the cursor, or the last before it, round the
+   *  ends. @param {1 | -1} by */
+  function findStep(by) {
+    const f = state.find;
+    if (!els.findText.value) return;
+    if (!f.current) {
+      f.then = by;
+      seek(true);
+      return;
+    }
+    const list = f.matches;
+    if (!list.length) return;
+    const { index, on } = matchPlace();
+    const to = by > 0 ? (on ? index + 1 : index) % list.length : (index - 1 + list.length) % list.length;
+    const [r, c] = list[to];
+    state.visual = "";
+    select(r, c);
+  }
+
+  /** Replace in the cell the cursor is on if it is one found, and go on;
+   *  on any other, go to the next that is. */
+  function replaceOne() {
+    if (!els.findText.value) return;
+    if (state.find.current && matchPlace().on) {
+      send({ type: "sheetReplace", ...findWords(), with: els.replaceText.value, at: cellName(state.at[0], state.at[1]) });
+    }
+    findStep(1);
+  }
+
+  function replaceAll() {
+    if (els.findText.value) send({ type: "sheetReplace", ...findWords(), with: els.replaceText.value, at: null });
+  }
+
+  els.findText.addEventListener("input", () => seek());
+  els.replaceText.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      replaceOne();
+    }
+  });
+  els.findText.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (!els.findText.value) return closeFind();
+    findStep(e.shiftKey ? -1 : 1);
+    if (state.find.vim) els.scroll.focus({ preventScroll: true });
+  });
+  els.find.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeFind();
+    }
+    // Typed here, not at the grid; ⌘S and the modes' keys go on up.
+    if (!e.metaKey && !e.ctrlKey) e.stopPropagation();
+  });
+  els.find.addEventListener("mousedown", (e) => {
+    // Clicking a button leaves the keyboard where it was.
+    if (e.target instanceof Element && e.target.closest("button")) e.preventDefault();
+  });
+  els.find.addEventListener("click", (e) => {
+    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("button")) : null;
+    if (!b) return;
+    if (b.dataset.sheetFindStep) return findStep(b.dataset.sheetFindStep === "1" ? 1 : -1);
+    if (b === els.findWhole) {
+      state.find.whole = !state.find.whole;
+      b.setAttribute("aria-pressed", String(state.find.whole));
+      return seek(true);
+    }
+    if (b === els.findWithin) {
+      state.find.within = null;
+      findWithinShown();
+      return seek(true);
+    }
+    if (b === els.findMore) {
+      const on = els.replaceRow.hidden;
+      showReplace(on);
+      (on ? els.replaceText : els.findText).focus();
+      return;
+    }
+    if (b.dataset.sheetFindClose !== undefined) return closeFind();
+    if (b.dataset.sheetReplaceOne !== undefined) return replaceOne();
+    if (b.dataset.sheetReplaceAll !== undefined) return replaceAll();
+  });
+
   /* ── the format bar ────────────────────────────────────────────────── */
 
   els.tools.innerHTML = `
@@ -768,14 +1025,16 @@ export function createSheet(host) {
     <button class="xl-tool" data-sheet-filter title="Filter  :filter">▾</button>
     <button class="xl-tool" data-sheet-rules title="Conditional colour  :rules">◐</button>
     <button class="xl-tool" data-sheet-chart title="A chart of the selection  :chart">▥</button>
+    <button class="xl-tool" data-sheet-find-open title="Find and replace  / or ⌘F" aria-label="Find and replace">⌕</button>
     <button class="xl-tool" data-sheet-to-data title="Send the selection to Data as a dataframe  :data">→ Data</button>`;
   els.tools.addEventListener("mousedown", (e) => {
     // Clicking a tool leaves the keyboard with the grid.
     if (e.target instanceof Element && e.target.closest("button")) e.preventDefault();
   });
   els.tools.addEventListener("click", (e) => {
-    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style], [data-sheet-sort], [data-sheet-filter], [data-sheet-rules], [data-sheet-chart], [data-sheet-to-data]")) : null;
+    const b = e.target instanceof Element ? /** @type {HTMLElement | null} */ (e.target.closest("[data-sheet-style], [data-sheet-clear-style], [data-sheet-sort], [data-sheet-filter], [data-sheet-rules], [data-sheet-chart], [data-sheet-find-open], [data-sheet-to-data]")) : null;
     if (!b || !state.book) return;
+    if (b.dataset.sheetFindOpen !== undefined) return openFind();
     if (b.dataset.sheetSort) return sortBy(b.dataset.sheetSort === "down");
     if (b.dataset.sheetFilter !== undefined) return toggleFilter();
     if (b.dataset.sheetRules !== undefined) return openRules();
@@ -1137,6 +1396,13 @@ export function createSheet(host) {
       host.dispatch({ type: "sheetSave" });
       return;
     }
+    // ⌘F finds and ⌘⌥F replaces, wherever the focus is in the mode.
+    if (b && e.metaKey && (e.code === "KeyF" || e.key.toLowerCase() === "f")) {
+      e.preventDefault();
+      if (state.editing) commit(state.editing === "cell" ? els.editor.value : els.bar.value, [0, 0]);
+      openFind({ replacing: e.altKey });
+      return;
+    }
     if (e.target !== els.scroll || !b) return;
     if (e.ctrlKey && /^[0-9]$/.test(e.key)) return; // modes, the window's
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -1234,12 +1500,16 @@ export function createSheet(host) {
         els.cmd.value = "";
         els.cmd.focus();
       },
+      "/": () => openFind({ vim: true }),
+      // Only with the find bar open: otherwise they start a cell, as any letter does.
+      ...(state.find.open ? { n: () => findStep(1), N: () => findStep(-1) } : {}),
       Escape: () => {
+        if (state.find.open) closeFind();
         state.visual = "";
         select(r, c);
       },
     };
-    const name = e.key === "G" || e.key === "V" || e.key === "O" ? e.key : k;
+    const name = e.key === "G" || e.key === "V" || e.key === "O" || e.key === "N" ? e.key : k;
     const act = keys[name];
     if (act) {
       e.preventDefault();
@@ -1335,8 +1605,18 @@ export function createSheet(host) {
         state.editing = "";
         state.visual = "";
         els.editor.hidden = true;
+        if (state.find.open) closeFind();
       }
       renderBook();
+      // Cells or the sheet changed under a search: what it found is looked for again.
+      const f = state.find;
+      if (f.open && event.book && (event.book.version !== f.version || event.book.active !== f.sheet)) {
+        if (event.book.active !== f.sheet) {
+          f.within = null;
+          findWithinShown();
+        }
+        seek();
+      }
     },
     /** @param {CellsEvent} event */
     cells(event) {
@@ -1361,6 +1641,18 @@ export function createSheet(host) {
     /** @param {{col: number, values: [string, number][], ticked: string[] | null, criteria: string}} event */
     filterValues(event) {
       showFilter(event);
+    },
+    /** What the find bar asked for, or an answer to an older question, dropped.
+     *  @param {{generation: number, sheet: number, ask: number, matches: [number, number][], total: number, shownOnly: number, hidden: number}} event */
+    matches(event) {
+      const b = state.book;
+      const f = state.find;
+      if (!b || !f.open || event.generation !== b.generation || event.sheet !== b.active || event.ask !== f.ask) return;
+      f.current = true;
+      setMatches(event.matches, event.total, event.shownOnly, event.hidden);
+      const then = f.then;
+      f.then = 0;
+      if (then === 1 || then === -1) findStep(then);
     },
     /** The mode is on screen: the grid takes the keys. */
     shown() {

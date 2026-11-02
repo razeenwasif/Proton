@@ -341,6 +341,125 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
     assert(sent(before, 'sheetFromData').length === 1, 'Data\'s dock did not send its table');
   });
 
+  await test('/ asks the core for what is typed, marks what it finds, and n and N walk it round the ends', async () => {
+    await win.pushEvents([book({version: 20}), cells([cell(0, 0, 'Rent'), cell(1, 0, 'rent due'), cell(1, 2, 'Rent'), cell(5, 0, 'other')])]); await settle();
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    const bar = ws().querySelector('[data-sheet-find]');
+    const field = ws().querySelector('[data-sheet-find-text]');
+    const name = ws().querySelector('[data-sheet-name]');
+    scroll.focus();
+    key('g'); key('g'); key('0'); await settle();
+    assert(!shown(bar), 'the bar is open before it is asked for');
+    const height = scroll.clientHeight;
+    const before = win.commands.length;
+    key('/'); await settle();
+    assert(shown(bar) && doc.activeElement === field, '/ did not open the bar and take the keys');
+    assert(scroll.clientHeight < height, 'the grid did not make room');
+    assert(sent(before, 'sheetSet').length === 0 && !shown(ws().querySelector('[data-sheet-editor]')), '/ started a cell');
+    field.value = 'rent'; field.dispatchEvent(new win.Event('input'));
+    await new Promise((done) => win.setTimeout(done, 180));
+    const asked = sent(before, 'sheetFind').at(-1);
+    assert(asked?.text === 'rent' && asked.generation === 3 && asked.sheet === 0 && asked.whole === false && asked.within === null, `asked ${JSON.stringify(asked)}`);
+    const found = (/** @type {number} */ ask, /** @type {Record<string, any>} */ more = {}) => ({type: 'sheetMatches', generation: 3, sheet: 0, ask, matches: [[0, 0], [1, 0], [1, 2]], total: 3, shownOnly: 0, hidden: 0, ...more});
+    await win.pushEvents([found(asked.ask - 1, {matches: [[5, 0]], total: 1})]); await settle();
+    assert(!ws().querySelector('.xl-c.hit'), 'an answer to an older search was taken');
+    await win.pushEvents([found(asked.ask)]); await settle();
+    assert(ws().querySelectorAll('.xl-c.hit').length === 3, `${ws().querySelectorAll('.xl-c.hit').length} cells marked`);
+    const count = ws().querySelector('[data-sheet-find-count]');
+    assert(count.textContent === '1 of 3', `the count says ${count.textContent}`);
+    // Enter goes on from the cursor, and / gives the keys back to the grid.
+    key('Enter'); await settle();
+    assert(name.value === 'A2' && doc.activeElement === scroll, `Enter went to ${name.value}`);
+    assert(count.textContent === '2 of 3', `the count says ${count.textContent}`);
+    const typed = win.commands.length;
+    key('n'); await settle();
+    assert(name.value === 'C2', `n went to ${name.value}`);
+    key('n'); await settle();
+    assert(name.value === 'A1', `n did not go round to the first: ${name.value}`);
+    key('N', {shiftKey: true}); await settle();
+    assert(name.value === 'C2', `N did not go round to the last: ${name.value}`);
+    assert(sent(typed, 'sheetSet').length === 0 && !shown(ws().querySelector('[data-sheet-editor]')), 'n and N started a cell');
+    // Off the matches the count says how many, and n goes to the next past the cursor.
+    key('j'); key('j'); await settle();
+    assert(count.textContent === '3 found', `the count says ${count.textContent}`);
+    key('N', {shiftKey: true}); await settle();
+    assert(name.value === 'C2', `N from past them went to ${name.value}`);
+    // An edit is looked for again.
+    const edit = win.commands.length;
+    await win.pushEvents([book({version: 21})]);
+    await new Promise((done) => win.setTimeout(done, 180));
+    assert(sent(edit, 'sheetFind').length === 1, 'a change did not search again');
+    // Escape takes it all away, and n types again.
+    key('Escape'); await settle();
+    assert(!shown(bar) && !ws().querySelector('.xl-c.hit') && doc.activeElement === scroll, 'Escape did not close the find');
+    assert(scroll.clientHeight === height, 'the grid did not take its room back');
+    key('n'); await settle();
+    assert(shown(ws().querySelector('[data-sheet-editor]')), 'n does not start a cell with no search');
+    key('Escape'); await settle();
+  });
+
+  await test('⌘F opens find and keeps its Enter; a range selected is what is searched and the bar says so', async () => {
+    await win.pushEvents([book({version: 30})]); await settle();
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    const field = ws().querySelector('[data-sheet-find-text]');
+    const within = ws().querySelector('[data-sheet-find-within]');
+    scroll.focus();
+    key('g'); key('g'); key('0'); key('v'); key('j'); key('l'); await settle();
+    const before = win.commands.length;
+    key('f', {metaKey: true}); await settle();
+    assert(doc.activeElement === field && shown(ws().querySelector('[data-sheet-find]')), '⌘F did not open the bar');
+    assert(shown(within) && within.textContent.includes('A1:B2'), `the range is not said: ${within.textContent}`);
+    field.value = 'x'; field.dispatchEvent(new win.Event('input'));
+    key('Enter'); await settle();
+    const asked = sent(before, 'sheetFind').at(-1);
+    assert(asked?.within === 'A1:B2', `asked ${JSON.stringify(asked)}`);
+    await win.pushEvents([{type: 'sheetMatches', generation: 3, sheet: 0, ask: asked.ask, matches: [[1, 1]], total: 1, shownOnly: 0, hidden: 2}]); await settle();
+    assert(ws().querySelector('[data-sheet-name]').value === 'B2', 'Enter ahead of the answer did not go to it');
+    assert(doc.activeElement === field, 'Enter after ⌘F left the bar');
+    assert(ws().querySelector('[data-sheet-find-count]').textContent.includes('2 hidden by a filter'), 'what a filter hides is not said');
+    within.click(); await settle();
+    assert(!shown(within) && sent(before, 'sheetFind').at(-1).within === null, 'the range did not go');
+    ws().querySelector('[data-sheet-find-whole]').click(); await settle();
+    assert(sent(before, 'sheetFind').at(-1).whole === true, 'Whole cell was not asked for');
+    ws().querySelector('[data-sheet-find-whole]').click(); await settle();
+    key('Escape'); await settle();
+    assert(doc.activeElement === scroll, 'Escape did not give the keys back');
+  });
+
+  await test('Replace sends the cell found and goes on; Replace all sends what the bar says', async () => {
+    await win.pushEvents([book({version: 40}), cells([cell(0, 0, 'Rent'), cell(1, 0, 'rent due')])]); await settle();
+    const scroll = ws().querySelector('[data-sheet-scroll]');
+    const field = ws().querySelector('[data-sheet-find-text]');
+    const swap = ws().querySelector('[data-sheet-replace-text]');
+    const name = ws().querySelector('[data-sheet-name]');
+    scroll.focus();
+    key('g'); key('g'); key('0'); await settle();
+    const before = win.commands.length;
+    key('f', {metaKey: true, altKey: true}); await settle();
+    assert(shown(swap), '⌘⌥F did not show the replace row');
+    field.value = 'rent'; field.dispatchEvent(new win.Event('input'));
+    swap.value = 'rates';
+    await new Promise((done) => win.setTimeout(done, 180));
+    const asked = sent(before, 'sheetFind').at(-1);
+    await win.pushEvents([{type: 'sheetMatches', generation: 3, sheet: 0, ask: asked.ask, matches: [[0, 0], [1, 0]], total: 3, shownOnly: 1, hidden: 0}]); await settle();
+    assert(ws().querySelector('[data-sheet-find-count]').textContent.includes('1 only show it'), 'what only shows it is not said');
+    swap.focus(); key('Enter'); await settle();
+    const one = sent(before, 'sheetReplace').at(-1);
+    assert(one?.at === 'A1' && one.text === 'rent' && one.with === 'rates' && one.generation === 3, `sent ${JSON.stringify(one)}`);
+    assert(name.value === 'A2', `Replace did not go on: ${name.value}`);
+    assert(doc.activeElement === swap, 'Replace took the keys from its field');
+    const beforeAll = win.commands.length;
+    ws().querySelector('[data-sheet-replace-all]').click(); await settle();
+    const all = sent(beforeAll, 'sheetReplace').at(-1);
+    assert(all && all.at === null && all.with === 'rates' && all.text === 'rent', `sent ${JSON.stringify(all)}`);
+    // With words in Find already, ⌘⌥F puts the keys in Replace with.
+    key('Escape'); await settle();
+    key('f', {metaKey: true, altKey: true}); await settle();
+    assert(doc.activeElement === swap, 'with words in Find, the keys did not go to Replace with');
+    key('Escape'); await settle();
+    field.value = '';
+  });
+
   await test('Scrolling a long way asks for the rows there, and the grid goes on', async () => {
     await win.pushEvents([book({active: 0, version: 2})]); await settle();
     const scroll = ws().querySelector('[data-sheet-scroll]');

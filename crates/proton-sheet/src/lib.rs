@@ -9,6 +9,7 @@
 //! - [`edit`]: rows and columns put in and taken out, formulas following;
 //!   copying and filling.
 //! - [`arrange`]: sorting, filters, and conditional colour.
+//! - [`find`]: text found in a sheet and replaced.
 //! - [`numfmt`]: Excel's number formats, for showing a value.
 //! - [`xlsx`], [`csv`]: Excel's files and delimited text, opened and saved.
 //! - [`refs`], [`value`], [`dates`]: references, values, and dates as
@@ -19,6 +20,7 @@ pub mod book;
 pub mod csv;
 pub mod dates;
 pub mod edit;
+pub mod find;
 pub mod folder;
 pub mod formula;
 pub mod functions;
