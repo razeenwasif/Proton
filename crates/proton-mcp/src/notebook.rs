@@ -15,6 +15,9 @@
 //! `read_note` hands back one of the notebook's notes — the student's own
 //! writing, a cheatsheet the tutor made — whole: `notebook_sources` lists
 //! them after the sources, ticked or not, since a note is not a source.
+//! `read_file` does the same for the files a tutor wrote in `files/` — a
+//! `.tex` cheatsheet, say — listed after the notes; a PDF made from one is
+//! a source, read as sources are.
 //!
 //! `view_pages` draws a PDF source's pages as pictures, for slides whose
 //! words were too few to read: it needs the file itself, found under the
@@ -196,6 +199,13 @@ pub fn tools() -> Value {
             "inputSchema": { "type": "object", "properties": { "note": { "type": "string", "description": "The note's id: N001." } }, "required": ["note"] }
         },
         {
+            "name": "read_file",
+            "description": "Read one of the files written for the student, kept in the notebook's files/ — a .tex cheatsheet, \
+                            a script — by its name as notebook_sources lists them. Name it as \"the file sheet.tex\"; it is not \
+                            a source, so it is not cited in brackets. A PDF compiled from one is a source.",
+            "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "The file's name: sheet.tex." } }, "required": ["name"] }
+        },
+        {
             "name": "notebook_status",
             "description": "How many sources this notebook has, how many you may use, and whether any is still being read.",
             "inputSchema": { "type": "object", "properties": {} }
@@ -229,6 +239,10 @@ pub fn call(served: &mut Served, name: &str, args: &Value) -> Value {
             Ok(text) => rpc::tool_output(text, false),
             Err(why) => rpc::tool_output(why, true),
         },
+        "read_file" => match written(served, args) {
+            Ok(text) => rpc::tool_output(text, false),
+            Err(why) => rpc::tool_output(why, true),
+        },
         other => rpc::tool_output(format!("no tool named {other}"), true),
     }
 }
@@ -244,6 +258,44 @@ fn notes_list(book: &Book) -> String {
         out.push_str(&format!("{}  {}\n", n.id, n.title));
     }
     out
+}
+
+/// The files written for the student, by name: listed after the notes.
+fn files_list(book: &Book) -> String {
+    let files = book.files();
+    if files.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\nFiles written for the student, in the notebook's files/; read_file shows one:\n");
+    for (name, size) in files {
+        out.push_str(&format!("{name}  {}\n", size_of(size)));
+    }
+    out
+}
+
+/// A file's size, as people say it.
+fn size_of(bytes: u64) -> String {
+    match bytes {
+        b if b < 1_000 => format!("{b} bytes"),
+        b if b < 1_000_000 => format!("{} KB", b.div_ceil(1_000)),
+        b => format!("{:.1} MB", b as f64 / 1e6),
+    }
+}
+
+/// One file written for the student, whole or as far as a call may hand back.
+fn written(served: &Served, args: &Value) -> Result<String, String> {
+    let book = served.book.as_ref().ok_or("the notebook cannot be read")?;
+    let name = args["name"].as_str().ok_or("read_file: `name` is required, a file's name: sheet.tex")?;
+    let mut body = book.read_file(name)?;
+    if body.len() > MOST {
+        let mut cut = MOST;
+        while !body.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        body.truncate(cut);
+        body.push_str("\n…(cut here: the rest is longer than one call hands back)");
+    }
+    Ok(format!("files/{}\n\n{body}", name.trim()))
 }
 
 /// One note, whole or as far as a call may hand back.
@@ -267,7 +319,7 @@ fn sources(served: &Served) -> String {
     let Some(book) = &served.book else { return "the notebook cannot be read".into() };
     let ticked = served.ticked();
     if ticked.is_empty() {
-        return format!("No sources are ticked for you to use. Say so: the student ticks sources in the notebook.\n{}", notes_list(book));
+        return format!("No sources are ticked for you to use. Say so: the student ticks sources in the notebook.\n{}{}", notes_list(book), files_list(book));
     }
     let mut out = format!("The notebook \"{}\" — the sources you may use:\n", book.notebook.title);
     for s in &ticked {
@@ -288,6 +340,7 @@ fn sources(served: &Served) -> String {
         out.push_str(&format!("{others} other source{} are not ticked, and are not yours to use.\n", if others == 1 { " is" } else { "s" }));
     }
     out.push_str(&notes_list(book));
+    out.push_str(&files_list(book));
     out
 }
 
@@ -586,6 +639,28 @@ mod tests {
         assert!(text(&read).contains("A* is optimal when h is admissible."), "{}", text(&read));
         assert_eq!(call(&mut served, "read_note", &json!({ "note": "N404" }))["isError"], json!(true));
         assert!(tools().as_array().unwrap().iter().any(|t| t["name"] == "read_note"));
+    }
+
+    #[test]
+    fn the_files_written_for_the_student_are_listed_after_the_notes_and_read_by_name() {
+        let (dir, _) = notebook("files");
+        let book = Book::read(&dir).unwrap();
+        book.write_file("sheet.tex", "\\section{Search} A* is optimal when $h$ is admissible.").unwrap();
+        std::fs::write(book.files_dir().join("sheet.pdf"), b"%PDF-1.5 \xff\xfe binary").unwrap();
+        std::fs::create_dir_all(book.files_dir().join(".build")).unwrap();
+        let mut served = Served::open(dir.clone(), Vec::new());
+        let listed = text(&call(&mut served, "notebook_sources", &json!({})));
+        assert!(listed.contains("Files written for the student") && listed.contains("sheet.tex  "), "{listed}");
+        assert!(!listed.contains(".build"), "{listed}");
+        let read = call(&mut served, "read_file", &json!({ "name": "sheet.tex" }));
+        assert_eq!(read["isError"], json!(false));
+        assert!(text(&read).contains("A* is optimal when $h$ is admissible."), "{}", text(&read));
+        let pdf = call(&mut served, "read_file", &json!({ "name": "sheet.pdf" }));
+        assert!(pdf["isError"] == json!(true) && text(&pdf).contains("read as a source"), "{}", text(&pdf));
+        for outside in ["../sources.json", "/etc/hosts", ".build", "missing.tex"] {
+            assert_eq!(call(&mut served, "read_file", &json!({ "name": outside }))["isError"], json!(true), "{outside}");
+        }
+        assert!(tools().as_array().unwrap().iter().any(|t| t["name"] == "read_file"));
     }
 
     #[test]

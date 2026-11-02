@@ -203,6 +203,37 @@ impl Book {
         Ok(path)
     }
 
+    /// The files a tutor wrote, by name and size, in order of name: those
+    /// in `files/` a name `tutor::file_name` allows, and no link.
+    pub fn files(&self) -> Vec<(String, u64)> {
+        let Ok(entries) = std::fs::read_dir(self.files_dir()) else {
+            return Vec::new();
+        };
+        let mut files: Vec<(String, u64)> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_str()?.to_string();
+                let meta = entry.path().symlink_metadata().ok()?;
+                (meta.is_file() && crate::tutor::file_name(&name).as_deref() == Some(name.as_str())).then_some((name, meta.len()))
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// A file a tutor wrote, as text; a PDF or another file that is not
+    /// text is refused, as is a name that is not one of `files()`.
+    pub fn read_file(&self, name: &str) -> Result<String, String> {
+        let name = crate::tutor::file_name(name).ok_or_else(|| format!("{name}: not a name a file can have here"))?;
+        let path = self.files_dir().join(&name);
+        match path.symlink_metadata() {
+            Ok(meta) if meta.is_file() => {}
+            _ => return Err(format!("{name}: no such file in the notebook's files")),
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("{name}: {e}"))?;
+        String::from_utf8(bytes).map_err(|_| format!("{name} is not text: a PDF made from a .tex is read as a source"))
+    }
+
     /* ── notes ─────────────────────────────────────────────────────── */
 
     /// Every note, in order of its id.

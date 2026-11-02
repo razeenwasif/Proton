@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// The notebook server's tools a tutor may call.
-pub const TOOLS: [&str; 7] = ["notebook_sources", "search_sources", "read_source", "digest_source", "view_pages", "notebook_status", "read_note"];
+pub const TOOLS: [&str; 8] = ["notebook_sources", "search_sources", "read_source", "digest_source", "view_pages", "notebook_status", "read_note", "read_file"];
 
 /// The most passages a tutor without the tools is given, in characters.
 const PASSAGES: usize = 16_000;
@@ -286,6 +286,7 @@ fn step(tool: &Tool) -> StudyStep {
         }
         "digest_source" => ("read", format!("Read {}'s digest", field("source"))),
         "read_note" => ("read", format!("Read the note {}", field("note"))),
+        "read_file" => ("read", format!("Read the file {}", field("name"))),
         "view_pages" => {
             let pages: Vec<String> = input.get("pages").and_then(|v| v.as_array()).map(|p| p.iter().map(|n| n.to_string()).collect()).unwrap_or_default();
             ("view", format!("Looked at {} page {}", field("source"), pages.join(", ")))
@@ -313,6 +314,31 @@ fn passages(book: &Book, question: &str) -> String {
     }
     let mut out = proton_library::quote(&kept);
     out.push_str(&notes_given(book));
+    out.push_str(&files_given(book));
+    out
+}
+
+/// The files written for the student, for a tutor given passages: those
+/// that are text, whole as far as their share goes, and otherwise by name.
+fn files_given(book: &Book) -> String {
+    /// What the files may take of a message, in characters.
+    const FILES: usize = 8_000;
+    let files = book.files();
+    if files.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n\nFiles written for the student, in the notebook's files/; not sources, so name one as \"the file sheet.tex\", unbracketed:\n");
+    let mut used = 0;
+    for (name, _) in files {
+        let Ok(body) = book.read_file(&name) else { continue };
+        let whole = format!("\n## files/{name}\n```\n{}\n```\n", body.trim());
+        if used + whole.len() <= FILES {
+            used += whole.len();
+            out.push_str(&whole);
+        } else {
+            out.push_str(&format!("\n## files/{name} (too long to give here)\n"));
+        }
+    }
     out
 }
 
