@@ -30,7 +30,6 @@ use crate::chat::{Answer, Image, Settings};
 use crate::engine::{Conversation, Engine, Unattended};
 use crate::fold::{Capabilities, Changes, Fold, Level, ModelChoice, Tool, ToolState};
 use crate::pipe::{Line, Pipe};
-use crate::saved::Record;
 
 /// Where `agy` is: `PROTON_AGY_BIN`, where Antigravity's installer puts it,
 /// then the login shell's PATH and our own, then the copy the Gemini desktop
@@ -147,32 +146,6 @@ impl Antigravity {
     pub fn unattended(cwd: PathBuf, settings: Settings, how: &Unattended) -> Antigravity {
         let mut agy = Antigravity::new(cwd, Settings { mode: "plan".into(), ..settings });
         agy.unattended = Some(how.clone());
-        agy
-    }
-
-    pub fn restore(record: Record) -> Antigravity {
-        let settings = Settings { model: record.model.clone(), mode: record.mode.clone(), effort: record.effort.clone() };
-        let mut agy = Antigravity::new(record.cwd.clone(), settings);
-        agy.id = record.id.clone();
-        agy.fold = Fold::for_engine(&record.id, Engine::Antigravity);
-        agy.fold.restore(record.items);
-        agy.fold.ended("");
-        let status = agy.fold.status_mut();
-        status.title = record.title;
-        status.mode = Engine::Antigravity.mode(&record.mode);
-        status.model = record.model.unwrap_or_default();
-        status.effort = record.effort;
-        status.error = None;
-        agy.conversation = record.native;
-        // Rows kept from earlier runs were numbered by them.
-        agy.run = agy
-            .fold
-            .items()
-            .iter()
-            .filter_map(|i| i.id().strip_prefix('r')?.split(':').next()?.parse::<u32>().ok())
-            .max()
-            .unwrap_or(0);
-        let _ = agy.fold.take();
         agy
     }
 
@@ -486,20 +459,6 @@ impl Conversation for Antigravity {
         self.fold.published(tool, artifact);
     }
 
-    fn record(&self) -> Option<Record> {
-        Some(Record {
-            id: self.id.clone(),
-            engine: Engine::Antigravity,
-            cwd: self.cwd.clone(),
-            native: self.conversation.clone(),
-            title: self.fold.status().title.clone(),
-            updated: crate::codex::now(),
-            model: self.settings.model.clone(),
-            mode: self.settings.mode.clone(),
-            effort: self.settings.effort.clone(),
-            items: self.fold.items().to_vec(),
-        })
-    }
 }
 
 impl Antigravity {
@@ -564,6 +523,15 @@ fn capabilities_with(models: Vec<ModelChoice>) -> Capabilities {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn its_conversation_is_kept_to_carry_on_in_a_new_process() {
+        let mut agy = Antigravity::new(PathBuf::from("/n"), Settings::default());
+        agy.hear(&json!({ "event": "init", "conversation_id": "c1", "init": { "permission_mode": "request-review" } }));
+        assert_eq!(agy.conversation.as_deref(), Some("c1"));
+        let args = args(&agy.settings, agy.conversation.as_deref(), None);
+        assert!(args.iter().any(|a| a.contains("c1")), "{args:?}");
+    }
 
     #[test]
     #[cfg(target_os = "macos")]

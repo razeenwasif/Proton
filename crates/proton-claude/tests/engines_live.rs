@@ -59,12 +59,9 @@ fn codex_answers_and_its_thread_carries_on_in_a_new_process() {
     println!("codex said: {first}");
     assert!(first.to_lowercase().contains("pelican"), "{first}");
     assert!(matches!(codex.fold().items().last(), Some(Item::Turn { error: None, .. })));
-    let record = codex.record().unwrap();
-    assert!(record.native.is_some(), "no thread to carry on with");
-    drop(codex);
+    codex.stop();
 
-    let mut again = Codex::restore(record);
-    let second = turn(&mut again, "Which bird did you name a moment ago? Reply with one word. Do not run any commands.");
+    let second = turn(&mut codex, "Which bird did you name a moment ago? Reply with one word. Do not run any commands.");
     println!("codex, picked up again, said: {second}");
     assert!(second.to_lowercase().contains("pelican"), "the thread did not carry on: {second}");
     let _ = std::fs::remove_dir_all(cwd);
@@ -78,12 +75,9 @@ fn antigravity_answers_and_its_conversation_carries_on_in_a_new_process() {
     let first = turn(&mut agy, "Reply with exactly the word: heron. Do not use any tools.");
     println!("agy said: {first}");
     assert!(first.to_lowercase().contains("heron"), "{first}");
-    let record = agy.record().unwrap();
-    assert!(record.native.is_some(), "no conversation to carry on with");
-    drop(agy);
+    agy.stop();
 
-    let mut again = Antigravity::restore(record);
-    let second = turn(&mut again, "Which bird did you name a moment ago? Reply with one word. Do not use any tools.");
+    let second = turn(&mut agy, "Which bird did you name a moment ago? Reply with one word. Do not use any tools.");
     println!("agy, picked up again, said: {second}");
     assert!(second.to_lowercase().contains("heron"), "the conversation did not carry on: {second}");
     let _ = std::fs::remove_dir_all(cwd);

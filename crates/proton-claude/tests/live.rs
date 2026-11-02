@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use proton_claude::chat::{Answer, Chat, Settings};
 use proton_claude::fold::{Activity, Item, ToolState};
-use proton_claude::history;
 
 fn scratch() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("proton-claude-live-{}", std::process::id()));
@@ -99,21 +98,13 @@ fn a_conversation_streams_asks_is_interrupted_and_resumes() {
     until(&mut chat, 60, |chat| chat.fold().status().activity == Activity::Idle);
 
     // Let it go, and pick it up again from its file.
-    let id = chat.id.clone();
+    let turns = |chat: &Chat| chat.fold().items().iter().filter(|i| matches!(i, Item::Turn { .. })).count();
+    let before = turns(&chat);
     chat.stop();
     std::thread::sleep(Duration::from_millis(800));
-    let file = history::file(&dir, &id).expect("Claude Code kept a file for the session");
-    let listed = history::sessions(&dir, &mut history::Titles::new());
-    assert!(listed.iter().any(|s| s.id == id), "{listed:?}");
-    let (lines, shortened) = history::load(&file).unwrap();
-    assert!(!shortened);
-    let mut resumed = Chat::resume(dir.clone(), &id, &lines, haiku(), None);
-    let users = resumed.fold().items().iter().filter(|i| matches!(i, Item::User { .. })).count();
-    assert_eq!(users, 3, "{:#?}", resumed.fold().items());
-    resumed.send("What word did you reply with first? One word.", &[]).unwrap();
-    let third = |chat: &Chat| chat.fold().items().iter().any(|i| matches!(i, Item::Turn { .. }));
-    until(&mut resumed, 90, |chat| third(chat) && chat.fold().status().activity == Activity::Idle);
-    let last = resumed
+    chat.send("What word did you reply with first? One word.", &[]).unwrap();
+    until(&mut chat, 90, |chat| turns(chat) > before && chat.fold().status().activity == Activity::Idle);
+    let last = chat
         .fold()
         .items()
         .iter()
@@ -123,6 +114,6 @@ fn a_conversation_streams_asks_is_interrupted_and_resumes() {
             _ => None,
         })
         .unwrap();
-    assert!(last.contains("pong"), "the resumed session remembered: {last}");
-    resumed.stop();
+    assert!(last.contains("pong"), "the session picked up again remembered: {last}");
+    chat.stop();
 }

@@ -4,9 +4,8 @@
 //! A process is started by the first thing said and stays for the turns
 //! after it, the way a terminal session does; switching away leaves it
 //! running, so a long task carries on while you look at another. A session
-//! that already has a history — picked up from the list, or one whose process
-//! was stopped — is started again with `--resume`, which hands Claude Code
-//! its own file to carry on from.
+//! whose process was stopped is started again with `--resume`, which hands
+//! Claude Code its own file to carry on from.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -71,11 +70,6 @@ pub struct Chat {
     fold: Fold,
     /// Whether Claude Code has a file for this session to resume from.
     has_history: bool,
-    /// Continue a copy rather than the session itself: another Claude Code
-    /// has it open. Cleared once the copy has its own id.
-    fork: bool,
-    /// The id this conversation had before a fork gave it its own.
-    renamed: Option<String>,
     /// Open permission requests, as they were asked: the answer has to give
     /// the tool's input back, and "always" needs the suggested rules.
     asks: HashMap<String, Value>,
@@ -100,8 +94,6 @@ impl Chat {
             process: None,
             fold,
             has_history: false,
-            fork: false,
-            renamed: None,
             asks: HashMap::new(),
             extra: Vec::new(),
             env: Vec::new(),
@@ -160,48 +152,9 @@ impl Chat {
         chat
     }
 
-    /// A session read back from its file.
-    pub fn resume(cwd: PathBuf, id: &str, lines: &[Value], settings: Settings, system: Option<String>) -> Chat {
-        let mut fold = Fold::new(id);
-        for line in lines {
-            fold.line(line);
-        }
-        // What was waiting when it was last open is not waiting any more:
-        // that process is gone, and its questions with it.
-        fold.ended("");
-        fold.status_mut().mode = settings.mode.clone();
-        fold.status_mut().effort = settings.effort.clone();
-        fold.status_mut().error = None;
-        Chat {
-            id: id.to_string(),
-            cwd,
-            settings,
-            system,
-            process: None,
-            fold,
-            has_history: true,
-            fork: false,
-            renamed: None,
-            asks: HashMap::new(),
-            extra: Vec::new(),
-            env: Vec::new(),
-        }
-    }
-
-    /// Continue a copy of this session rather than the session itself.
-    pub fn fork(&mut self) {
-        self.fork = true;
-    }
-
     /// The folder it runs in.
     pub fn cwd(&self) -> &std::path::Path {
         &self.cwd
-    }
-
-    /// The id it had before a fork gave it its own, once — for a host that
-    /// knew it by that one.
-    pub fn take_renamed(&mut self) -> Option<String> {
-        self.renamed.take()
     }
 
     pub fn fold(&self) -> &Fold {
@@ -227,7 +180,6 @@ impl Chat {
             cwd: self.cwd.clone(),
             session: self.id.clone(),
             resume: self.has_history,
-            fork: self.fork && self.has_history,
             model: self.settings.model.clone(),
             mode: flag_mode(&self.settings.mode).to_string(),
             effort: self.settings.effort.clone(),
@@ -381,15 +333,6 @@ impl Chat {
                         }
                     }
                     self.fold.line(&message);
-                    // A fork's first word is its new id: from here on, this
-                    // conversation is that session, and resumes as it.
-                    if self.fork && message.get("subtype").and_then(Value::as_str) == Some("init") {
-                        let session = self.fold.status().session.clone();
-                        if !session.is_empty() && session != self.id {
-                            self.renamed = Some(std::mem::replace(&mut self.id, session));
-                            self.fork = false;
-                        }
-                    }
                 }
                 Line::Ended(why) => {
                     self.process = None;
@@ -454,7 +397,6 @@ pub fn probe(cwd: PathBuf) -> std::sync::mpsc::Receiver<crate::fold::Capabilitie
             cwd,
             session: uuid(),
             resume: false,
-            fork: false,
             model: None,
             mode: "manual".into(),
             effort: None,

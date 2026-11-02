@@ -17,9 +17,6 @@
 //!   into the rows a transcript is drawn from, and says which ones changed.
 //! - [`chat`] is one conversation: a process when one is running, its fold,
 //!   and the questions waiting on you.
-//! - [`history`] reads the sessions Claude Code keeps for a project, so any of
-//!   them — started here, in a terminal or in the desktop app — can be picked
-//!   up again.
 //! - [`artifacts`] keeps what the Artifact tool publishes, a version at a time,
 //!   so a notebook can read and show it without a round trip to claude.ai.
 //! - [`import`] finds what was published before Proton was keeping it: in
@@ -47,17 +44,14 @@ pub mod codex;
 pub mod engine;
 pub mod fold;
 pub mod gemini;
-pub mod history;
 pub mod import;
 pub mod patch;
 pub mod pipe;
 pub mod process;
 pub mod rpc;
-pub mod saved;
 
 pub use artifacts::{Artifact, ArtifactRef, Imported, Store, Version};
 pub use chat::{Answer, Chat, Settings};
 pub use engine::{Conversation, Engine, ModeChoice};
 pub use fold::{Activity, Ask, AskKind, Capabilities, Command, Fold, Item, Level, Limit, ModelChoice, Status, Task, Tool, ToolState};
-pub use history::SessionSummary;
 pub use process::on_output;

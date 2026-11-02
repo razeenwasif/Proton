@@ -137,8 +137,6 @@ fn an_antigravity_session_reads_as_its_tools_and_both_answers() {
     assert!(tools.iter().all(|t| t.state == ToolState::Done), "{tools:#?}");
     assert_eq!(fold.status().activity, Activity::Idle);
     assert!(fold.status().context > 0);
-    let record = agy.record().unwrap();
-    assert_eq!(record.native.as_deref(), Some("a56ae8cb-2904-48b9-ae68-b77eb1f298e9"), "its conversation, to carry on with");
 }
 
 #[test]
@@ -206,25 +204,6 @@ fn in_accept_edits_gemini_is_not_asked_about_an_edit() {
     let edit = gemini.fold().tool("replace-2").unwrap();
     assert!(edit.ask.is_none(), "{edit:#?}");
     assert_ne!(gemini.fold().status().activity, Activity::Waiting);
-}
-
-#[test]
-fn a_kept_conversation_carries_its_engines_id_and_rows_back() {
-    let mut codex = Codex::new(project(), Settings::default());
-    for (sent, line) in fixture("codex-session") {
-        if !sent {
-            codex.hear(classify(line).unwrap());
-        }
-    }
-    let mut record = codex.record().unwrap();
-    record.native = Some("01a106ae-14e5-72b2-9dc2-69850a9d5244".into());
-    record.title = "Notes".into();
-    let back = Codex::restore(record.clone());
-    assert_eq!(back.id(), record.id);
-    assert_eq!(back.fold().items(), codex.fold().items());
-    assert_eq!(back.fold().status().title, "Notes");
-    assert_eq!(back.record().unwrap().native, record.native);
-    assert!(!back.running());
 }
 
 /* ── unattended, for Research ─────────────────────────────────────────

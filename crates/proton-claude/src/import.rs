@@ -153,7 +153,18 @@ pub fn iso_ms(text: &str) -> Option<u64> {
 /* ── the desktop app's records ─────────────────────────────────────── */
 
 /// Where the Claude desktop app keeps its Code sessions' records.
-pub(crate) fn desktop_dir() -> Option<PathBuf> {
+/// Where Claude Code keeps its own files: `CLAUDE_CONFIG_DIR` if it is set,
+/// otherwise `~/.claude`.
+fn config_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(|home| PathBuf::from(home).join(".claude"))
+}
+
+fn desktop_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("PROTON_CLAUDE_DESKTOP") {
         return Some(PathBuf::from(dir));
     }
@@ -234,7 +245,7 @@ fn jsonl_files(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
 }
 
 fn from_sessions() -> Vec<Found> {
-    let Some(config) = crate::history::config_dir() else { return Vec::new() };
+    let Some(config) = config_dir() else { return Vec::new() };
     let mut files = Vec::new();
     jsonl_files(&config.join("projects"), &mut files, 0);
     let mut found = Vec::new();

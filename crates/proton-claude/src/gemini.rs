@@ -30,7 +30,6 @@ use crate::chat::{Answer, Image, Settings};
 use crate::engine::{Conversation, Engine, Unattended};
 use crate::fold::{Ask, AskKind, Capabilities, Changes, Fold, Level, ModelChoice, Task, Tool, ToolState};
 use crate::rpc::{Incoming, Rpc};
-use crate::saved::Record;
 
 /// Where `gemini` is: `PROTON_GEMINI_BIN`, then the login shell's PATH —
 /// where npm and Homebrew put it — and our own.
@@ -183,24 +182,6 @@ impl Gemini {
             .map(|s| json!({ "name": s.name, "command": s.command, "args": s.args, "env": [] }))
             .collect();
         Value::Array(servers)
-    }
-
-    pub fn restore(record: Record) -> Gemini {
-        let settings = Settings { model: record.model.clone(), mode: record.mode.clone(), effort: None };
-        let mut gemini = Gemini::new(record.cwd.clone(), settings);
-        gemini.id = record.id.clone();
-        gemini.fold = Fold::for_engine(&record.id, Engine::Gemini);
-        gemini.fold.restore(record.items);
-        gemini.fold.ended("");
-        let status = gemini.fold.status_mut();
-        status.title = record.title;
-        status.mode = Engine::Gemini.mode(&record.mode);
-        status.model = record.model.unwrap_or_default();
-        status.error = None;
-        // Its session went with the process that had it.
-        gemini.replay = true;
-        let _ = gemini.fold.take();
-        gemini
     }
 
     /// One thing the CLI said: what the running process says, as `poll`
@@ -702,20 +683,6 @@ impl Conversation for Gemini {
         self.fold.published(tool, artifact);
     }
 
-    fn record(&self) -> Option<Record> {
-        Some(Record {
-            id: self.id.clone(),
-            engine: Engine::Gemini,
-            cwd: self.cwd.clone(),
-            native: None,
-            title: self.fold.status().title.clone(),
-            updated: crate::codex::now(),
-            model: self.settings.model.clone(),
-            mode: self.settings.mode.clone(),
-            effort: None,
-            items: self.fold.items().to_vec(),
-        })
-    }
 }
 
 #[cfg(test)]

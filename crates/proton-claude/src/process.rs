@@ -50,9 +50,6 @@ pub struct Spawn {
     pub session: String,
     /// Pick up a session that already has a history, rather than start one.
     pub resume: bool,
-    /// Carry on from a copy of it, under a new id: for a session another
-    /// Claude Code has open, which must not be written into twice.
-    pub fork: bool,
     pub model: Option<String>,
     pub mode: String,
     pub effort: Option<String>,
@@ -98,9 +95,6 @@ impl Spawn {
         }
         args.push(if self.resume { "--resume" } else { "--session-id" }.into());
         args.push(self.session.clone());
-        if self.resume && self.fork {
-            args.push("--fork-session".into());
-        }
         if let Some(system) = self.system.as_deref().filter(|s| !s.is_empty()) {
             args.push("--append-system-prompt".into());
             args.push(system.to_string());
@@ -222,7 +216,6 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             session: "0f8fad5b-d9cb-469f-a165-70867728950e".into(),
             resume: false,
-            fork: false,
             model: Some("opus".into()),
             mode: "acceptEdits".into(),
             effort: Some("high".into()),
@@ -255,9 +248,7 @@ mod tests {
         spawn.effort = None;
         let args = spawn.args();
         assert!(args.windows(2).any(|w| w[0] == "--resume" && w[1] == spawn.session));
-        assert!(!args.iter().any(|a| a == "--session-id" || a == "--model" || a == "--effort" || a == "--fork-session"));
-        spawn.fork = true;
-        assert!(spawn.args().iter().any(|a| a == "--fork-session"), "a session open elsewhere is forked");
+        assert!(!args.iter().any(|a| a == "--session-id" || a == "--model" || a == "--effort"));
     }
 
     #[test]

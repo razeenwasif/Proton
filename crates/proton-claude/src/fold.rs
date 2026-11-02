@@ -637,28 +637,6 @@ impl Fold {
         fold
     }
 
-    /// Rows kept from before, drawn as they were.
-    pub fn restore(&mut self, items: Vec<Item>) {
-        for item in items {
-            // The rows this fold makes itself are numbered; new ones must not
-            // reuse a number a kept one has.
-            if let Some((_, n)) = item.id().rsplit_once('-') {
-                if let Ok(n) = n.parse::<u64>() {
-                    self.local = self.local.max(n);
-                }
-            }
-            match self.at.get(item.id()) {
-                Some(&at) => {
-                    self.items[at] = item;
-                    self.touch(at);
-                }
-                None => {
-                    self.push(item);
-                }
-            }
-        }
-    }
-
     /// Prose as it streams: a row made the first time, added to after.
     pub fn prose(&mut self, id: &str, delta: &str, thinking: bool) {
         if delta.is_empty() && !self.at.contains_key(id) {

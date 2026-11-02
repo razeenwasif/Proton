@@ -29,7 +29,6 @@ use crate::chat::{Answer, Image, Settings};
 use crate::engine::{Conversation, Engine, Unattended};
 use crate::fold::{Ask, AskKind, Capabilities, Changes, Fold, Item, Level, Limit, ModelChoice, Task, Tool, ToolState};
 use crate::rpc::{Incoming, Rpc};
-use crate::saved::Record;
 
 /// Where `codex` is: `PROTON_CODEX_BIN`, the one inside the Codex or ChatGPT
 /// app, then the login shell's PATH — where npm puts it — and our own.
@@ -171,25 +170,6 @@ impl Codex {
             unattended: None,
             plugins: Vec::new(),
         }
-    }
-
-    /// A conversation kept by Proton, to carry on with its thread.
-    pub fn restore(record: Record) -> Codex {
-        let settings = Settings { model: record.model.clone(), mode: record.mode.clone(), effort: record.effort.clone() };
-        let mut codex = Codex::new(record.cwd.clone(), settings);
-        codex.id = record.id.clone();
-        codex.fold = Fold::for_engine(&record.id, Engine::Codex);
-        codex.fold.restore(record.items);
-        codex.fold.ended("");
-        let status = codex.fold.status_mut();
-        status.title = record.title;
-        status.mode = Engine::Codex.mode(&record.mode);
-        status.effort = record.effort;
-        status.model = record.model.unwrap_or_default();
-        status.error = None;
-        codex.thread = record.native;
-        let _ = codex.fold.take();
-        codex
     }
 
     /// One thing the app-server said: what the running process says, as
@@ -984,20 +964,6 @@ impl Conversation for Codex {
         self.fold.published(tool, artifact);
     }
 
-    fn record(&self) -> Option<Record> {
-        Some(Record {
-            id: self.id.clone(),
-            engine: Engine::Codex,
-            cwd: self.cwd.clone(),
-            native: self.thread.clone(),
-            title: self.fold.status().title.clone(),
-            updated: now(),
-            model: self.settings.model.clone(),
-            mode: self.settings.mode.clone(),
-            effort: self.settings.effort.clone(),
-            items: self.fold.items().to_vec(),
-        })
-    }
 }
 
 pub(crate) fn now() -> u64 {

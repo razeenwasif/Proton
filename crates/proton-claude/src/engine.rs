@@ -213,18 +213,6 @@ pub trait Conversation: Send {
     fn stop(&mut self);
     /// The artifact a tool published, kept by the host.
     fn published(&mut self, tool: &str, artifact: ArtifactRef);
-    /// Carry on from a copy rather than the session itself, for one another
-    /// program has open. Only Claude Code's sessions are shared that way.
-    fn fork(&mut self) {}
-    /// The id it had before a fork gave it its own, once.
-    fn take_renamed(&mut self) -> Option<String> {
-        None
-    }
-    /// What Proton keeps of it to read back, for an engine whose own files
-    /// Proton does not read; `None` for Claude Code, whose files it does.
-    fn record(&self) -> Option<crate::saved::Record> {
-        None
-    }
 }
 
 impl Conversation for Chat {
@@ -272,12 +260,6 @@ impl Conversation for Chat {
     }
     fn published(&mut self, tool: &str, artifact: ArtifactRef) {
         Chat::published(self, tool, artifact)
-    }
-    fn fork(&mut self) {
-        Chat::fork(self)
-    }
-    fn take_renamed(&mut self) -> Option<String> {
-        Chat::take_renamed(self)
     }
 }
 

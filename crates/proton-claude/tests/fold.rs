@@ -230,19 +230,15 @@ fn a_session_read_back_draws_what_it_drew_live() {
 }
 
 #[test]
-fn a_session_file_read_back_after_a_relaunch_keeps_its_answers() {
+fn a_session_file_keeps_its_answers() {
     // As Claude Code writes a session to disk: an answer's line puts its
     // message — with a `"type":"message"` of its own — before the line's own
-    // `"type":"assistant"`. Read back by the first `"type":` in the line,
-    // every answer was dropped and only the prompts came back.
+    // `"type":"assistant"`.
     let path = format!("{}/tests/fixtures/session-on-disk.jsonl", env!("CARGO_MANIFEST_DIR"));
-    let (lines, shortened) = proton_claude::history::load(std::path::Path::new(&path)).unwrap();
-    let kinds: Vec<&str> = lines.iter().filter_map(|l| l["type"].as_str()).collect();
-    assert_eq!(kinds, ["user", "assistant", "assistant", "mode"]);
-    assert!(!shortened);
+    let text = std::fs::read_to_string(path).unwrap();
     let mut fold = Fold::new("s1");
-    for line in &lines {
-        fold.line(line);
+    for line in text.lines() {
+        fold.line(&serde_json::from_str(line).unwrap());
     }
     let drawn: Vec<(&str, &str)> = fold
         .items()
@@ -255,23 +251,6 @@ fn a_session_file_read_back_after_a_relaunch_keeps_its_answers() {
         })
         .collect();
     assert_eq!(drawn, [("you", "What is in the folder?"), ("thinking", ""), ("claude", "Two notes and a plan.")]);
-}
-
-/// A real session read back, by hand, saying only how much of it came back:
-/// `PROTON_SESSION=<a session's .jsonl> cargo test -p proton-claude --test fold -- --ignored --nocapture real`
-#[test]
-#[ignore = "reads the real session PROTON_SESSION names"]
-fn a_real_session_read_back_has_its_answers() {
-    let Ok(path) = std::env::var("PROTON_SESSION") else { return };
-    let (lines, shortened) = proton_claude::history::load(std::path::Path::new(&path)).unwrap();
-    let count = |kind: &str| lines.iter().filter(|l| l["type"] == kind).count();
-    let mut fold = Fold::new("session");
-    for line in &lines {
-        fold.line(line);
-    }
-    let answers = fold.items().iter().filter(|i| matches!(i, Item::Text { .. })).count();
-    println!("{} prompts and answers' lines {}, {answers} answers drawn, earlier left out: {shortened}", count("user"), count("assistant"));
-    assert!(answers > 0);
 }
 
 #[test]
