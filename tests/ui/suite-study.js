@@ -574,6 +574,19 @@ export async function studyChecks({test, assert, win, doc, $, settle, key, shown
     ws().querySelector('[data-study-ask-form] textarea').value = '';
   });
 
+  await test('The chat keeps its column\'s width: a long line of code scrolls in its own box, and a long word in a question wraps', async () => {
+    await win.dispatch({type: 'setMode', mode: 'study'}); await settle();
+    await win.pushEvents([notebook([row('S01')])]); await settle();
+    const code = 'CF carry out of MSB (unsigned ovf); ZF $=0$; SF $<0$; OF signed ovf (pos+pos=neg, neg+neg=pos). Set by arithmetic, logic, and much more besides on one line';
+    await win.pushEvents([chatEvent({turns: [turn(`add this to the cheatsheet: ${'x'.repeat(160)} %edi`, `Paste this:\n\n\`\`\`latex\n${code}\n\`\`\`\n\nThen \`${'y'.repeat(140)}\`.`, [])]})]); await settle();
+    const stage = ws().querySelector('[data-study-stage]');
+    assert(stage.scrollWidth <= stage.clientWidth + 1, `the stage scrolls sideways: ${stage.scrollWidth} > ${stage.clientWidth}`);
+    const pre = ws().querySelector('.st-answer pre');
+    assert(pre && pre.getBoundingClientRect().width <= ws().querySelector('.st-chat-log').getBoundingClientRect().width + 1 && pre.scrollWidth > pre.clientWidth,
+      'the code does not scroll in its own box');
+    await win.pushEvents([chatEvent()]); await settle();
+  });
+
   await test('Who answers, and how, is chosen in the tutor\'s menu; an answer can be kept as a note', async () => {
     await win.pushEvents([{type: 'claudeCapabilities', capabilities: {engine: 'codex', models: [{value: 'gpt-6.1-sol', resolved: '', name: 'GPT-6.1 Sol', description: '', efforts: []}],
       modes: [], commands: [], plan: '', email: '', missing: null}}]); await settle();
