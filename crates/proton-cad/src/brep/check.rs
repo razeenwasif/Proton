@@ -129,7 +129,7 @@ pub fn check(s: &Solid) -> Vec<Problem> {
                 out.push(problem(format!("`{}` faces the wrong way: {which} in its surface's parameters", name(f)), vec![f], vec![]));
             }
         }
-        if let Some(why) = crossing(&fu.loops) {
+        if let Some(why) = crossing(s, &fu) {
             out.push(problem(format!("`{}`: {why}", name(f)), vec![f], vec![]));
         }
     }
@@ -193,20 +193,24 @@ fn shoelace(p: &[Vec2]) -> f64 {
     (0..p.len()).map(|i| p[i].cross(p[(i + 1) % p.len()])).sum::<f64>() / 2.0
 }
 
-/// Whether any two pieces of a face's loops cross or touch, but for
-/// neighbours along one loop.
-fn crossing(loops: &[Vec<uv::UvPt>]) -> Option<String> {
+/// Whether two of a face's edges cross, but where they meet at an end:
+/// found by their pieces in the parameters crossing, and then made sure of
+/// on the curves themselves — two loops nearer each other than the pieces
+/// they are cut in look as if they cross, and do not.
+fn crossing(s: &Solid, fu: &uv::FaceUv) -> Option<String> {
     let mut segs: Vec<(Vec2, Vec2, usize, usize)> = Vec::new();
-    for (l, pts) in loops.iter().enumerate() {
-        for i in 0..pts.len() {
-            segs.push((pts[i].uv, pts[(i + 1) % pts.len()].uv, l, i));
+    for (l, pieces) in fu.pieces.iter().enumerate() {
+        for p in pieces {
+            for w in p.uv.windows(2) {
+                segs.push((w[0], w[1], p.edge, l));
+            }
         }
     }
-    let n_of = |l: usize| loops[l].len();
+    let mut checked = std::collections::HashSet::new();
     for i in 0..segs.len() {
-        let (a, b, la, ia) = segs[i];
-        for &(c, d, lb, ib) in &segs[i + 1..] {
-            if la == lb && (ia + 1 == ib || (ib + 1) % n_of(lb) == ia) {
+        let (a, b, ea, la) = segs[i];
+        for &(c, d, eb, lb) in &segs[i + 1..] {
+            if ea == eb || checked.contains(&(ea.min(eb), ea.max(eb))) {
                 continue;
             }
             if a.x.max(b.x) < c.x.min(d.x) || c.x.max(d.x) < a.x.min(b.x) || a.y.max(b.y) < c.y.min(d.y) || c.y.max(d.y) < a.y.min(b.y) {
@@ -214,7 +218,16 @@ fn crossing(loops: &[Vec<uv::UvPt>]) -> Option<String> {
             }
             let o = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
             let (d1, d2, d3, d4) = (o(a, b, c), o(a, b, d), o(c, d, a), o(c, d, b));
-            if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
+            if !(d1 * d2 < 0.0 && d3 * d4 < 0.0) {
+                continue;
+            }
+            checked.insert((ea.min(eb), ea.max(eb)));
+            let (e, g) = (&s.edges[ea], &s.edges[eb]);
+            let ends: Vec<Vec3> = [e.start, e.end, g.start, g.end].iter().map(|&v| s.vertices[v].point).collect();
+            let real = crate::intersect::curves(&e.curve, &g.curve, Some((e.t0, e.t1)), Some((g.t0, g.t1)))
+                .into_iter()
+                .any(|h| ends.iter().all(|q| q.distance(h.point) > 10.0 * tol::LINEAR));
+            if real {
                 return Some(if la == lb { "a loop crosses itself".into() } else { "two of its loops cross".into() });
             }
         }

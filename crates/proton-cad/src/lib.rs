@@ -33,6 +33,7 @@
 //! - [`export`]: STL and 3MF.
 //! - [`model`]: a `.part` file built into bodies, each mistake at its line.
 
+pub mod boolean;
 pub mod brep;
 pub mod bspline;
 pub mod curve;

@@ -226,6 +226,22 @@ pub fn face(solid: &Solid, f: usize, edges: &[EdgePts], pos: &[Vec3], step: f64)
             }
         }
     }
+    // A piece of the seam's line used once — what a face split by a
+    // boolean meets the seam along, one fragment either side — is placed
+    // as a seam is: every seam a sweep makes is at u = 0, its frame's x,
+    // and a fragment reaches that line only along a piece of it.
+    if pu {
+        let line = cut_u.unwrap_or(0.0);
+        for (li, l) in face.loops.iter().enumerate() {
+            for (ci, c) in l.iter().enumerate() {
+                let us: Vec<f64> = raw[li][ci].iter().filter(|p| !p.pole).map(|p| p.u).collect();
+                if us.len() >= 2 && us.iter().all(|&u| signed(u - line).abs() < 1e-7) {
+                    kind.insert(c.edge, true);
+                    cut_u = Some(line);
+                }
+            }
+        }
+    }
     let coedge_vals = |pick: fn(&Raw) -> f64| -> Vec<Vec<f64>> { raw[0].iter().map(|c| c.iter().filter(|p| !p.pole).map(pick).collect()).collect() };
     let us: Vec<f64> = match (pu, cut_u) {
         (false, _) => vec![0.0],

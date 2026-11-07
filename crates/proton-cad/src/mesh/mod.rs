@@ -130,8 +130,10 @@ pub fn cuts(curve: &Curve, t0: f64, t1: f64, q: &Quality) -> Vec<f64> {
     match curve {
         Curve::Line(_) => vec![t0, t1],
         Curve::Circle(c) => {
+            // Two pieces at least: a curved edge cut once is its chord, which
+            // another face could draw between the same two points.
             let closed = (t1 - t0) >= TAU - 1e-12;
-            let n = ((t1 - t0) / turn(c.radius, q)).ceil().max(if closed { 3.0 } else { 1.0 }) as usize;
+            let n = ((t1 - t0) / turn(c.radius, q)).ceil().max(if closed { 3.0 } else { 2.0 }) as usize;
             even(n)
         }
         Curve::Ellipse(e) => {
@@ -190,22 +192,81 @@ fn steps(s: &Surface, rho: (f64, f64), q: &Quality) -> Steps {
 
 /// The solid as triangles, to the quality asked.
 pub fn tessellate(solid: &Solid, q: &Quality) -> Result<Mesh, String> {
-    let mut m = Mesh { positions: solid.vertices.iter().map(|v| v.point).collect(), ..Mesh::default() };
-    let eps = edge_points(solid, q, &mut m.positions);
-    m.edges = eps.iter().map(|e| e.ids.iter().map(|&i| m.positions[i as usize]).collect()).collect();
-    for f in 0..solid.faces.len() {
-        face(solid, f, &eps, q, &mut m)?;
+    // A face thinner than the pieces its edges are cut in — a sliver two
+    // nearly tangent curves bound — would have its loops cross in its
+    // parameters. The edges whose pieces cross are cut finer, for both
+    // faces they bound, until none do.
+    let mut levels = vec![0u32; solid.edges.len()];
+    for round in 0..8 {
+        let mut pos: Vec<Vec3> = solid.vertices.iter().map(|v| v.point).collect();
+        let eps = edge_points_at(solid, q, &levels, &mut pos);
+        let mut finer = std::collections::HashSet::new();
+        for f in 0..solid.faces.len() {
+            let step = 0.2;
+            if let Ok(fu) = uv::face(solid, f, &eps, &pos, step) {
+                finer.extend(crossing_edges(&fu));
+            }
+        }
+        if finer.is_empty() || round == 7 {
+            let mut m = Mesh { positions: pos, ..Mesh::default() };
+            m.edges = eps.iter().map(|e| e.ids.iter().map(|&i| m.positions[i as usize]).collect()).collect();
+            for f in 0..solid.faces.len() {
+                face(solid, f, &eps, q, &mut m)?;
+            }
+            return Ok(m);
+        }
+        for e in finer {
+            levels[e] += 1;
+        }
     }
-    Ok(m)
+    unreachable!()
+}
+
+/// The edges of a face whose pieces cross in its parameters.
+fn crossing_edges(fu: &uv::FaceUv) -> Vec<usize> {
+    let mut segs: Vec<(Vec2, Vec2, usize, usize)> = Vec::new();
+    for pieces in &fu.pieces {
+        for p in pieces {
+            for (k, w) in p.uv.windows(2).enumerate() {
+                segs.push((w[0], w[1], p.edge, k));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for i in 0..segs.len() {
+        let (a, b, ea, ka) = segs[i];
+        for &(c, d, eb, kb) in &segs[i + 1..] {
+            if ea == eb && ka.abs_diff(kb) <= 1 {
+                continue;
+            }
+            if a.x.max(b.x) < c.x.min(d.x) || c.x.max(d.x) < a.x.min(b.x) || a.y.max(b.y) < c.y.min(d.y) || c.y.max(d.y) < a.y.min(b.y) {
+                continue;
+            }
+            let o = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
+            if o(a, b, c) * o(a, b, d) < 0.0 && o(c, d, a) * o(c, d, b) < 0.0 {
+                out.push(ea);
+                out.push(eb);
+            }
+        }
+    }
+    out
 }
 
 /// Every edge cut, its points added to `pos` after the vertices.
 pub fn edge_points(solid: &Solid, q: &Quality, pos: &mut Vec<Vec3>) -> Vec<EdgePts> {
+    edge_points_at(solid, q, &vec![0; solid.edges.len()], pos)
+}
+
+/// Every edge cut, each `levels` times finer than the quality — a quarter
+/// the chord and half the angle a level.
+fn edge_points_at(solid: &Solid, q: &Quality, levels: &[u32], pos: &mut Vec<Vec3>) -> Vec<EdgePts> {
     solid
         .edges
         .iter()
-        .map(|e| {
-            let t = cuts(&e.curve, e.t0, e.t1, q);
+        .zip(levels)
+        .map(|(e, &level)| {
+            let q = Quality { chord: q.chord / 4f64.powi(level as i32), angle: q.angle / 2f64.powi(level as i32) };
+            let t = cuts(&e.curve, e.t0, e.t1, &q);
             let mut ids = vec![e.start as u32];
             for &x in &t[1..t.len() - 1] {
                 pos.push(e.point(x));
@@ -287,6 +348,11 @@ fn face(solid: &Solid, f: usize, eps: &[EdgePts], q: &Quality, m: &mut Mesh) -> 
     }
 
     // Split what strays from the surface.
+    let extent = {
+        let (lo, hi) = bounds(&fu.loops);
+        (to_plane(hi) - to_plane(lo)).length().max(1e-300)
+    };
+    let near = extent * 1e-8;
     let limit = 400_000;
     for _ in 0..40 {
         let mut added = 0;
@@ -316,7 +382,8 @@ fn face(solid: &Solid, f: usize, eps: &[EdgePts], q: &Quality, m: &mut Mesh) -> 
                     at = mid;
                 }
             }
-            if worst > q.chord && add(&mut cdt, at, 0.0, &mut uvs, &mut ids, &mut p3) {
+            // Not nearer an existing point than rounding can tell apart.
+            if worst > q.chord && add(&mut cdt, at, near, &mut uvs, &mut ids, &mut p3) {
                 added += 1;
             }
         }

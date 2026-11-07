@@ -18,12 +18,25 @@ use crate::vec::Vec2;
 const NONE: u32 = u32::MAX;
 /// Nearer than this, in the unit box, two points are one, and a point is
 /// on an edge.
-const NEAR: f64 = 1e-12;
+const NEAR: f64 = 1e-10;
 /// The three corners of the triangle everything starts inside.
 const SUPER: usize = 3;
 
+/// Whether every change is checked as it is made: `CDT_VERIFY` set, for
+/// finding what breaks a triangulation. Read once.
+fn verifying() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CDT_VERIFY").is_ok())
+}
+
 fn orient(a: Vec2, b: Vec2, c: Vec2) -> f64 {
     (b - a).cross(c - a)
+}
+
+/// Whether `a`, `b`, `c` turn anticlockwise by more than rounding could
+/// make them: a triangle made of them is not a sliver turned inside out.
+fn clearly_left(a: Vec2, b: Vec2, c: Vec2) -> bool {
+    orient(a, b, c) > 1e-10 * (b - a).length() * (c - a).length()
 }
 
 /// Positive when `d` is inside the circle through `a`, `b`, `c`, taken
@@ -176,8 +189,26 @@ impl Cdt {
             let (a, b, c) = (self.corner(t, k), self.corner(t, k + 1), self.corner(t, k + 2));
             let j = self.edge_of(u, b, a);
             let d = self.corner(u, j + 2);
-            if incircle(self.p(a), self.p(b), self.p(c), self.p(d)) > 0.0 {
+            let (pa, pb, pc, pd) = (self.p(a), self.p(b), self.p(c), self.p(d));
+            // Only where both triangles the flip makes run anticlockwise:
+            // rounding can call for a flip of a quadrilateral that is not
+            // convex, and that flip would turn a triangle inside out.
+            if incircle(pa, pb, pc, pd) > 0.0 && clearly_left(pa, pd, pc) && clearly_left(pd, pb, pc) {
+                let before = if verifying() {
+                    let mut v = vec![(t, self.tri[t as usize], self.nbr[t as usize]), (u, self.tri[u as usize], self.nbr[u as usize])];
+                    for &n in self.nbr[t as usize].iter().chain(self.nbr[u as usize].iter()) {
+                        if n != NONE {
+                            v.push((n, self.tri[n as usize], self.nbr[n as usize]));
+                        }
+                    }
+                    format!("{v:?} k {k}")
+                } else {
+                    String::new()
+                };
                 let (t2, u2) = self.flip(t, k);
+                if verifying() {
+                    self.checked(&format!("a flip of {before}"));
+                }
                 stack.push((t2, 0));
                 stack.push((u2, 0));
             }
@@ -198,6 +229,15 @@ impl Cdt {
         let o: Vec<f64> = (0..3).map(|k| orient(self.p(v[k]), self.p(v[(k + 1) % 3]), q) / (self.p(v[k]) - self.p(v[(k + 1) % 3])).length()).collect();
         let id = self.pts.len() as u32;
         if let Some(k) = (0..3).find(|&k| o[k].abs() <= NEAR) {
+            // On the edge's line: at one of its ends, it is that end.
+            let (a, b) = (self.p(v[k]), self.p(v[(k + 1) % 3]));
+            let along = (q - a).dot(b - a) / (b - a).dot(b - a);
+            if along <= 1e-9 {
+                return Ok((v[k], false));
+            }
+            if along >= 1.0 - 1e-9 {
+                return Ok((v[(k + 1) % 3], false));
+            }
             if self.fixed[t as usize][k] && !split_kept {
                 return Err("on a kept edge".into());
             }
@@ -225,6 +265,7 @@ impl Cdt {
         self.put(t2, [c, a, q], [nca, t, t1], [fca, false, false], inside);
         self.set_nbr(nbc, t, t1);
         self.set_nbr(nca, t, t2);
+        self.checked("a triangle split in three");
         self.legalize(vec![(t, 0), (t1, 0), (t2, 0)]);
     }
 
@@ -244,6 +285,9 @@ impl Cdt {
         self.put(td, [d, b, q], [ndb, tb, u], [fdb, fab, false], iu);
         self.set_nbr(nbc, t, tb);
         self.set_nbr(ndb, u, td);
+        if verifying() {
+            self.checked(&format!("an edge split ({a}, {b}) between {t} and {u}"));
+        }
         self.legalize(vec![(t, 0), (tb, 0), (u, 0), (td, 0)]);
         Ok(())
     }
@@ -251,7 +295,9 @@ impl Cdt {
     /// Add a point, before any segment is kept. Its index: a new one, or
     /// the one of the point it falls on.
     pub fn insert(&mut self, p: Vec2) -> Result<usize, String> {
-        Ok(self.add(p, true)?.0 as usize - SUPER)
+        let got = self.add(p, true);
+        self.checked("a point inserted");
+        Ok(got?.0 as usize - SUPER)
     }
 
     /// The triangles round a point.
@@ -307,6 +353,7 @@ impl Cdt {
                 Crossed::Edges(edges) => {
                     self.clear(a, b, edges)?;
                     self.mark(a, b);
+                    self.checked("a segment kept");
                 }
             }
         }
@@ -389,8 +436,8 @@ impl Cdt {
             let c = self.corner(t, k + 2);
             let j = self.edge_of(u, q, p);
             let d = self.corner(u, j + 2);
-            let (op, oq) = (orient(self.p(c), self.p(d), self.p(p)), orient(self.p(c), self.p(d), self.p(q)));
-            if op * oq < 0.0 {
+            // Both triangles the flip makes clearly anticlockwise.
+            if clearly_left(self.p(p), self.p(d), self.p(c)) && clearly_left(self.p(d), self.p(q), self.p(c)) {
                 self.flip(t, k);
                 if crosses(self, c, d) {
                     queue.push_back((c, d));
@@ -421,7 +468,7 @@ impl Cdt {
                 let x = self.corner(t, k + 2);
                 let j = self.edge_of(u, d, c);
                 let y = self.corner(u, j + 2);
-                if incircle(self.p(c), self.p(d), self.p(x), self.p(y)) > 0.0 && orient(self.p(x), self.p(y), self.p(c)) * orient(self.p(x), self.p(y), self.p(d)) < 0.0 {
+                if incircle(self.p(c), self.p(d), self.p(x), self.p(y)) > 0.0 && clearly_left(self.p(c), self.p(y), self.p(x)) && clearly_left(self.p(y), self.p(d), self.p(x)) {
                     self.flip(t, k);
                     *e = (x, y);
                     changed = true;
@@ -472,9 +519,48 @@ impl Cdt {
                 return None;
             }
         }
-        match self.add(p, false) {
+        let got = self.add(p, false);
+        self.checked("a point added inside");
+        match got {
             Ok((id, true)) => Some(id as usize - SUPER),
             _ => None,
+        }
+    }
+
+    /// Whether every link holds: each neighbour points back across the
+    /// same edge, each point's triangle has it. For tests.
+    pub fn verify(&self) -> Result<(), String> {
+        for t in 0..self.tri.len() as u32 {
+            for k in 0..3 {
+                let (a, b) = (self.corner(t, k), self.corner(t, k + 1));
+                let u = self.nbr[t as usize][k];
+                if u == NONE {
+                    continue;
+                }
+                if !(0..3).any(|j| self.corner(u, j) == b && self.corner(u, j + 1) == a && self.nbr[u as usize][j] == t) {
+                    return Err(format!("triangle {t} edge {k} ({a}, {b}): neighbour {u} {:?} does not point back", self.tri[u as usize]));
+                }
+            }
+        }
+        for t in 0..self.tri.len() as u32 {
+            let [a, b, c] = self.tri[t as usize].map(|v| self.p(v));
+            if orient(a, b, c) <= 0.0 {
+                return Err(format!("triangle {t} {:?} runs clockwise", self.tri[t as usize]));
+            }
+        }
+        for (v, &t) in self.vtri.iter().enumerate() {
+            if !self.tri[t as usize].contains(&(v as u32)) {
+                return Err(format!("point {v}'s triangle {t} {:?} does not have it", self.tri[t as usize]));
+            }
+        }
+        Ok(())
+    }
+
+    fn checked(&self, what: &str) {
+        if verifying() {
+            if let Err(e) = self.verify() {
+                panic!("after {what}: {e}");
+            }
         }
     }
 
@@ -523,5 +609,6 @@ pub fn polygon(points: &[Vec2], loops: &[Vec<usize>]) -> Result<Cdt, String> {
         }
     }
     cdt.classify();
+    cdt.checked("the polygon");
     Ok(cdt)
 }
