@@ -164,6 +164,21 @@ What is left of it.
 - **FPGA boards and JEDEC files.** BASYS3 and TinyFPGA, and GALs; they need
   the hardware to test against.
 
+## CAD
+
+A CAD mode, asked for on 2026-11-07, is planned in [`CAD.md`](CAD.md):
+parametric parts on Proton's own boundary-representation kernel,
+assemblies with mates and clearance checks, liquid-cooling routes with their
+loop schematic, drawings (blueprint among the styles), and electronics —
+schematics, footprints, boards and Gerbers. "CAD" on ⌃8. First use: the
+person's FormD T1 build with a custom loop.
+
+### Waiting on the person
+
+- **The FormD T1's figures** and the parts of the build (motherboard,
+  card, radiator, pump, fittings), so the library makes those first.
+- **Whether a board for the case comes before the build is finished.**
+
 ## Logic
 
 A logic mode after logic-calculator.com and Logic for Fun, asked for on
