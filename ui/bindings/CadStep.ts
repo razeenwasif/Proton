@@ -24,7 +24,16 @@ note: string | null,
 /**
  * An extrude's or a revolve's sketch.
  */
-sketch: string | null, distance: string | null, symmetric: boolean, axis: string | null, angle: string | null, 
+sketch: string | null, distance: string | null, symmetric: boolean, 
+/**
+ * An extrude right through everything.
+ */
+through: boolean, 
+/**
+ * An extrude's or a revolve's `join`, `cut` or `intersect`, and the
+ * body it is made into; none for a body of its own.
+ */
+how: string | null, body: string | null, axis: string | null, angle: string | null, 
 /**
  * A sketch's plane, and its offset.
  */

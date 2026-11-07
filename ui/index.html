@@ -108,6 +108,9 @@
     <symbol id="i-cad" viewBox="0 0 24 24"><path d="M12 3.5l7.5 4.25v8.5L12 20.5l-7.5-4.25v-8.5zM12 12l7.5-4.25M12 12v8.5M12 12L4.5 7.75"/></symbol>
     <symbol id="i-sketch" viewBox="0 0 24 24"><path d="M4.5 19.5h15M6.5 17l9.5-9.5 2.5 2.5L9 19.5H6.5z"/></symbol>
     <symbol id="i-extrude" viewBox="0 0 24 24"><path d="M5 15.5l7 3.5 7-3.5M5 15.5V9l7-3.5L19 9v6.5M12 12v7M12 12L5 9M12 12l7-3"/></symbol>
+    <symbol id="i-hole" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-pattern" viewBox="0 0 24 24"><circle cx="6.5" cy="6.5" r="2"/><circle cx="17.5" cy="6.5" r="2"/><circle cx="6.5" cy="17.5" r="2"/><circle cx="17.5" cy="17.5" r="2"/></symbol>
+    <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M9.5 6.5L4 17h5.5zM14.5 6.5L20 17h-5.5z"/></symbol>
     <symbol id="i-revolve" viewBox="0 0 24 24"><path d="M12 3v18M17.5 7.5a7 4 0 1 1-11 0M15.5 5l2 2.5-3 .5"/></symbol>
     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13.5a4 4 0 006 .5l2.5-2.5a4.2 4.2 0 00-6-6L11 7"/><path d="M14 10.5a4 4 0 00-6-.5L5.5 12.5a4.2 4.2 0 006 6L13 17"/></symbol>
     <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19.5a6 6 0 0112 0M16 5.2a3.2 3.2 0 010 5.6M17.5 19.5a6 6 0 00-2-4.5"/></symbol>
@@ -1040,6 +1043,7 @@
           <button class="cc-new" data-cad-add="sketch" title="A new sketch: on XY, or on the face chosen in the view"><svg class="i"><use href="#i-sketch"/></svg>Sketch</button>
           <button class="cc-new" data-cad-add="extrude" title="Extrude the chosen sketch"><svg class="i"><use href="#i-extrude"/></svg>Extrude</button>
           <button class="cc-new" data-cad-add="revolve" title="Revolve the chosen sketch"><svg class="i"><use href="#i-revolve"/></svg>Revolve</button>
+          <button class="cc-new" data-cad-add="hole" title="A hole: click a flat face in the view where it goes, then Hole here"><svg class="i"><use href="#i-hole"/></svg>Hole</button>
         </div>
         <!-- The part's parameters and steps, from Event::CadPart; with no
              part open, the project's parts, from Event::CadHome. -->

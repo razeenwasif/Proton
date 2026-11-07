@@ -101,6 +101,12 @@ pub struct CadStep {
     pub sketch: Option<String>,
     pub distance: Option<String>,
     pub symmetric: bool,
+    /// An extrude right through everything.
+    pub through: bool,
+    /// An extrude's or a revolve's `join`, `cut` or `intersect`, and the
+    /// body it is made into; none for a body of its own.
+    pub how: Option<String>,
+    pub body: Option<String>,
     pub axis: Option<String>,
     pub angle: Option<String>,
     /// A sketch's plane, and its offset.
@@ -560,22 +566,57 @@ fn item_name(i: &Item) -> Option<&str> {
         Item::Sketch(s) => Some(&s.name),
         Item::Extrude(e) => Some(&e.name),
         Item::Revolve(r) => Some(&r.name),
+        Item::Hole(h) => Some(&h.name),
+        Item::Pattern(p) => Some(&p.name),
+        Item::Mirror(m) => Some(&m.name),
         _ => None,
     }
 }
 
-/// `old` renamed `new` wherever the part uses it: a feature's sketch, a
-/// sketch's plane.
+/// `old` renamed `new` wherever the part uses it: a feature's sketch or
+/// body, a sketch's or a hole's face, what a pattern or mirror repeats.
 fn rename(p: &mut Part, old: &str, new: &str) {
+    let face = |r: &mut String| {
+        if r == old {
+            *r = new.to_string();
+        } else if let Some(rest) = r.strip_prefix(&format!("{old}.")) {
+            *r = format!("{new}.{rest}");
+        }
+    };
+    let body = |b: &mut Option<(proton_cad::part::ast::Combine, String)>| {
+        if let Some((_, x)) = b {
+            if x == old {
+                *x = new.to_string();
+            }
+        }
+    };
+    let list = |l: &mut Vec<String>| l.iter_mut().filter(|x| *x == old).for_each(|x| *x = new.to_string());
     for n in &mut p.items {
         match &mut n.item {
-            Item::Extrude(e) if e.sketch == old => e.sketch = new.to_string(),
-            Item::Revolve(r) if r.sketch == old => r.sketch = new.to_string(),
-            Item::Sketch(s) => {
-                if s.on.reference == old {
-                    s.on.reference = new.to_string();
-                } else if let Some(rest) = s.on.reference.strip_prefix(&format!("{old}.")) {
-                    s.on.reference = format!("{new}.{rest}");
+            Item::Extrude(e) => {
+                if e.sketch == old {
+                    e.sketch = new.to_string();
+                }
+                body(&mut e.into);
+            }
+            Item::Revolve(r) => {
+                if r.sketch == old {
+                    r.sketch = new.to_string();
+                }
+                body(&mut r.into);
+            }
+            Item::Sketch(s) => face(&mut s.on.reference),
+            Item::Hole(h) => face(&mut h.face),
+            Item::Pattern(pt) => list(&mut pt.of),
+            Item::Mirror(m) => {
+                list(&mut m.of);
+                face(&mut m.plane);
+            }
+            Item::Combined(c) => {
+                for x in [&mut c.body, &mut c.with] {
+                    if x == old {
+                        *x = new.to_string();
+                    }
                 }
             }
             _ => {}
@@ -770,7 +811,7 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
         };
         let error = m.errors.iter().find(|d| d.line >= span.0 && d.line <= span.1).map(|d| d.message.clone());
         let note = m.notes.iter().find(|d| d.line == n.line).map(|d| d.message.clone());
-        let blank = CadStep { index: i as u32, line, kind: String::new(), name: String::new(), text: String::new(), error, note, sketch: None, distance: None, symmetric: false, axis: None, angle: None, on: None, offset: None };
+        let blank = CadStep { index: i as u32, line, kind: String::new(), name: String::new(), text: String::new(), error, note, sketch: None, distance: None, symmetric: false, through: false, how: None, body: None, axis: None, angle: None, on: None, offset: None };
         let step = match &n.item {
             Item::Sketch(s) => {
                 let mut head = format!("sketch {} on {}", s.name, s.on.reference);
@@ -784,8 +825,11 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
                 name: e.name.clone(),
                 text: line_of(&n.item),
                 sketch: Some(e.sketch.clone()),
-                distance: Some(print::expr(&e.distance)),
+                distance: e.distance.as_ref().map(print::expr),
                 symmetric: e.symmetric,
+                through: e.distance.is_none(),
+                how: e.into.as_ref().map(|(h, _)| h.word().to_string()),
+                body: e.into.as_ref().map(|(_, b)| b.clone()),
                 ..blank
             },
             Item::Revolve(r) => CadStep {
@@ -795,6 +839,19 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
                 sketch: Some(r.sketch.clone()),
                 axis: Some(r.axis.clone()),
                 angle: r.angle.as_ref().map(print::expr),
+                how: r.into.as_ref().map(|(h, _)| h.word().to_string()),
+                body: r.into.as_ref().map(|(_, b)| b.clone()),
+                ..blank
+            },
+            Item::Hole(h) => CadStep { kind: "hole".into(), name: h.name.clone(), text: line_of(&n.item), on: Some(h.face.clone()), ..blank },
+            Item::Pattern(pt) => CadStep { kind: "pattern".into(), name: pt.name.clone(), text: line_of(&n.item), ..blank },
+            Item::Mirror(mi) => CadStep { kind: "mirror".into(), name: mi.name.clone(), text: line_of(&n.item), ..blank },
+            Item::Combined(c) => CadStep {
+                kind: if c.how == proton_cad::part::ast::Combine::Join { "union".into() } else { c.how.word().into() },
+                name: c.body.clone(),
+                text: line_of(&n.item),
+                how: Some(c.how.word().into()),
+                body: Some(c.with.clone()),
                 ..blank
             },
             Item::Feature { keyword, text } => {

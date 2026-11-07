@@ -4997,3 +4997,8 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .cd-diag { flex: none; max-height: 30%; overflow: auto; padding: 6px 12px 10px; font: var(--z-2xs)/1.5 var(--zed); }
 .cd-diag .bad { color: var(--cd-bad); }
 .cd-diag .note { color: var(--muted); }
+
+.cd-line { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 6px 8px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head);
+  color: var(--text); font: var(--z-xs)/1.45 var(--mono, ui-monospace, monospace); resize: vertical; outline: none; }
+.cd-line:focus { border-color: var(--accent); }
+.cd-field select:disabled, .cd-field input:disabled { opacity: .5; }

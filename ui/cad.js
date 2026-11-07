@@ -24,14 +24,32 @@ const TEXT_WAIT = 300;
 export const stepText = {
   /** @param {string} name @param {string} on @param {string} [offset] */
   sketch: (name, on, offset) => `sketch ${name} on ${on}${offset?.trim() ? ` offset ${offset.trim()}` : ""}`,
-  /** @param {string} name @param {string} sketch @param {string} distance @param {boolean} symmetric */
-  extrude: (name, sketch, distance, symmetric) => `extrude ${name} from ${sketch} distance ${distance.trim() || "10"}${symmetric ? " symmetric" : ""}`,
-  /** @param {string} name @param {string} sketch @param {string} axis @param {string} [angle] */
-  revolve: (name, sketch, axis, angle) => `revolve ${name} from ${sketch} about ${axis}${angle?.trim() ? ` angle ${angle.trim()}` : ""}`,
+  /** @param {string} name @param {string} sketch @param {string} distance @param {boolean} symmetric
+   *  @param {boolean} [through] @param {string} [how] `join`, `cut`, `intersect`, or none for a body of its own @param {string} [body] */
+  extrude: (name, sketch, distance, symmetric, through = false, how = "", body = "") =>
+    `extrude ${name} from ${sketch} ${through ? "through" : `distance ${distance.trim() || "10"}${symmetric ? " symmetric" : ""}`}${how && body ? ` ${how} ${body}` : ""}`,
+  /** @param {string} name @param {string} sketch @param {string} axis @param {string} [angle] @param {string} [how] @param {string} [body] */
+  revolve: (name, sketch, axis, angle, how = "", body = "") =>
+    `revolve ${name} from ${sketch} about ${axis}${angle?.trim() ? ` angle ${angle.trim()}` : ""}${how && body ? ` ${how} ${body}` : ""}`,
 };
 
-/** A face a sketch can be put on by name: an extrude's or a revolve's cap. @param {string} name */
-export const placeable = (name) => /^[A-Za-z_][A-Za-z0-9_]*\.(top|bottom|start|end)$/.test(name);
+/** A face a sketch or a hole can be put on by name: an extrude's or a
+ *  revolve's cap, or a side named for the shape that swept it. @param {string} name */
+export const placeable = (name) => /^[A-Za-z_][A-Za-z0-9_]*\.(top|bottom|start|end|side\([A-Za-z_][A-Za-z0-9_.]*\))$/.test(name);
+
+/** Millimetres in one of the part's units. @param {string} units */
+export const unitScale = (units) => ({ mm: 1, cm: 10, m: 1000, in: 25.4 })[units] ?? 1;
+
+/** A point on a flat face in the face's own coordinates, in the part's
+ *  units: its plane is origin, outward normal and x, nine numbers.
+ *  @param {number[]} plane @param {number[]} p @param {number} scale @returns {[number, number]} */
+export function onFace(plane, p, scale) {
+  const [ox, oy, oz, nx, ny, nz, xx, xy, xz] = plane;
+  const [yx, yy, yz] = [ny * xz - nz * xy, nz * xx - nx * xz, nx * xy - ny * xx];
+  const d = [p[0] - ox, p[1] - oy, p[2] - oz];
+  const r = (/** @type {number} */ v) => Math.round((v / scale) * 1000) / 1000;
+  return [r(d[0] * xx + d[1] * xy + d[2] * xz), r(d[0] * yx + d[1] * yy + d[2] * yz)];
+}
 
 /** Cubic millimetres as words. @param {number} v */
 export function volumeText(v) {
@@ -42,8 +60,11 @@ export function volumeText(v) {
 /** What a step is, in a few words. @param {Step} s */
 function summary(s) {
   if (s.kind === "sketch") return `on ${s.on}${s.offset ? `, offset ${s.offset}` : ""}`;
-  if (s.kind === "extrude") return `${s.sketch} · ${s.distance}${s.symmetric ? " each way" : ""}`;
-  if (s.kind === "revolve") return `${s.sketch} · about ${s.axis}${s.angle ? ` · ${s.angle}°` : ""}`;
+  const into = s.how && s.body && !["union", "cut", "intersect"].includes(s.kind) ? ` · ${s.how} ${s.body}` : "";
+  if (s.kind === "extrude") return `${s.sketch} · ${s.through ? "through" : s.distance}${s.symmetric ? " each way" : ""}${into}`;
+  if (s.kind === "revolve") return `${s.sketch} · about ${s.axis}${s.angle ? ` · ${s.angle}°` : ""}${into}`;
+  if (s.kind === "hole") return `on ${s.on}`;
+  if (["union", "cut", "intersect"].includes(s.kind)) return `with ${s.body}`;
   return s.note ?? "";
 }
 
@@ -82,7 +103,8 @@ export function createCad(host) {
     /** @type {PartView | null} */ part: null,
     /** The step chosen, by its place among the part's items. @type {number | null} */ step: null,
     /** The sketch being drawn, by its place. @type {number | null} */ sketching: null,
-    /** The face chosen in the view. @type {{body: string, face: number} | null} */ face: null,
+    /** The face chosen in the view, and where on it — in its own
+     *  coordinates — for a flat one. @type {{body: string, face: number, at?: [number, number]} | null} */ face: null,
     tab: /** @type {"step" | "text"} */ ("step"),
     /** When the text was last typed: the core's copy is not put over it. */
     typedAt: 0,
@@ -142,7 +164,7 @@ export function createCad(host) {
     const steps = p.steps
       .map((s) => {
         const mark = s.error ? `<i class="cd-bad" title="${esc(s.error)}">!</i>` : s.note ? `<i class="cd-later" title="${esc(s.note)}">·</i>` : "";
-        const kind = s.kind === "sketch" ? "sketch" : s.kind === "revolve" ? "revolve" : s.kind === "extrude" ? "extrude" : "file";
+        const kind = /** @type {Record<string, string>} */ ({ sketch: "sketch", revolve: "revolve", extrude: "extrude", hole: "hole", pattern: "pattern", mirror: "mirror", union: "extrude", cut: "extrude", intersect: "extrude" })[s.kind] ?? "file";
         return `<button class="cd-row${s.index === state.step ? " on" : ""}${s.error ? " bad" : ""}${s.note ? " later" : ""}${s.index === state.sketching ? " drawing" : ""}" data-cad-step="${s.index}" title="${esc(s.error ?? s.note ?? s.text)}">${icon(kind)}<span class="cd-row-name">${esc(s.name || s.kind)}</span><span class="cd-row-what">${esc(summary(s))}</span>${mark}</button>`;
       })
       .join("");
@@ -165,8 +187,11 @@ export function createCad(host) {
     const face = state.face ? p.bodies.find((b) => b.name === state.face?.body)?.faces[state.face.face] : null;
     let html = "";
     if (face) {
-      html += `<section class="cd-card"><div class="cd-head">Face</div><p class="cd-name">${esc(face.name)}</p><p class="cd-muted">${esc(face.surface)}</p>` +
-        (face.plane && placeable(face.name) ? `<button class="cd-btn" data-cad-sketch-on="${esc(face.name)}">Sketch on this face</button>` : face.plane ? `<p class="cd-muted">A flat face, but not one named for sketching on until K4.</p>` : "") +
+      const at = state.face?.at;
+      html += `<section class="cd-card"><div class="cd-head">Face</div><p class="cd-name">${esc(face.name)}</p><p class="cd-muted">${esc(face.surface)}${at ? ` · clicked at (${at[0]}, ${at[1]})` : ""}</p>` +
+        (face.plane && placeable(face.name)
+          ? `<div class="cd-row-btns"><button class="cd-btn" data-cad-sketch-on="${esc(face.name)}">Sketch on this face</button>${at ? `<button class="cd-btn" data-cad-hole-at>Hole here</button>` : ""}</div>`
+          : face.plane ? `<p class="cd-muted">A flat face not named for what made it: sketch on a cap or a side instead.</p>` : "") +
         `</section>`;
     }
     if (!s) {
@@ -186,6 +211,11 @@ export function createCad(host) {
     const sketches = earlier.filter((x) => x.kind === "sketch").map((x) => x.name);
     const err = s.error ? `<p class="cd-error">${esc(s.error)}</p>` : s.note ? `<p class="cd-muted">${esc(s.note)}</p>` : "";
     const named = field("Name", `<input data-cad-f="name" value="${esc(s.name)}" aria-label="Name">`);
+    // Bodies there before this step, for it to be made into.
+    const bodies = [...new Set(earlier.filter((x) => (x.kind === "extrude" || x.kind === "revolve") && !x.how).map((x) => x.name))];
+    const ops = `<label class="cd-field"><span>Makes</span><select data-cad-f="how" aria-label="What it makes">` +
+      [["", "A body of its own"], ["join", "Joined to"], ["cut", "Cut from"], ["intersect", "What it shares with"]].map(([v, l]) => `<option value="${v}"${(s.how ?? "") === v ? " selected" : ""}>${l}</option>`).join("") +
+      `</select></label>` + (s.how || bodies.length ? field("Body", `<select data-cad-f="body" aria-label="Body"${s.how ? "" : " disabled"}>${options([...new Set([...bodies, ...(s.body ? [s.body] : [])])], s.body)}</select>`) : "");
     if (s.kind === "sketch") {
       const sv = p.sketches.find((x) => x.index === s.index);
       const faces = p.bodies.filter((b) => earlier.some((x) => x.name === b.name)).flatMap((b) => b.faces.filter((f) => f.plane && placeable(f.name)).map((f) => f.name));
@@ -199,9 +229,10 @@ export function createCad(host) {
       const body = p.bodies.find((b) => b.name === s.name);
       html += `<section class="cd-card"><div class="cd-head">Extrude</div>${named}` +
         field("Sketch", `<select data-cad-f="sketch" aria-label="Sketch">${options([...new Set([...sketches, s.sketch ?? ""])], s.sketch)}</select>`) +
-        field("Distance", `<input data-cad-f="distance" value="${esc(s.distance ?? "")}" aria-label="Distance">`) +
-        `<label class="cd-check"><input type="checkbox" data-cad-f="symmetric"${s.symmetric ? " checked" : ""}> Half each way</label>` +
-        err + (body ? `<p class="cd-muted">${volumeText(body.volume)}</p>` : "") +
+        field("Distance", `<input data-cad-f="distance" value="${esc(s.distance ?? "")}" aria-label="Distance"${s.through ? " disabled" : ""}>`) +
+        `<label class="cd-check"><input type="checkbox" data-cad-f="symmetric"${s.symmetric ? " checked" : ""}${s.through ? " disabled" : ""}> Half each way</label>` +
+        `<label class="cd-check"><input type="checkbox" data-cad-f="through"${s.through ? " checked" : ""}> Right through everything</label>` +
+        ops + err + (body ? `<p class="cd-muted">${volumeText(body.volume)}</p>` : "") +
         `<div class="cd-row-btns"><button class="cd-btn quiet" data-cad-remove="${s.index}">Delete</button></div></section>`;
     } else if (s.kind === "revolve") {
       const sv = p.sketches.find((x) => x.name === s.sketch);
@@ -211,10 +242,13 @@ export function createCad(host) {
         field("Sketch", `<select data-cad-f="sketch" aria-label="Sketch">${options([...new Set([...sketches, s.sketch ?? ""])], s.sketch)}</select>`) +
         field("About", `<select data-cad-f="axis" aria-label="Axis">${options(axes, s.axis)}</select>`) +
         field("Angle", `<input data-cad-f="angle" value="${esc(s.angle ?? "")}" placeholder="360" aria-label="Angle">`) +
-        err + (body ? `<p class="cd-muted">${volumeText(body.volume)}</p>` : "") +
+        ops + err + (body ? `<p class="cd-muted">${volumeText(body.volume)}</p>` : "") +
         `<div class="cd-row-btns"><button class="cd-btn quiet" data-cad-remove="${s.index}">Delete</button></div></section>`;
     } else {
-      html += `<section class="cd-card"><div class="cd-head">${esc(s.kind)}</div><p class="cd-code">${esc(s.text)}</p>${err}<div class="cd-row-btns"><button class="cd-btn quiet" data-cad-remove="${s.index}">Delete</button></div></section>`;
+      // Holes, patterns, mirrors and the rest: their line, to edit as it is.
+      const what = /** @type {Record<string, string>} */ ({ hole: "Hole", pattern: "Pattern", mirror: "Mirror", union: "Union", cut: "Cut", intersect: "Intersect" })[s.kind] ?? s.kind;
+      html += `<section class="cd-card"><div class="cd-head">${esc(what)}</div><textarea class="cd-line" data-cad-f="line" rows="3" spellcheck="false" aria-label="The step's line">${esc(s.text)}</textarea>${err}` +
+        `<p class="cd-muted">${s.note ? "" : "Edit the line and leave it to make the change."}</p><div class="cd-row-btns"><button class="cd-btn quiet" data-cad-remove="${s.index}">Delete</button></div></section>`;
     }
     els.step.innerHTML = html;
   }
@@ -228,8 +262,14 @@ export function createCad(host) {
     const name = v("name")?.value.trim() || s.name;
     let text = "";
     if (s.kind === "sketch") text = stepText.sketch(name, v("on")?.value ?? s.on ?? "XY", v("offset")?.value);
-    else if (s.kind === "extrude") text = stepText.extrude(name, v("sketch")?.value ?? s.sketch ?? "", v("distance")?.value ?? s.distance ?? "10", !!v("symmetric")?.checked);
-    else if (s.kind === "revolve") text = stepText.revolve(name, v("sketch")?.value ?? s.sketch ?? "", v("axis")?.value ?? s.axis ?? "yaxis", v("angle")?.value);
+    else if (s.kind === "extrude" || s.kind === "revolve") {
+      const how = v("how")?.value ?? s.how ?? "";
+      // A body to be made into: the one chosen, or the first there is.
+      const body = how ? v("body")?.value || s.body || p.steps.find((x) => x.index < s.index && (x.kind === "extrude" || x.kind === "revolve") && !x.how)?.name || "" : "";
+      text = s.kind === "extrude"
+        ? stepText.extrude(name, v("sketch")?.value ?? s.sketch ?? "", v("distance")?.value ?? s.distance ?? "10", !!v("symmetric")?.checked, !!v("through")?.checked, how, body)
+        : stepText.revolve(name, v("sketch")?.value ?? s.sketch ?? "", v("axis")?.value ?? s.axis ?? "yaxis", v("angle")?.value, how, body);
+    } else text = v("line")?.value.trim().replace(/\s*\n\s*/g, " ") ?? "";
     if (text && text !== s.text) edit([{ op: "replace", index: s.index, text }]);
     void t;
   }
@@ -277,8 +317,10 @@ export function createCad(host) {
           hover: (name) => {
             if (state.sketching == null) status(name ? `${name}  — click to choose it` : "");
           },
-          pick: (body, face) => {
-            state.face = body == null || face == null ? null : { body, face };
+          pick: (body, face, point) => {
+            const f = body == null || face == null ? null : state.part?.bodies.find((b) => b.name === body)?.faces[face];
+            const at = f?.plane && point ? onFace(f.plane, point, unitScale(state.part?.units ?? "mm")) : undefined;
+            state.face = body == null || face == null ? null : { body, face, at };
             renderStep();
           },
         });
@@ -397,6 +439,10 @@ export function createCad(host) {
       return;
     }
     const add = /** @type {HTMLElement | null} */ (t.closest("[data-cad-add]"));
+    if (add?.dataset.cadAdd === "hole") {
+      if (!state.face?.at) return status("Click a flat face in the view where the hole goes, then Hole here.");
+      return;
+    }
     if (add) return addStep(/** @type {any} */ (add.dataset.cadAdd));
     const draw = /** @type {HTMLElement | null} */ (t.closest("[data-cad-draw]"));
     if (draw) return state.sketching === Number(draw.dataset.cadDraw) ? leaveSketch() : enterSketch(Number(draw.dataset.cadDraw));
@@ -412,6 +458,14 @@ export function createCad(host) {
       const name = fresh("s", names());
       state.want = { name, open: true };
       return edit([{ op: "insert", at: null, text: `${stepText.sketch(name, on.dataset.cadSketchOn ?? "XY")}\nend` }]);
+    }
+    if (t.closest("[data-cad-hole-at]")) {
+      const p = state.part, f = state.face;
+      const face = f && p?.bodies.find((b) => b.name === f.body)?.faces[f.face];
+      if (!face || !f?.at) return;
+      const name = fresh("h", names());
+      state.want = { name, open: false };
+      return edit([{ op: "insert", at: null, text: `hole ${name} on ${face.name} at (${f.at[0]}, ${f.at[1]}) diameter 3 through` }]);
     }
     const exp = /** @type {HTMLElement | null} */ (t.closest("[data-cad-export]"));
     if (exp) return void host.dispatch({ type: "cadExport", generation: generation(), format: exp.dataset.cadExport });

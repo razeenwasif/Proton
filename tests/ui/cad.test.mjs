@@ -4,7 +4,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {num, round, fresh, level, rectText, holdText, dimensionText, toggleConstruction, splinePoints, spot} from '../../ui/cad-sketch.js';
-import {stepText, placeable, volumeText} from '../../ui/cad.js';
+import {stepText, placeable, volumeText, onFace, unitScale} from '../../ui/cad.js';
 import {PART} from '../../ui/preview-cad-part.js';
 
 const base = PART.sketches.find((s) => s.name === 'base');
@@ -85,7 +85,25 @@ test('a step\'s settings write its line', () => {
   assert.equal(stepText.revolve('v1', 'base', 'mid', ''), 'revolve v1 from base about mid');
   assert.equal(stepText.revolve('v1', 'base', 'yaxis', '90'), 'revolve v1 from base about yaxis angle 90');
   assert.ok(placeable('plate.top') && placeable('spin.end'));
-  assert.ok(!placeable('plate.side(r.left)') && !placeable('plate'));
+  assert.ok(placeable('plate.side(r.left)') && !placeable('plate'), 'since K4 a side is placeable too');
   assert.equal(volumeText(904.78), '904.8 mm³');
   assert.equal(volumeText(9545.5), '9.55 cm³');
+});
+
+test('an extrude or revolve made into a body, or right through, writes its line', () => {
+  assert.equal(stepText.extrude('slot', 's', '-2', false, false, 'cut', 'plate'), 'extrude slot from s distance -2 cut plate');
+  assert.equal(stepText.extrude('win', 's', '3', true, true, 'cut', 'plate'), 'extrude win from s through cut plate');
+  assert.equal(stepText.extrude('e', 's', '3', false, false, 'join', ''), 'extrude e from s distance 3', 'no body, no join');
+  assert.equal(stepText.revolve('v', 's', 'yaxis', '90', 'intersect', 'plate'), 'revolve v from s about yaxis angle 90 intersect plate');
+  assert.ok(placeable('plate.side(r.left)') && placeable('m3.side(wall1)'));
+  assert.ok(!placeable('plate.side(r.left') && !placeable('plate.edges(parallel z)'));
+});
+
+test('a point on a face is in the face\'s own coordinates, in the part\'s units', () => {
+  // The top of a plate 3 high: origin (0, 0, 3), up, x along x.
+  assert.deepEqual(onFace([0, 0, 3, 0, 0, 1, 1, 0, 0], [10, 20, 3], 1), [10, 20]);
+  // A side facing -y: its x along x, its y = n × x = up.
+  assert.deepEqual(onFace([0, 0, 0, 0, -1, 0, 1, 0, 0], [5, 0, 2], 1), [5, 2]);
+  // In inches.
+  assert.deepEqual(onFace([0, 0, 0, 0, 0, 1, 1, 0, 0], [25.4, 50.8, 0], unitScale('in')), [1, 2]);
 });

@@ -47,7 +47,7 @@ export function sketchRuns(s) {
   return runs;
 }
 
-/** @param {HTMLCanvasElement} canvas @param {{hover: (name: string | null) => void, pick: (body: string | null, face: number | null) => void}} host */
+/** @param {HTMLCanvasElement} canvas @param {{hover: (name: string | null) => void, pick: (body: string | null, face: number | null, point: number[] | null) => void}} host */
 export async function mountView(canvas, host) {
   const [THREE, { OrbitControls }] = await three();
   /** @type {import("./vendor/three/three.module.js").WebGLRenderer} */
@@ -197,6 +197,8 @@ export async function mountView(canvas, host) {
   }
 
   const ray = new THREE.Raycaster();
+  /** Where the last ray hit, in the world. @type {number[] | null} */
+  let hitPoint = null;
   /** The body and face under a point of the canvas. @param {MouseEvent} e @returns {[number, number] | null} */
   function under(e) {
     const r = canvas.getBoundingClientRect();
@@ -204,6 +206,7 @@ export async function mountView(canvas, host) {
     ray.setFromCamera(at, camera);
     const hits = ray.intersectObjects(bodies.map((b) => b.mesh), false);
     const hit = hits[0];
+    hitPoint = hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
     if (!hit || hit.faceIndex == null) return null;
     const i = bodies.findIndex((b) => b.mesh === hit.object);
     return [i, bodies[i].faceOf[hit.faceIndex]];
@@ -232,7 +235,7 @@ export async function mountView(canvas, host) {
     const at = under(e);
     picked = at;
     repaint();
-    host.pick(at ? bodies[at[0]].name : null, at ? at[1] : null);
+    host.pick(at ? bodies[at[0]].name : null, at ? at[1] : null, at ? hitPoint : null);
   });
 
   const watch = new ResizeObserver(resize);

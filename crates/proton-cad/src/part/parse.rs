@@ -6,7 +6,7 @@ use super::lex::{self, Tok, Token};
 
 /// The keywords of features the later milestones build. They are kept as
 /// written until then; anything else unknown is a mistake.
-pub const FEATURES: [&str; 12] = ["cut", "hole", "fillet", "chamfer", "shell", "pattern", "mirror", "sweep", "loft", "union", "intersect", "thread"];
+pub const FEATURES: [&str; 6] = ["fillet", "chamfer", "shell", "sweep", "loft", "thread"];
 
 pub fn read(text: &str) -> Result<Part, Diag> {
     let lines: Vec<&str> = text.lines().collect();
@@ -66,13 +66,20 @@ pub fn read(text: &str) -> Result<Part, Diag> {
                 let name = p.ident("the extrude's name")?;
                 p.keyword("from")?;
                 let sketch = p.ident("the sketch it extrudes")?;
-                p.keyword("distance")?;
-                let distance = p.expr()?;
-                let symmetric = p.peek_ident("symmetric");
-                if symmetric {
+                let (distance, symmetric) = if p.peek_ident("through") {
                     p.i += 1;
-                }
-                Item::Extrude(Extrude { name, sketch, distance, symmetric })
+                    (None, false)
+                } else {
+                    p.keyword("distance")?;
+                    let d = p.expr()?;
+                    let sym = p.peek_ident("symmetric");
+                    if sym {
+                        p.i += 1;
+                    }
+                    (Some(d), sym)
+                };
+                let into = p.made_into()?;
+                Item::Extrude(Extrude { name, sketch, distance, symmetric, into })
             }
             "revolve" => {
                 let name = p.ident("the revolve's name")?;
@@ -86,7 +93,96 @@ pub fn read(text: &str) -> Result<Part, Diag> {
                 } else {
                     None
                 };
-                Item::Revolve(Revolve { name, sketch, axis, angle })
+                let into = p.made_into()?;
+                Item::Revolve(Revolve { name, sketch, axis, angle, into })
+            }
+            "hole" => {
+                let name = p.ident("the hole's name")?;
+                p.keyword("on")?;
+                let face = p.path("the face it is drilled into")?;
+                p.keyword("at")?;
+                let mut at = vec![p.spot()?];
+                while p.peek_sym(',') {
+                    p.i += 1;
+                    at.push(p.spot()?);
+                }
+                const STOP: [&str; 4] = ["depth", "through", "counterbore", "countersink"];
+                let size = match p.ident("`diameter`, `thread` or `clearance`")?.as_str() {
+                    "diameter" => HoleSize::Diameter(p.expr()?),
+                    "thread" => HoleSize::Thread(p.raw_until(&STOP, "a thread's size, like M3 or G1/4")?),
+                    "clearance" => HoleSize::Clearance(p.raw_until(&STOP, "a screw's size, like M3")?),
+                    _ => return Err(p.err_at(1, "a hole's size is `diameter`, `thread` or `clearance`")),
+                };
+                let depth = if p.peek_ident("through") {
+                    p.i += 1;
+                    None
+                } else {
+                    p.keyword("depth")?;
+                    Some(p.expr()?)
+                };
+                let counter = if p.peek_ident("counterbore") {
+                    p.i += 1;
+                    let diameter = p.expr()?;
+                    p.keyword("depth")?;
+                    Some(Counter::Bore { diameter, depth: p.expr()? })
+                } else if p.peek_ident("countersink") {
+                    p.i += 1;
+                    let diameter = p.expr()?;
+                    let angle = if p.peek_ident("angle") {
+                        p.i += 1;
+                        Some(p.expr()?)
+                    } else {
+                        None
+                    };
+                    Some(Counter::Sink { diameter, angle })
+                } else {
+                    None
+                };
+                Item::Hole(Hole { name, face, at, size, depth, counter })
+            }
+            "pattern" => {
+                let name = p.ident("the pattern's name")?;
+                p.keyword("of")?;
+                let of = p.names("a feature to repeat")?;
+                let repeat = match p.ident("`linear` or `circular`")?.as_str() {
+                    "linear" => {
+                        p.sym('(')?;
+                        let x = p.expr()?;
+                        p.sym(',')?;
+                        let y = p.expr()?;
+                        p.sym(',')?;
+                        let z = p.expr()?;
+                        p.sym(')')?;
+                        Repeat::Linear(x, y, z)
+                    }
+                    "circular" => {
+                        p.keyword("about")?;
+                        let axis = p.path("an axis: x, y, z or a sketch's line")?;
+                        let angle = if p.peek_ident("angle") {
+                            p.i += 1;
+                            Some(p.expr()?)
+                        } else {
+                            None
+                        };
+                        Repeat::Circular { axis, angle }
+                    }
+                    _ => return Err(p.err_at(1, "a pattern is `linear (x, y, z)` or `circular about AXIS`")),
+                };
+                p.keyword("count")?;
+                Item::Pattern(Pattern { name, of, repeat, count: p.expr()? })
+            }
+            "mirror" => {
+                let name = p.ident("the mirror's name")?;
+                p.keyword("of")?;
+                let of = p.names("a feature to mirror")?;
+                p.keyword("about")?;
+                Item::Mirror(Mirror { name, of, plane: p.path("a plane: XY, XZ, YZ or a flat face")? })
+            }
+            w @ ("union" | "cut" | "intersect") => {
+                let how = if w == "union" { Combine::Join } else { Combine::from_word(w).unwrap() };
+                let body = p.ident("the body made")?;
+                p.keyword("with")?;
+                Item::Combined(Combined { how, body, with: p.ident("the body used up")? })
             }
             w if FEATURES.contains(&w) => Item::Feature { keyword: w.to_string(), text: p.rest(note.as_deref()).unwrap_or_default() },
             "end" => return Err(p.err_at(1, "an `end` with no sketch open")),
@@ -330,18 +426,71 @@ impl Cursor<'_> {
         (!s.is_empty()).then_some(s)
     }
 
-    /// `name`, `name.part`, `name.2`.
+    /// `name`, `name.part`, `name.2`, `plate.side(r.left)`.
     fn path(&mut self, what: &str) -> Result<String, Diag> {
         let mut s = self.ident(what)?;
-        while self.peek_sym('.') {
-            self.i += 1;
-            match self.next() {
-                Some(Tok::Ident(w)) => s.push_str(&format!(".{w}")),
-                Some(Tok::Num(n)) if n.fract() == 0.0 => s.push_str(&format!(".{}", n as u64)),
-                _ => return Err(self.err_at(1, "a name after the `.`")),
+        loop {
+            if self.peek_sym('.') {
+                self.i += 1;
+                match self.next() {
+                    Some(Tok::Ident(w)) => s.push_str(&format!(".{w}")),
+                    Some(Tok::Num(n)) if n.fract() == 0.0 => s.push_str(&format!(".{}", n as u64)),
+                    _ => return Err(self.err_at(1, "a name after the `.`")),
+                }
+            } else if self.peek_sym('(') && self.touching() {
+                self.i += 1;
+                let inner = self.path("a name in the brackets")?;
+                self.sym(')')?;
+                s.push_str(&format!("({inner})"));
+            } else {
+                return Ok(s);
             }
         }
-        Ok(s)
+    }
+
+    /// Whether the next token starts where the last one ended: `side(l2)`,
+    /// not `l1.end (80, 40)`.
+    fn touching(&self) -> bool {
+        let (Some(prev), Some(next)) = (self.i.checked_sub(1).and_then(|i| self.toks.get(i)), self.toks.get(self.i)) else { return false };
+        let len = match &prev.tok {
+            Tok::Ident(w) => w.chars().count(),
+            Tok::Sym(_) => 1,
+            _ => return false,
+        };
+        next.col == prev.col + len
+    }
+
+    /// `a, b, c`: names, a comma between.
+    fn names(&mut self, what: &str) -> Result<Vec<String>, Diag> {
+        let mut out = vec![self.ident(what)?];
+        while self.peek_sym(',') {
+            self.i += 1;
+            out.push(self.ident(what)?);
+        }
+        Ok(out)
+    }
+
+    /// `join BODY`, `cut BODY` or `intersect BODY`, if it is there.
+    fn made_into(&mut self) -> Result<Option<(Combine, String)>, Diag> {
+        let Some(Token { tok: Tok::Ident(w), .. }) = self.toks.get(self.i) else { return Ok(None) };
+        let Some(how) = Combine::from_word(w) else { return Ok(None) };
+        self.i += 1;
+        Ok(Some((how, self.ident("the body it is made into")?)))
+    }
+
+    /// The line as written from here to the first of `stop`, as one word:
+    /// a size like `M2.5` or `G1/4`.
+    fn raw_until(&mut self, stop: &[&str], what: &str) -> Result<String, Diag> {
+        let from = self.i;
+        while self.i < self.toks.len() && !stop.iter().any(|w| self.peek_ident(w)) {
+            self.i += 1;
+        }
+        if self.i == from {
+            return Err(self.err_here(format!("expected {what}")));
+        }
+        let at = self.toks[from].at;
+        let end = self.toks.get(self.i).map_or(self.text.len(), |t| t.at);
+        Ok(self.text[at..end].split('#').next().unwrap_or("").trim().to_string())
     }
 
     /// A number, with a minus if it has one.

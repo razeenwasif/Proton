@@ -64,31 +64,137 @@ pub enum Item {
     Sketch(Sketch),
     Extrude(Extrude),
     Revolve(Revolve),
-    /// A feature — `hole`, `fillet` … — kept as written until the
+    Hole(Hole),
+    Pattern(Pattern),
+    Mirror(Mirror),
+    Combined(Combined),
+    /// A feature — `fillet`, `shell` … — kept as written until the
     /// milestone that builds it reads it.
     Feature { keyword: String, text: String },
 }
 
-/// `extrude NAME from SKETCH distance EXPR [symmetric]`: the sketch's
-/// profile pushed along its normal — the other way for a negative
-/// distance, or half each way when symmetric.
+/// How a feature's solid is made into a body already there: joined to it,
+/// cut from it, or what the two share kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Combine {
+    Join,
+    Cut,
+    Intersect,
+}
+
+impl Combine {
+    pub fn word(self) -> &'static str {
+        match self {
+            Combine::Join => "join",
+            Combine::Cut => "cut",
+            Combine::Intersect => "intersect",
+        }
+    }
+
+    pub fn from_word(w: &str) -> Option<Combine> {
+        [Combine::Join, Combine::Cut, Combine::Intersect].into_iter().find(|c| c.word() == w)
+    }
+}
+
+/// `extrude NAME from SKETCH distance EXPR [symmetric] [join|cut|intersect
+/// BODY]`, or `… through …`: the sketch's profile pushed along its normal —
+/// the other way for a negative distance, half each way when symmetric,
+/// right through everything both ways when `through` — as a body of its
+/// own, or made into `BODY`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Extrude {
     pub name: String,
     pub sketch: String,
-    pub distance: Expr,
+    /// None: through.
+    pub distance: Option<Expr>,
     pub symmetric: bool,
+    pub into: Option<(Combine, String)>,
 }
 
-/// `revolve NAME from SKETCH about LINE [angle EXPR]`: the profile turned
-/// about a line of the sketch — `xaxis`, `yaxis`, or one drawn — by the
-/// angle in degrees, all the way round if none is given.
+/// `revolve NAME from SKETCH about LINE [angle EXPR] [join|cut|intersect
+/// BODY]`: the profile turned about a line of the sketch — `xaxis`,
+/// `yaxis`, or one drawn — by the angle in degrees, all the way round if
+/// none is given.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Revolve {
     pub name: String,
     pub sketch: String,
     pub axis: String,
     pub angle: Option<Expr>,
+    pub into: Option<(Combine, String)>,
+}
+
+/// A hole's size: a diameter, or the drill for a thread or a screw's
+/// clearance by its name — `M3`, `G1/4`, `6-32`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HoleSize {
+    Diameter(Expr),
+    Thread(String),
+    Clearance(String),
+}
+
+/// A hole's top widened: counterbored to a diameter and depth, or
+/// countersunk to a diameter at an angle (90° if none is given).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Counter {
+    Bore { diameter: Expr, depth: Expr },
+    Sink { diameter: Expr, angle: Option<Expr> },
+}
+
+/// `hole NAME on FACE at P[, P…] (diameter EXPR | thread SIZE | clearance
+/// SIZE) (depth EXPR | through) [counterbore EXPR depth EXPR | countersink
+/// EXPR [angle EXPR]]`: drilled square into a flat face at each point — a
+/// sketch's point by name, or `(x, y)` on the face — and cut from the body
+/// the face is on. A blind hole ends in a drill's 118° point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hole {
+    pub name: String,
+    pub face: String,
+    pub at: Vec<Spot>,
+    pub size: HoleSize,
+    /// None: through.
+    pub depth: Option<Expr>,
+    pub counter: Option<Counter>,
+}
+
+/// How a pattern repeats.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Repeat {
+    /// `linear (x, y, z)`: each copy that far on from the last.
+    Linear(Expr, Expr, Expr),
+    /// `circular about AXIS [angle EXPR]`: round an axis — `x`, `y`, `z`,
+    /// or a sketch's line `SKETCH.LINE` — evenly all the way round, or
+    /// spread over the angle.
+    Circular { axis: String, angle: Option<Expr> },
+}
+
+/// `pattern NAME of FEATURE[, FEATURE…] (linear (x, y, z) | circular about
+/// AXIS [angle EXPR]) count N`: the features made again, moved, into the
+/// bodies they were made into — `count` in all, the first where it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pattern {
+    pub name: String,
+    pub of: Vec<String>,
+    pub repeat: Repeat,
+    pub count: Expr,
+}
+
+/// `mirror NAME of FEATURE[, FEATURE…] about PLANE`: the features made
+/// again, mirrored in a plane — `XY`, `XZ`, `YZ`, or a flat face.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mirror {
+    pub name: String,
+    pub of: Vec<String>,
+    pub plane: String,
+}
+
+/// `union BODY with OTHER`, `cut BODY with OTHER`, `intersect BODY with
+/// OTHER`: two bodies made one, `OTHER` used up.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Combined {
+    pub how: Combine,
+    pub body: String,
+    pub with: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

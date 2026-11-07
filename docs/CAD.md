@@ -126,10 +126,25 @@ island. `extrude NAME from SKETCH distance D` pushes the profile along the
 sketch's normal (back for a negative `D`; `symmetric` puts half each side);
 `revolve NAME from SKETCH about LINE angle A` turns it about a line of the
 sketch — `xaxis`, `yaxis` or one drawn, often as construction — by `A`
-degrees, all the way round if no angle is given. Faces are named for what
-made them: an extrude's `NAME.top` and `NAME.bottom`, a revolve's
-`NAME.start` and `NAME.end`, and each side `NAME.side(r.left)` after the
-shape that swept it.
+degrees, all the way round if no angle is given. Either makes a body of its
+own, or ends `join BODY`, `cut BODY` or `intersect BODY` to be made into one;
+an extrude can go `through` everything both ways in place of a distance.
+`hole NAME on FACE at P, P … diameter D` (or `thread M3`, `clearance M3`)
+`depth D` (or `through`), with `counterbore D depth H` or `countersink D
+angle A` if wanted, is drilled square into a flat face at sketches' points
+or `(x, y)` on the face, and cut from the body the face is on — a blind hole
+ending in a drill's 118° point, a tapped one at its tap drill with the thread
+kept for drawings. `pattern NAME of F, F … linear (x, y, z) count N` or
+`circular about AXIS [angle A] count N` makes features again moved, into the
+bodies they were made into; `mirror NAME of F, F … about PLANE` makes them
+again mirrored in `XY`, `XZ`, `YZ` or a flat face. `union BODY with OTHER`,
+`cut BODY with OTHER` and `intersect BODY with OTHER` make two bodies one.
+Faces are named for what made them: an extrude's `NAME.top` and
+`NAME.bottom`, a revolve's `NAME.start` and `NAME.end`, each side
+`NAME.side(r.left)` after the shape that swept it, a hole's walls
+`NAME.side(wall1)`; a face keeps its name through every boolean, so a sketch
+or a hole placed on it finds it after an edit, and one that is gone is said
+to be, with why.
 
 An `.assembly` lists instances — a part or assembly file, or a library
 part with its parameters — and the mates between them (fastened, revolute,
@@ -391,6 +406,44 @@ constraints and dimensions, a value typed over, a drag, ⌫, the text, ⌘S and
 ⌘Z, and the 3D view drawing the core's triangles; and 9 node tests of the
 editor's arithmetic. Not yet looked at in the installed app or in WebKit.
 
+K4 — booleans, and the features made of them. A boolean splits and
+classifies: each edge of one solid is cut where it meets the other's faces
+(an edge lying in the other's surface where it crosses that face's edges),
+and each vertex lying on the other's faces or edges marks them; each pair of
+faces' common curves (K0's) are cut at the points on both and kept where
+inside both — a piece lying along an edge already there is that edge — and a
+face lying in the other's surface is cut by that face's edges; a cut that
+crosses a periodic face's seam is cut there too. Faces are split by tracing
+their boundary and cuts as a plane arrangement in their parameters, each
+piece told in, out or on the other solid (on the same side, or facing it) by
+an exact ray, pieces joined by an untouched edge told together; the
+operation keeps what it keeps, turning the other's pieces over where they
+bound a hole, edges come to lie along one another are made one, and the
+result is checked. Every feature keeps the tools it was made of — a profile,
+a frame, a sweep — so a pattern makes them again moved and a mirror in a
+mirrored frame, whose normal is turned so it stays right-handed and the sweep
+run the other way. Along the way the triangulation learned to flip only into
+triangles that turn clearly anticlockwise (a flip of a not-quite-convex
+quadrilateral had folded two triangles over each other), to take a point at
+an edge's end as that end, and to keep refinement clear of existing points;
+the tessellator cuts finer the edges whose pieces cross in a sliver and cuts
+every curved edge at least twice; a piece of a seam's line used once by a
+fragment is placed as a seam is; the check makes sure on the curves of loops
+that only look as if they cross. Tested (14 + 9): overlapping boxes, a hole
+through a block, a boss on a plate, stacked, overhanging and flush boxes, a
+hole across a tube's seam — volumes and areas to 10⁻⁷ of the formulas — and
+140 random pairs of boxes, rods, balls and tubes at random angles, each
+joined, met and cut, valid, closed, and adding up by inclusion and exclusion
+(V(A∪B) + V(A∩B) = V(A) + V(B), V(A−B) + V(A∩B) = V(A)); cuts to a depth and
+through, a join, an intersect, M3 tapped, blind with its point, counterbored
+and countersunk holes, linear and circular patterns, a mirror and body
+booleans against formulas; a sketch on `plate.side(l2)` found after the plate
+is widened and said to be gone when `l2` is taken out; every new statement
+read and printed back the same. Of 200 random pairs on another seed, one — a
+ball grazing a tube's wall, two curves a micrometre apart — leaves a few
+triangles unmatched. Measured (release): 49 holes patterned through a plate
+and a boss joined, 0.71 s.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |
@@ -428,5 +481,12 @@ editor's arithmetic. Not yet looked at in the installed app or in WebKit.
   sweeps a surface of linear extrusion or of revolution, which the five
   analytic surfaces do not include. They can be added as two exact swept
   surfaces of their own if curved panels are wanted.
+- **Surfaces that nearly touch.** Two faces meeting at a near tangency — a
+  ball grazing a cylinder — leave slivers whose triangles can fail to match
+  (1 in 200 random pairs). A boolean that cannot be made says so and leaves
+  the part as it was.
+- **Each hole is its own boolean**, so a pattern of n holes costs about n
+  times one (0.71 s for 49). Cutting a pattern's tools together would be
+  faster, if it is wanted.
 - **3MF is stored, not compressed**: about 60 bytes a point and 45 a
   triangle. A deflate of Proton's own would make it a fifth of that.

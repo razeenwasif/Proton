@@ -288,8 +288,10 @@ the engine before you see it. Edits are held until ⌘S.
 **CAD** · on ⌃8, parametric parts on a kernel of Proton's own
 (`crates/proton-cad`, planned in [`docs/CAD.md`](docs/CAD.md)). A `.part` file
 is text: parameters, sketches of lines, arcs and circles held by constraints
-and dimensions, and features made from them — extrudes and revolves so far,
-each body checked closed and its volume integrated exactly. The steps are
+and dimensions, and features made from them — extrudes and revolves joined
+to, cut from or met with a body, holes tapped, counterbored or countersunk,
+patterns and mirrors — on booleans of Proton's own, each body checked closed
+and its volume integrated exactly. The steps are
 listed on the left, each with its mistake; the part is drawn in 3D; a sketch
 opens flat on its plane, where the mouse draws and holds shapes, a dimension
 is typed over in place and a point dragged with the solver holding the rest,

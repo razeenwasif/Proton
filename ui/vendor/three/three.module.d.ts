@@ -117,6 +117,7 @@ export class Vector2 {
 }
 export interface Intersection {
   distance: number;
+  point: Vector3;
   faceIndex?: number | null;
   object: Object3D;
 }

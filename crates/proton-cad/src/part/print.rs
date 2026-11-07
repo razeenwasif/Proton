@@ -16,14 +16,56 @@ pub fn write(part: &Part) -> String {
             Item::Units(u) => format!("units {}", u.word()),
             Item::Material(m) => format!("material {m}"),
             Item::Param { name, value } => format!("param {name} = {}", expr(value)),
-            Item::Extrude(e) => format!("extrude {} from {} distance {}{}", e.name, e.sketch, expr(&e.distance), if e.symmetric { " symmetric" } else { "" }),
+            Item::Extrude(e) => {
+                let mut l = format!("extrude {} from {}", e.name, e.sketch);
+                match &e.distance {
+                    Some(d) => l.push_str(&format!(" distance {}{}", expr(d), if e.symmetric { " symmetric" } else { "" })),
+                    None => l.push_str(" through"),
+                }
+                l.push_str(&into(&e.into));
+                l
+            }
             Item::Revolve(r) => {
                 let mut l = format!("revolve {} from {} about {}", r.name, r.sketch, r.axis);
                 if let Some(a) = &r.angle {
                     l.push_str(&format!(" angle {}", expr(a)));
                 }
+                l.push_str(&into(&r.into));
                 l
             }
+            Item::Hole(h) => {
+                let at: Vec<String> = h.at.iter().map(spot).collect();
+                let mut l = format!("hole {} on {} at {} ", h.name, h.face, at.join(", "));
+                l.push_str(&match &h.size {
+                    HoleSize::Diameter(d) => format!("diameter {}", expr(d)),
+                    HoleSize::Thread(t) => format!("thread {t}"),
+                    HoleSize::Clearance(t) => format!("clearance {t}"),
+                });
+                l.push_str(&match &h.depth {
+                    Some(d) => format!(" depth {}", expr(d)),
+                    None => " through".into(),
+                });
+                match &h.counter {
+                    Some(Counter::Bore { diameter, depth }) => l.push_str(&format!(" counterbore {} depth {}", expr(diameter), expr(depth))),
+                    Some(Counter::Sink { diameter, angle }) => {
+                        l.push_str(&format!(" countersink {}", expr(diameter)));
+                        if let Some(a) = angle {
+                            l.push_str(&format!(" angle {}", expr(a)));
+                        }
+                    }
+                    None => {}
+                }
+                l
+            }
+            Item::Pattern(pt) => {
+                let how = match &pt.repeat {
+                    Repeat::Linear(x, y, z) => format!("linear ({}, {}, {})", expr(x), expr(y), expr(z)),
+                    Repeat::Circular { axis, angle } => format!("circular about {axis}{}", angle.as_ref().map_or(String::new(), |a| format!(" angle {}", expr(a)))),
+                };
+                format!("pattern {} of {} {how} count {}", pt.name, pt.of.join(", "), expr(&pt.count))
+            }
+            Item::Mirror(m) => format!("mirror {} of {} about {}", m.name, m.of.join(", "), m.plane),
+            Item::Combined(c) => format!("{} {} with {}", if c.how == Combine::Join { "union" } else { c.how.word() }, c.body, c.with),
             Item::Feature { keyword, text } => if text.is_empty() { keyword.clone() } else { format!("{keyword} {text}") },
             Item::Sketch(s) => {
                 let mut head = format!("sketch {} on {}", s.name, s.on.reference);
@@ -47,6 +89,11 @@ pub fn write(part: &Part) -> String {
         push(&mut out, &line, &n.note);
     }
     out
+}
+
+/// ` join BODY`, ` cut BODY`, ` intersect BODY`, or nothing.
+fn into(i: &Option<(Combine, String)>) -> String {
+    i.as_ref().map_or(String::new(), |(how, body)| format!(" {} {body}", how.word()))
 }
 
 fn push(out: &mut String, line: &str, note: &Option<String>) {

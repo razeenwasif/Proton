@@ -111,6 +111,38 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     assert(sent(before, 'cadExport')[0]?.format === '3mf' && sent(before, 'cadExport')[0]?.generation === 5, 'Write 3MF did not ask for one');
   });
 
+  await test('An extrude is made into a body or cut from it, or goes right through; a hole\'s line is edited as it is', async () => {
+    await win.pushEvents([part()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="11"]').click(); await settle();
+    const how = ws().querySelector('[data-cad-settings] [data-cad-f="how"]');
+    assert(how && how.value === '' && ws().querySelector('[data-cad-settings] [data-cad-f="body"]')?.disabled, 'a body of its own is not what the boss makes');
+    let before = win.commands.length;
+    how.value = 'join';
+    how.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(ops(before)[0]?.text === 'extrude boss from post distance 8 join plate', `joining did not write the line: ${JSON.stringify(ops(before))}`);
+    await win.pushEvents([part()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="8"]').click(); await settle();
+    before = win.commands.length;
+    const through = ws().querySelector('[data-cad-settings] [data-cad-f="through"]');
+    through.checked = true;
+    through.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(ops(before)[0]?.text === 'extrude plate from base through', `right through did not write the line: ${JSON.stringify(ops(before))}`);
+    // A hole, as the core would send it: its line in a box.
+    const p = part();
+    p.part.steps.push({index: 13, line: 24, kind: 'hole', name: 'm3', text: 'hole m3 on plate.top at (10, 10) thread M3 through', error: null, note: null, sketch: null, distance: null, symmetric: false, through: false, how: null, body: null, axis: null, angle: null, on: 'plate.top', offset: null});
+    await win.pushEvents([p]); await settle();
+    const row = ws().querySelector('.cd-history [data-cad-step="13"]');
+    assert(row?.textContent.includes('on plate.top') && row.querySelector('use')?.getAttribute('href') === '#i-hole', 'the hole is not listed as one');
+    row.click(); await settle();
+    const line = ws().querySelector('[data-cad-settings] [data-cad-f="line"]');
+    assert(line?.value === 'hole m3 on plate.top at (10, 10) thread M3 through', 'the hole\'s line is not offered');
+    before = win.commands.length;
+    line.value = 'hole m3 on plate.top at (10, 10)\n  thread M4 through';
+    line.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'replace', index: 13, text: 'hole m3 on plate.top at (10, 10) thread M4 through'}]), `the edited line was not sent: ${JSON.stringify(ops(before))}`);
+    await win.pushEvents([part()]); await settle();
+  });
+
   await test('Adding a sketch asks for one on XY and opens it as it comes back; extrude takes the chosen sketch', async () => {
     let before = win.commands.length;
     ws().querySelector('[data-cad-add="sketch"]').click(); await settle();

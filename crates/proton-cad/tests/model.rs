@@ -30,7 +30,8 @@ fn the_plans_example_builds_its_plate_and_notes_the_rest() {
     assert!(m.errors.is_empty(), "{:?}", m.errors);
     near(volume(&m, "plate"), (80.0 * 40.0 - 2.0 * PI * 1.7 * 1.7) * 2.0);
     let notes: Vec<&str> = m.notes.iter().map(|d| d.message.as_str()).collect();
-    assert_eq!(notes, ["`hole` is not built yet: it comes with K4", "`fillet` is not built yet: it comes with K5"]);
+    // (Its hole is built since K4: tests/features.rs.)
+    assert_eq!(notes, ["`fillet` is not built yet: it comes with K5"]);
 }
 
 #[test]
@@ -86,7 +87,7 @@ fn each_mistake_is_named_at_its_line() {
         ("extrude e from nowhere distance 1\n", 1, "no sketch called `nowhere`"),
         ("sketch s on XY\n  circle c center origin radius = 1\nend\nextrude e from s distance 0\n", 4, "some distance"),
         ("sketch s on XY\n  circle c center origin radius = 1\nend\nextrude s from s distance 1\n", 4, "a name already"),
-        ("sketch s on plate.top\n  circle c center origin radius = 1\nend\n", 1, "no body called `plate`"),
+        ("sketch s on plate.top\n  circle c center origin radius = 1\nend\n", 1, "no feature called `plate`"),
         ("sketch s on XY\n  circle c center (3, 0) radius = 1\nend\nrevolve e from s about c\n", 4, "no line called `c`"),
         ("sketch s on XY\n  rect r corner origin size = (2, 2)\n  horizontal r.left\nend\nextrude e from s distance 1\n", 1, "does not solve"),
     ];

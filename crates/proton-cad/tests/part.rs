@@ -46,9 +46,19 @@ sketch lid on base.top offset -t * 2
 end
 
 extrude plate from base distance t
-revolve boss from lid about xaxis angle 90 / 2
+revolve boss from lid about xaxis angle 90 / 2 join plate
 extrude rib from lid distance -t symmetric
+extrude slot from lid through cut plate
 hole m3 on plate.top at h1.center, h2.center thread M3 through
+hole cb on plate.side(r.left) at (5, 1.5), h1.center clearance M2.5 depth 2 counterbore 5 depth 1
+hole cs on plate.top at (1, 2) diameter 3.4 through countersink 6 angle 82
+hole g on plate.top at (40, 20) thread G1/4 depth 8
+pattern row of m3, cb linear (10, 0, -t) count 3
+pattern ring of slot circular about base.mid angle 180 count 4
+mirror twin of rib about YZ
+union plate with boss
+cut plate with rib
+intersect plate with slot
 fillet plate.edges(parallel z) radius 2
 "#;
 
@@ -64,12 +74,22 @@ fn a_part_prints_back_as_it_was_written() {
     assert_eq!(sketches[1].on.reference, "base.top");
     assert_eq!(print::expr(sketches[1].on.offset.as_ref().unwrap()), "-t * 2");
     let features: Vec<&str> = p.items.iter().filter_map(|n| if let Item::Feature { keyword, .. } = &n.item { Some(keyword.as_str()) } else { None }).collect();
-    assert_eq!(features, ["hole", "fillet"]);
+    assert_eq!(features, ["fillet"]);
     let extrudes: Vec<&Extrude> = p.items.iter().filter_map(|n| if let Item::Extrude(e) = &n.item { Some(e) } else { None }).collect();
     assert_eq!(
         extrudes,
-        [&Extrude { name: "plate".into(), sketch: "base".into(), distance: Expr::Name("t".into()), symmetric: false }, &Extrude { name: "rib".into(), sketch: "lid".into(), distance: Expr::Neg(Box::new(Expr::Name("t".into()))), symmetric: true }]
+        [
+            &Extrude { name: "plate".into(), sketch: "base".into(), distance: Some(Expr::Name("t".into())), symmetric: false, into: None },
+            &Extrude { name: "rib".into(), sketch: "lid".into(), distance: Some(Expr::Neg(Box::new(Expr::Name("t".into())))), symmetric: true, into: None },
+            &Extrude { name: "slot".into(), sketch: "lid".into(), distance: None, symmetric: false, into: Some((Combine::Cut, "plate".into())) },
+        ]
     );
+    let holes: Vec<&Hole> = p.items.iter().filter_map(|n| if let Item::Hole(h) = &n.item { Some(h) } else { None }).collect();
+    assert_eq!(holes[1].face, "plate.side(r.left)");
+    assert_eq!(holes[1].at, [Spot::At(5.0, 1.5), Spot::Ref("h1.center".into())]);
+    assert_eq!(holes[1].size, HoleSize::Clearance("M2.5".into()));
+    assert_eq!(holes[3].size, HoleSize::Thread("G1/4".into()));
+    assert!(matches!(holes[2].counter, Some(Counter::Sink { .. })));
     let revolves: Vec<&Revolve> = p.items.iter().filter_map(|n| if let Item::Revolve(r) = &n.item { Some(r) } else { None }).collect();
     assert_eq!(revolves.len(), 1);
     assert_eq!((revolves[0].axis.as_str(), print::expr(revolves[0].angle.as_ref().unwrap()).as_str()), ("xaxis", "90 / 2"));
