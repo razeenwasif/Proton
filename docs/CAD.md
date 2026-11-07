@@ -117,6 +117,20 @@ corners `.bl`, `.br`, `.tr`, `.tl`; a spline's `.1`, `.2` … and `.start`,
 `length`, `radius`, `diameter`, `angle` (degrees). Solved, the file is
 written back with where everything ended up, rounded to a nanometre.
 
+A sketch is drawn `on XY` (its normal +z), `XZ` (its x along x, its y along
+z, its normal −y), `YZ` (normal +x), another sketch's plane, or a flat face
+of a body above — `plate.top` — with `offset` along its normal. Its profile
+is every closed loop its lines, arcs and circles make (construction geometry
+left out): a loop inside another is a hole in it, one inside a hole an
+island. `extrude NAME from SKETCH distance D` pushes the profile along the
+sketch's normal (back for a negative `D`; `symmetric` puts half each side);
+`revolve NAME from SKETCH about LINE angle A` turns it about a line of the
+sketch — `xaxis`, `yaxis` or one drawn, often as construction — by `A`
+degrees, all the way round if no angle is given. Faces are named for what
+made them: an extrude's `NAME.top` and `NAME.bottom`, a revolve's
+`NAME.start` and `NAME.end`, and each side `NAME.side(r.left)` after the
+shape that swept it.
+
 An `.assembly` lists instances — a part or assembly file, or a library
 part with its parameters — and the mates between them (fastened, revolute,
 slider, cylindrical, planar, distance, angle). A route belongs to an
@@ -283,6 +297,62 @@ driving a sketch; a solved sketch written back and solved again to the same
 text — the incircle of a 3-4-5 triangle at (2, 1), radius 1. Thirty
 dimensioned rectangles (120 points) solve in 24 ms in release.
 
+K2 — solids. A profile is read from a solved sketch as a plane graph: every
+node must join exactly two shapes, shapes meet only at ends they share (a
+crossing, a touch, a stretch along each other, a dangling end are each named
+with the shape and the point), and loops nest into regions by rays cast
+analytically against lines and arcs. A spline in a profile is refused: its
+side would be a free-form surface. Extrude and revolve are one sweep: each
+node runs along a path — a line, or a circle about the axis — and each edge
+sweeps a face between its start and end copies: planes and cylinders for an
+extrude; planes, cylinders, cones, spheres and tori for a revolve. On the axis
+a node is a pole (a cone's apex, a sphere's poles) and an edge sweeps
+nothing; all the way round, the profile's edges become the seams of the
+faces they swept, except a disc's or ring's, which a plane bounds with
+circles alone. Each face is a surface, a side (reversed or not) and loops with
+the face on their left; each edge is used once each way. The check: edges
+end at their vertices and lie on every face that uses them; loops join up;
+each edge has exactly two coedges, opposite; in each face's own parameters
+its boundary runs anticlockwise and its holes clockwise, and no two of its
+loops cross; each shell is connected and `V − E + F − H` is even and at most
+2; the volume is positive. Every body a part builds is checked before it is
+kept. Area, volume and centroid are integrated on the exact geometry — the
+divergence theorem to each face, then Green's theorem in the face's
+parameters to its edges, Gauss–Legendre along the edges' own curves — so
+they hold to 10⁻⁹ against the formulas, not to the triangles. Tessellation
+cuts every edge once (within the chord, turning at most the angle), so the
+two faces beside it share its points and the mesh has no cracks; each face is
+triangulated in its parameters by a constrained Delaunay triangulation of
+its own (Lawson insertion, Sloan's constraint recovery, inside by parity) —
+the periodic parameter cut at the seam, or where the face does not reach, the
+loop at a pole run along the pole's line and the slivers there dropped; a
+sphere or torus starts from a grid, a cylinder or cone is stretched round its
+axis so triangles join nearest neighbours there, and any triangle further than
+the chord from its surface is split at its longest splittable edge.
+Out: binary and text STL, and 3MF (each body an object, shared points,
+millimetres) in a stored zip of Proton's own with its CRC-32, the same bytes
+for the same part. Tested (24): a plate with a hole; a cylinder, sphere, cone,
+torus, tube and frustum turned (the frustum each way, from either side of
+the axis, partly and all the way); quarter turns with their caps; a hole
+turned all the way into a void, its own shell; 60 random plates with up to
+three holes extruded in random frames, and 60 random profiles turned against
+Pappus — half of them standing on the axis, about half turned only partly
+round, either way; triangles facing
+out, their normals agreeing, every point on its face and every centroid
+within the chord; broken solids — open, a face turned over, a surface
+flipped, a vertex moved, inside out — each named; 300 random polygons with
+up to four holes triangulated to their exact area with every segment kept,
+points added inside, a 21 × 21 grid on its own circles left Delaunay, a comb
+of teeth a hundredth as wide as long; the plan's example built (its hole and
+fillet noted for K4 and K5), inches, `XZ` with an offset, a peg on a plate's
+top, symmetric and negative distances, revolves about a drawn line and by
+angles either way; ten mistakes at their lines; STL and 3MF read back, and a
+3MF written for the same bytes twice. Checked by hand: a 3MF opened by
+`unzip -t` and Python's own zip and XML readers, closed and in millimetres. Measured (release): a 120 mm
+fan grille of 53 holes checked in 14 ms, its mass in 11 ms, tessellated in
+7 ms for the screen (5,312 triangles) and 15 ms to 10 µm for a printer
+(10,208); a turned fitting to 10 µm in 6.5 ms.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |
@@ -316,3 +386,9 @@ dimensioned rectangles (120 points) solve in 24 ms in release.
 - **Whether electronics should come before the build is finished**, if a
   board for the case (a fan or lighting controller, front I/O) is wanted
   sooner.
+- **Splines in profiles** are refused (K2): extruded or turned, a spline
+  sweeps a surface of linear extrusion or of revolution, which the five
+  analytic surfaces do not include. They can be added as two exact swept
+  surfaces of their own if curved panels are wanted.
+- **3MF is stored, not compressed**: about 60 bytes a point and 45 a
+  triangle. A deflate of Proton's own would make it a fifth of that.

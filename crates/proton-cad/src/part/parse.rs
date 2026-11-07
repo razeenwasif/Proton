@@ -6,7 +6,7 @@ use super::lex::{self, Tok, Token};
 
 /// The keywords of features the later milestones build. They are kept as
 /// written until then; anything else unknown is a mistake.
-pub const FEATURES: [&str; 14] = ["extrude", "revolve", "cut", "hole", "fillet", "chamfer", "shell", "pattern", "mirror", "sweep", "loft", "union", "intersect", "thread"];
+pub const FEATURES: [&str; 12] = ["cut", "hole", "fillet", "chamfer", "shell", "pattern", "mirror", "sweep", "loft", "union", "intersect", "thread"];
 
 pub fn read(text: &str) -> Result<Part, Diag> {
     let lines: Vec<&str> = text.lines().collect();
@@ -61,6 +61,32 @@ pub fn read(text: &str) -> Result<Part, Diag> {
                 let (sketch_items, end_note, next) = sketch_body(&lines, i)?;
                 i = next;
                 Item::Sketch(Sketch { name, on: Placement { reference, offset }, items: sketch_items, end_note })
+            }
+            "extrude" => {
+                let name = p.ident("the extrude's name")?;
+                p.keyword("from")?;
+                let sketch = p.ident("the sketch it extrudes")?;
+                p.keyword("distance")?;
+                let distance = p.expr()?;
+                let symmetric = p.peek_ident("symmetric");
+                if symmetric {
+                    p.i += 1;
+                }
+                Item::Extrude(Extrude { name, sketch, distance, symmetric })
+            }
+            "revolve" => {
+                let name = p.ident("the revolve's name")?;
+                p.keyword("from")?;
+                let sketch = p.ident("the sketch it revolves")?;
+                p.keyword("about")?;
+                let axis = p.path("the line it turns about")?;
+                let angle = if p.peek_ident("angle") {
+                    p.i += 1;
+                    Some(p.expr()?)
+                } else {
+                    None
+                };
+                Item::Revolve(Revolve { name, sketch, axis, angle })
             }
             w if FEATURES.contains(&w) => Item::Feature { keyword: w.to_string(), text: p.rest(note.as_deref()).unwrap_or_default() },
             "end" => return Err(p.err_at(1, "an `end` with no sketch open")),

@@ -178,6 +178,9 @@ person's FormD T1 build with a custom loop.
 - **The FormD T1's figures** and the parts of the build (motherboard,
   card, radiator, pump, fittings), so the library makes those first.
 - **Whether a board for the case comes before the build is finished.**
+- **Whether curved panels drawn with splines are wanted**: K2 refuses a
+  spline in a profile, since what it sweeps is not one of the kernel's five
+  surfaces; two exact swept surfaces would add it.
 
 ## Logic
 

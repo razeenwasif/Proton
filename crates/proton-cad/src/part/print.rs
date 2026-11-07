@@ -16,6 +16,14 @@ pub fn write(part: &Part) -> String {
             Item::Units(u) => format!("units {}", u.word()),
             Item::Material(m) => format!("material {m}"),
             Item::Param { name, value } => format!("param {name} = {}", expr(value)),
+            Item::Extrude(e) => format!("extrude {} from {} distance {}{}", e.name, e.sketch, expr(&e.distance), if e.symmetric { " symmetric" } else { "" }),
+            Item::Revolve(r) => {
+                let mut l = format!("revolve {} from {} about {}", r.name, r.sketch, r.axis);
+                if let Some(a) = &r.angle {
+                    l.push_str(&format!(" angle {}", expr(a)));
+                }
+                l
+            }
             Item::Feature { keyword, text } => if text.is_empty() { keyword.clone() } else { format!("{keyword} {text}") },
             Item::Sketch(s) => {
                 let mut head = format!("sketch {} on {}", s.name, s.on.reference);

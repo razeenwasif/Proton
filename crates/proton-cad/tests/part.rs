@@ -46,6 +46,8 @@ sketch lid on base.top offset -t * 2
 end
 
 extrude plate from base distance t
+revolve boss from lid about xaxis angle 90 / 2
+extrude rib from lid distance -t symmetric
 hole m3 on plate.top at h1.center, h2.center thread M3 through
 fillet plate.edges(parallel z) radius 2
 "#;
@@ -62,7 +64,15 @@ fn a_part_prints_back_as_it_was_written() {
     assert_eq!(sketches[1].on.reference, "base.top");
     assert_eq!(print::expr(sketches[1].on.offset.as_ref().unwrap()), "-t * 2");
     let features: Vec<&str> = p.items.iter().filter_map(|n| if let Item::Feature { keyword, .. } = &n.item { Some(keyword.as_str()) } else { None }).collect();
-    assert_eq!(features, ["extrude", "hole", "fillet"]);
+    assert_eq!(features, ["hole", "fillet"]);
+    let extrudes: Vec<&Extrude> = p.items.iter().filter_map(|n| if let Item::Extrude(e) = &n.item { Some(e) } else { None }).collect();
+    assert_eq!(
+        extrudes,
+        [&Extrude { name: "plate".into(), sketch: "base".into(), distance: Expr::Name("t".into()), symmetric: false }, &Extrude { name: "rib".into(), sketch: "lid".into(), distance: Expr::Neg(Box::new(Expr::Name("t".into()))), symmetric: true }]
+    );
+    let revolves: Vec<&Revolve> = p.items.iter().filter_map(|n| if let Item::Revolve(r) = &n.item { Some(r) } else { None }).collect();
+    assert_eq!(revolves.len(), 1);
+    assert_eq!((revolves[0].axis.as_str(), print::expr(revolves[0].angle.as_ref().unwrap()).as_str()), ("xaxis", "90 / 2"));
     let notes: Vec<&str> = p.items.iter().filter_map(|n| n.note.as_deref()).collect();
     assert_eq!(notes, [" an M3 clearance hole"]);
     // Parameters, worked out in order.
@@ -179,7 +189,10 @@ fn random_sketches_read_back_unchanged() {
 
 #[test]
 fn each_mistake_is_named_at_its_line_and_column() {
-    let cases: [(&str, usize, usize, &str); 12] = [
+    let cases: [(&str, usize, usize, &str); 15] = [
+        ("extrude plate base distance 2\n", 1, 15, "expected `from`"),
+        ("extrude plate from base 2\n", 1, 25, "expected `distance`"),
+        ("revolve spin from base angle 90\n", 1, 24, "expected `about`"),
         ("units furlongs\n", 1, 7, "not units"),
         ("param = 3\n", 1, 7, "parameter's name"),
         ("param t = 2 +\n", 1, 14, "number, a name"),

@@ -62,9 +62,33 @@ pub enum Item {
     /// `param t = 2`
     Param { name: String, value: Expr },
     Sketch(Sketch),
-    /// A feature — `extrude`, `hole`, `fillet` … — kept as written until
-    /// the milestone that builds it reads it.
+    Extrude(Extrude),
+    Revolve(Revolve),
+    /// A feature — `hole`, `fillet` … — kept as written until the
+    /// milestone that builds it reads it.
     Feature { keyword: String, text: String },
+}
+
+/// `extrude NAME from SKETCH distance EXPR [symmetric]`: the sketch's
+/// profile pushed along its normal — the other way for a negative
+/// distance, or half each way when symmetric.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Extrude {
+    pub name: String,
+    pub sketch: String,
+    pub distance: Expr,
+    pub symmetric: bool,
+}
+
+/// `revolve NAME from SKETCH about LINE [angle EXPR]`: the profile turned
+/// about a line of the sketch — `xaxis`, `yaxis`, or one drawn — by the
+/// angle in degrees, all the way round if none is given.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Revolve {
+    pub name: String,
+    pub sketch: String,
+    pub axis: String,
+    pub angle: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

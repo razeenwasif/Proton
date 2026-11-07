@@ -25,7 +25,7 @@ use crate::part::expr::{eval, Env};
 use solver::{analyse, solve as run, Equation};
 
 /// A point's two unknowns.
-type Pt = (usize, usize);
+pub type Pt = (usize, usize);
 
 /// A circle's or an arc's radius: an unknown of its own, or an arc's
 /// distance from centre to start.
@@ -94,6 +94,29 @@ pub struct Group {
     pub eqs: Vec<Equation>,
 }
 
+/// A shape as drawn, by its unknowns: what a profile is made of. A
+/// rectangle is its four sides, `r.bottom`, `r.right`, `r.top`, `r.left`.
+#[derive(Debug, Clone)]
+pub struct Drawn {
+    /// The sketch item it came from, and the file's line.
+    pub item: usize,
+    pub line: usize,
+    pub name: String,
+    pub construction: bool,
+    pub geom: Geom,
+}
+
+#[derive(Debug, Clone)]
+pub enum Geom {
+    Point(Pt),
+    Line(Pt, Pt),
+    /// A circle's radius is an unknown of its own.
+    Circle { center: Pt, radius: usize },
+    /// Anticlockwise from `start` to `end`.
+    Arc { center: Pt, start: Pt, end: Pt },
+    Spline(Vec<Pt>),
+}
+
 /// A sketch as unknowns and equations.
 pub struct Built {
     pub x: Vec<f64>,
@@ -101,6 +124,8 @@ pub struct Built {
     pub groups: Vec<Group>,
     /// Each point's unknowns and its first name.
     pub points: Vec<(Pt, String)>,
+    /// Every shape, in the order drawn.
+    pub drawn: Vec<Drawn>,
     names: HashMap<String, Thing>,
     slots: Vec<Slot>,
 }
@@ -127,6 +152,7 @@ struct Builder<'a> {
     names: HashMap<String, Thing>,
     groups: Vec<Group>,
     points: Vec<(Pt, String)>,
+    drawn: Vec<Drawn>,
     slots: Vec<Slot>,
     line: usize,
     item: usize,
@@ -176,6 +202,10 @@ impl Builder<'_> {
         eval(e, self.env).map_err(|why| self.err(why))
     }
 
+    fn draw(&mut self, name: String, construction: bool, geom: Geom) {
+        self.drawn.push(Drawn { item: self.item, line: self.line, name, construction, geom });
+    }
+
     fn group(&mut self, eqs: Vec<Equation>) {
         self.groups.push(Group { item: self.item, eqs });
     }
@@ -195,6 +225,7 @@ impl Builder<'_> {
                 let p = self.point(*at, n, false);
                 self.slots.push(Slot::Point { item, p });
                 self.name(n.clone(), Thing::Point(p))?;
+                self.draw(n.clone(), e.construction, Geom::Point(p));
             }
             Shape::Line { start, end, length } => {
                 let (a, new_a) = self.spot(start, &format!("{n}.start"))?;
@@ -208,6 +239,7 @@ impl Builder<'_> {
                 self.name(format!("{n}.start"), Thing::Point(a))?;
                 self.name(format!("{n}.end"), Thing::Point(b))?;
                 self.name(n.clone(), Thing::Line(a, b))?;
+                self.draw(n.clone(), e.construction, Geom::Line(a, b));
                 if let Some(l) = length {
                     let d = self.positive(l, "a length")?;
                     self.group(vec![length_eq(a, b, d)]);
@@ -228,6 +260,7 @@ impl Builder<'_> {
                 self.name(format!("{n}.center"), Thing::Point(c))?;
                 let radius = Rad::Var(v);
                 self.name(n.clone(), Thing::Round { center: c, radius, ends: None })?;
+                self.draw(n.clone(), e.construction, Geom::Circle { center: c, radius: v });
                 if let Some(s) = size {
                     let eq = self.size_eq(radius, s)?;
                     self.group(vec![eq]);
@@ -251,6 +284,7 @@ impl Builder<'_> {
                 self.name(format!("{n}.end"), Thing::Point(t))?;
                 let radius = Rad::Arc(c, s);
                 self.name(n.clone(), Thing::Round { center: c, radius, ends: Some((s, t)) })?;
+                self.draw(n.clone(), e.construction, Geom::Arc { center: c, start: s, end: t });
                 // Its ends are as far from its centre as each other.
                 self.group(vec![Equation::new(vec![c.0, c.1, s.0, s.1, t.0, t.1], move |x| {
                     (x[s.0] - x[c.0]).hypot(x[s.1] - x[c.1]) - (x[t.0] - x[c.0]).hypot(x[t.1] - x[c.1])
@@ -279,6 +313,7 @@ impl Builder<'_> {
                 }
                 for (k, a, b) in [("bottom", bl, br), ("right", br, tr), ("top", tr, tl), ("left", tl, bl)] {
                     self.name(format!("{n}.{k}"), Thing::Line(a, b))?;
+                    self.draw(format!("{n}.{k}"), e.construction, Geom::Line(a, b));
                 }
                 self.name(n.clone(), Thing::Many(vec![bl, br, tr, tl]))?;
                 // Its sides square to the axes.
@@ -299,6 +334,7 @@ impl Builder<'_> {
                 }
                 self.name(format!("{n}.start"), Thing::Point(pts[0]))?;
                 self.name(format!("{n}.end"), Thing::Point(pts[pts.len() - 1]))?;
+                self.draw(n.clone(), e.construction, Geom::Spline(pts.clone()));
                 self.name(n.clone(), Thing::Many(pts))?;
             }
         }
@@ -570,7 +606,7 @@ fn dot_eq(a: Pt, b: Pt, p: Pt, q: Pt) -> Equation {
 
 /// A sketch as unknowns and equations, with `env`'s parameters.
 pub fn build(sketch: &Sketch, env: &Env) -> Result<Built, Diag> {
-    let mut b = Builder { env, x: Vec::new(), fixed: Vec::new(), names: HashMap::new(), groups: Vec::new(), points: Vec::new(), slots: Vec::new(), line: 0, item: 0 };
+    let mut b = Builder { env, x: Vec::new(), fixed: Vec::new(), names: HashMap::new(), groups: Vec::new(), points: Vec::new(), drawn: Vec::new(), slots: Vec::new(), line: 0, item: 0 };
     let origin = b.point((0.0, 0.0), "origin", true);
     let ux = b.point((1.0, 0.0), "xaxis", true);
     let uy = b.point((0.0, 1.0), "yaxis", true);
@@ -586,7 +622,7 @@ pub fn build(sketch: &Sketch, env: &Env) -> Result<Built, Diag> {
             SketchItem::Blank | SketchItem::Comment(_) => {}
         }
     }
-    Ok(Built { x: b.x, fixed: b.fixed, groups: b.groups, points: b.points, names: b.names, slots: b.slots })
+    Ok(Built { x: b.x, fixed: b.fixed, groups: b.groups, points: b.points, drawn: b.drawn, names: b.names, slots: b.slots })
 }
 
 impl Built {
@@ -594,6 +630,15 @@ impl Built {
     pub fn point(&self, name: &str) -> Option<(f64, f64)> {
         match self.names.get(name)? {
             Thing::Point(p) => Some((self.x[p.0], self.x[p.1])),
+            _ => None,
+        }
+    }
+
+    /// The ends of the line `name` — `mid`, `r.left`, `xaxis` — where the
+    /// unknowns `x` put them.
+    pub fn line(&self, name: &str, x: &[f64]) -> Option<((f64, f64), (f64, f64))> {
+        match self.names.get(name)? {
+            Thing::Line(a, b) => Some(((x[a.0], x[a.1]), (x[b.0], x[b.1]))),
             _ => None,
         }
     }
