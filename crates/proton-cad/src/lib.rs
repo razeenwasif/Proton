@@ -12,13 +12,22 @@
 //! - [`intersect`]: where curves meet surfaces and each other, and where
 //!   surfaces meet: by formula for every pair that has one, by [`march`]ing
 //!   and fitting a B-spline for the rest.
+//!
+//! K1, sketches:
+//! - [`part`]: the `.part` language — a part's head, parameters, sketches
+//!   and features — read and written back unchanged.
+//! - [`sketch`]: a sketch's shapes moved until its constraints hold, its
+//!   degrees of freedom counted, its redundant and conflicting constraints
+//!   named.
 
 pub mod bspline;
 pub mod curve;
 pub mod frame;
 pub mod intersect;
 pub mod march;
+pub mod part;
 pub mod poly;
+pub mod sketch;
 pub mod surface;
 pub mod tol;
 pub mod vec;

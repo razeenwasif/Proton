@@ -88,17 +88,34 @@ param t = 2
 param hole = 3.4
 
 sketch base on XY
-  rect r corner (0, 0) size (80, 40)
-  circle h1 center (10, 10) diameter hole
-  circle h2 center (70, 10) diameter hole
-  equal h1 h2
+  rect r corner origin size = (80, 40)
+  circle h1 center (10, 10) diameter = hole
+  circle h2 center (70, 10) diameter = hole
   horizontal h1.center h2.center
+  hdistance r.bl h1.center = 10
+  vdistance r.bl h1.center = 10
+  hdistance h1.center h2.center = 60
 end
 
 extrude plate from base distance t
 hole m3 on plate.top at h1.center, h2.center thread M3 through
 fillet plate.edges(parallel z) radius 2
 ```
+
+A statement a line; `#` starts a comment, kept with the file. In a sketch a
+shape says where it is now — numbers — and a value after `=` is a dimension
+the solver keeps: `circle h1 center (10, 10) radius 1.7` is drawn there,
+`… diameter = hole` is held to it. A shape's point may be one already drawn —
+`line b a.end (80, 40)` starts where `a` ends — so a profile is a run of
+shapes sharing points. Names: `origin`, `xaxis` and `yaxis`; a line's
+`.start` and `.end`; a circle's or arc's `.center` (an arc's `.start` and
+`.end` too); a rectangle's `.bottom`, `.right`, `.top`, `.left` and its
+corners `.bl`, `.br`, `.tr`, `.tl`; a spline's `.1`, `.2` … and `.start`,
+`.end`. Constraints: `coincident`, `on`, `horizontal`, `vertical`, `parallel`,
+`perpendicular`, `tangent`, `equal`, `midpoint`, `symmetric A B about L`,
+`concentric`, `fix`; dimensions: `distance`, `hdistance`, `vdistance`,
+`length`, `radius`, `diameter`, `angle` (degrees). Solved, the file is
+written back with where everything ended up, rounded to a nanometre.
 
 An `.assembly` lists instances — a part or assembly file, or a library
 part with its parameters — and the mates between them (fastened, revolute,
@@ -235,6 +252,36 @@ sampled 400,000 times; tangents by formula; a tee of 10 and 5 mm pipes as two
 closed loops whose length matches the integral to 10⁻⁶; five marched pairs
 on both surfaces within the fit; random pairs of every kind. Measured
 (release): a march 4–7 ms, about 65 poles a loop.
+
+K1 — the `.part` language: the head (`part`, `units`, `material`, `param`
+with expressions over earlier parameters — `+ − * /`, `sqrt`, `abs`, `min`,
+`max`, and `sin`, `cos`, `tan` in degrees), sketches on `XY`, `XZ`, `YZ` or a
+face with an offset, and features kept as written for the milestones that
+build them; read and written back unchanged, comments and blank lines too;
+each mistake named at its line and column. Sketches: points, lines, circles,
+arcs, rectangles and splines, construction or not, and the nineteen
+constraints and dimensions above. The solver takes damped least-length
+Gauss–Newton steps, so what is not constrained stays where it was drawn;
+which way a two-way constraint holds (a tangent's side, a dimension's
+direction, an angle's sense, circles inside or outside one another) is
+read from the drawing. A line or arc tangent at an end they share is held by
+the radius being square to the line there — a residual that grows with the
+error, where the distance form grows with its square and left a joint 6.5 µm
+loose in testing. Then the Jacobian's rows, taken in order into an orthogonal
+basis, say how many degrees of freedom are left, which points can move, and
+which constraints add nothing (redundant); a sketch that cannot solve names a
+smallest set of constraints that cannot all hold, by taking each out in turn.
+Tested (19): a bracket file with every construct, 5,000 random expressions and
+300 random sketches printed and read back the same; twelve mistakes at their
+line and column; a dimensioned rectangle, a 3-4-5 triangle, a circle tangent
+to both axes, a belt over two pulleys (its slope −asin 0.1), a slot of two arcs
+and two lines (one degree of freedom left until its ends are equal, then
+none), symmetry, midpoints, angles, offsets, a point on a circle, circles
+tangent inside; degrees of freedom counted down a line's constraints;
+redundant and conflicting constraints named, nothing else; parameters
+driving a sketch; a solved sketch written back and solved again to the same
+text — the incircle of a 3-4-5 triangle at (2, 1), radius 1. Thirty
+dimensioned rectangles (120 points) solve in 24 ms in release.
 
 | | What | Tested by |
 |---|---|---|
