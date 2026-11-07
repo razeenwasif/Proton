@@ -1,0 +1,10 @@
+[package]
+name = "proton-cad"
+description = "CAD mode's kernel: geometry, sketches, solids, assemblies, routes and drawings, Proton's own."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

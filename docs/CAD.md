@@ -208,6 +208,34 @@ hand.
 Each lands with its tests passing, in this order: the parts and the build
 first (K0–K11), then the electronics (E0–E5), then what is left (K12–K14).
 
+**Built** (2026-11-07): K0 — `crates/proton-cad`, with no dependencies: points,
+directions and boxes; frames and rigid motions; one tolerance (10⁻⁶ mm,
+10⁻⁹ rad, and 10⁻⁵ mm for fitted curves); the real roots of a polynomial,
+double roots included; lines, circles, ellipses and B-splines, evaluated with
+two derivatives, measured, and a point's nearest found (an ellipse's by
+Eberly's bisection, which cannot fail); B-splines interpolated through points
+on a banded solve; planes, cylinders, cones (one nappe), spheres and tori,
+each with its parameters and its exact signed distance, which agree. Where
+curves and surfaces meet: a line with each surface by formula (a torus's
+quartic polished on the true distance), touches told from crossings; a
+circle with a plane or a sphere as one trig equation; anything else by
+sampling. Two curves by Gauss–Newton. Two surfaces by formula for every pair
+that has one — a plane with each (lines, circles, ellipses, a cone's
+generators through its apex, a torus's sections across and along its axis),
+two spheres, any two surfaces about one axis (where their profiles meet), two
+parallel cylinders, two of one radius whose axes cross (two ellipses) — and
+the rest marched: seeds where a grid over each surface sees the other's
+distance change sign, a predictor–corrector walk to the box's edge or round
+to the start, and a cubic B-spline refitted until every midpoint is within
+10⁻⁵ mm of both surfaces. Tested (28): every surface's points at no distance
+from it and its normals its gradients; nearest points nearer than 20,000 of
+the surface's own; points on, half a tolerance off, twice off and well off
+told apart on every kind; lines' meetings counted against sign changes
+sampled 400,000 times; tangents by formula; a tee of 10 and 5 mm pipes as two
+closed loops whose length matches the integral to 10⁻⁶; five marched pairs
+on both surfaces within the fit; random pairs of every kind. Measured
+(release): a march 4–7 ms, about 65 poles a loop.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/proton-agent",
+    "crates/proton-cad",
     "crates/proton-circuit",
     "crates/proton-claude",
     "crates/proton-council",
@@ -37,6 +38,7 @@ repository = "https://github.com/razeenwasif/Proton"
 
 [workspace.dependencies]
 proton-agent = { path = "crates/proton-agent" }
+proton-cad = { path = "crates/proton-cad" }
 proton-claude = { path = "crates/proton-claude" }
 proton-circuit = { path = "crates/proton-circuit" }
 proton-voice = { path = "crates/proton-voice" }
@@ -74,6 +76,11 @@ ts-rs = "10"
 opt-level = 0
 
 [profile.dev.package."*"]
+opt-level = 2
+
+# The CAD kernel is arithmetic in tight loops — marching, Newton, fitting —
+# and unoptimised it is twenty times slower in tests and dev builds.
+[profile.dev.package.proton-cad]
 opt-level = 2
 
 [profile.release]
