@@ -2074,6 +2074,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"],
 :root[data-mode="research"],
 :root[data-mode="study"],
+:root[data-mode="cad"],
 :root[data-mode="logic"],
 :root[data-mode="circuit"],
 :root[data-mode="sheet"] {
@@ -2112,15 +2113,19 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="research"] .hint,
 :root[data-mode="study"] .hint,
 :root[data-mode="sheet"] .chrome-rail,
+:root[data-mode="cad"] .chrome-rail,
 :root[data-mode="logic"] .chrome-rail,
 :root[data-mode="circuit"] .chrome-rail,
 :root[data-mode="sheet"] .rail,
+:root[data-mode="cad"] .rail,
 :root[data-mode="logic"] .rail,
 :root[data-mode="circuit"] .rail,
 :root[data-mode="sheet"] .statusline,
+:root[data-mode="cad"] .statusline,
 :root[data-mode="logic"] .statusline,
 :root[data-mode="circuit"] .statusline,
 :root[data-mode="sheet"] .hint,
+:root[data-mode="cad"] .hint,
 :root[data-mode="logic"] .hint,
 :root[data-mode="circuit"] .hint,
 /* The terminal is Codex's; in Data, Research, Notebook, Excel and Circuit its toggle
@@ -2128,6 +2133,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .titlebar [data-term-toggle],
 :root[data-mode="research"] .titlebar [data-term-toggle],
 :root[data-mode="study"] .titlebar [data-term-toggle],
+:root[data-mode="cad"] .titlebar [data-term-toggle],
 :root[data-mode="logic"] .titlebar [data-term-toggle],
 :root[data-mode="circuit"] .titlebar [data-term-toggle],
 :root[data-mode="sheet"] .titlebar [data-term-toggle] { display: none; }
@@ -2135,6 +2141,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .app,
 :root[data-mode="research"] .app,
 :root[data-mode="study"] .app,
+:root[data-mode="cad"] .app,
 :root[data-mode="logic"] .app,
 :root[data-mode="circuit"] .app,
 :root[data-mode="sheet"] .app {
@@ -2145,6 +2152,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .body,
 :root[data-mode="research"] .body,
 :root[data-mode="sheet"] .body,
+:root[data-mode="cad"] .body,
 :root[data-mode="logic"] .body,
 :root[data-mode="circuit"] .body,
 :root[data-mode="study"] .body { grid-row: 1; grid-column: 1; grid-template-columns: minmax(0, 1fr); }
@@ -2157,10 +2165,12 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="research"] .titlebar,
 :root[data-mode="study"] .titlebar,
 :root[data-mode="sheet"] .titlebar,
+:root[data-mode="cad"] .titlebar,
 :root[data-mode="logic"] .titlebar,
 :root[data-mode="circuit"] .titlebar,
 .workspace[data-ws="codex"],
 .workspace[data-ws="sheet"],
+.workspace[data-ws="cad"],
 .workspace[data-ws="logic"],
 .workspace[data-ws="circuit"],
 .workspace[data-ws="data"] { background: var(--bg); }
@@ -2169,6 +2179,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 :root[data-mode="data"] .titlebar,
 :root[data-mode="research"] .titlebar,
 :root[data-mode="study"] .titlebar,
+:root[data-mode="cad"] .titlebar,
 :root[data-mode="logic"] .titlebar,
 :root[data-mode="circuit"] .titlebar,
 :root[data-mode="sheet"] .titlebar {
@@ -4857,3 +4868,132 @@ button.st-source-name:hover { color: var(--cc-accent); }
 .lg-tab-end.open { color: var(--danger, #e55); }
 .lg-tab-split { display: flex; justify-content: center; gap: 18px; padding-top: 6px; border-top: 1px solid var(--xl-line); }
 .lg-tab-wrap > .lg-tab-lines { margin: 0 auto; width: max-content; }
+
+/* ══ CAD ═════════════════════════════════════════════════════════════
+   A part's steps on the left, the part in 3D or a sketch flat on its
+   plane in the middle, the step's settings and the part's text on the
+   right (ui/cad.js). On Codex's ground and type; a sketch in SVG with
+   shapes in the text colour, construction dashed, what the solver can
+   still move in the accent, and what cannot hold in red. */
+.workspace.cd { --cd-shape: var(--text); --cd-free: var(--accent); --cd-bad: var(--err, #f7768e); --cd-warn: var(--warn, #e0af68); }
+.cd-side .cc-side-head[hidden], .cd-history[hidden], .cd-side .xl-list[hidden] { display: none; }
+.cd-history { flex: 1 1 auto; min-height: 0; padding: 2px 0 12px; }
+.cd-head { padding: 12px 14px 4px; color: var(--faint); font: 600 var(--z-2xs)/1 var(--zed); letter-spacing: .06em; text-transform: uppercase; }
+.cd-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; height: var(--z-row); padding: 0 12px;
+  border: 0; background: none; color: var(--muted); font: var(--z-ui)/1 var(--zed); text-align: left; cursor: pointer;
+}
+.cd-row:hover { background: var(--row-hover); color: var(--text); }
+.cd-row.on { background: var(--row-hover); color: var(--text); }
+.cd-row.drawing .cd-row-name { color: var(--accent); }
+.cd-row .i { width: 15px; height: 15px; flex: none; }
+.cd-row-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-row-what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: var(--z-2xs); }
+.cd-row.later .cd-row-name, .cd-row.later .cd-row-what { opacity: .6; }
+.cd-bad, .cd-later { flex: none; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font: 700 11px/1 var(--zed); font-style: normal; }
+.cd-bad { background: var(--cd-bad); color: var(--bg); }
+.cd-later { color: var(--faint); }
+.cd-part-row { margin-top: 6px; }
+.cd-param { display: flex; align-items: center; gap: 6px; height: calc(var(--z-row) - 2px); padding: 0 12px 0 34px; font: var(--z-xs)/1 var(--zed); }
+.cd-pname { color: var(--text); min-width: 3ch; }
+.cd-pvalue { flex: 1 1 auto; min-width: 0; height: 22px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: none; color: var(--text); font: var(--z-xs)/1 var(--mono, ui-monospace, monospace); }
+.cd-pvalue:hover, .cd-pvalue:focus { border-color: var(--xl-line); background: var(--xl-head); outline: none; }
+.cd-now { color: var(--faint); font-size: var(--z-2xs); white-space: nowrap; }
+
+.cd-main .xl-head { gap: 6px; }
+.cd-crumb { color: var(--muted); font: var(--z-xs)/1 var(--zed); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cd-crumb.bad { color: var(--cd-bad); }
+.cd-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.cd-tools[hidden] { display: none; }
+.cd-tools button {
+  min-width: 26px; height: 26px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: none;
+  color: var(--muted); font: var(--z-xs)/1 var(--zed); cursor: pointer;
+}
+.cd-tools button:hover { background: var(--row-hover); color: var(--text); }
+.cd-tools button[aria-pressed="true"] { border-color: var(--xl-line); background: var(--xl-head); color: var(--text); }
+.cd-tools .cd-done { color: var(--accent); }
+.cd-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--xl-line); }
+.cd-main .tb-btn:disabled { opacity: .35; cursor: default; }
+.cd-main .tb-btn:disabled:hover { background: none; color: var(--faint); }
+
+.cd-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--xl-line);
+  background: radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--text) 5%, var(--bg)), var(--bg) 75%); }
+.cd-3d, .cd-sketch { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+.cd-3d[hidden], .cd-sketch[hidden] { display: none; }
+.cd-sketch { background: var(--bg); cursor: crosshair; user-select: none; touch-action: none; }
+.cd-banner { position: absolute; top: 10px; left: 12px; right: 12px; padding: 7px 10px; border-radius: 6px;
+  background: color-mix(in srgb, var(--cd-bad) 16%, var(--bg)); color: var(--text); font: var(--z-xs)/1.45 var(--zed); pointer-events: none; }
+.cd-banner[hidden] { display: none; }
+.cd-status { position: absolute; left: 12px; bottom: 10px; right: 12px; color: var(--muted); font: var(--z-xs)/1.35 var(--zed); pointer-events: none;
+  text-shadow: 0 0 6px var(--bg); }
+.cd-value { position: absolute; width: 80px; height: 26px; padding: 0 6px; border: 1px solid var(--accent); border-radius: 5px; background: var(--bg);
+  color: var(--text); font: var(--z-xs)/1 var(--mono, ui-monospace, monospace); outline: none; z-index: 2; }
+.cd-value[hidden] { display: none; }
+
+/* The sketch. */
+.cd-grid line { stroke: color-mix(in srgb, var(--text) 5%, var(--bg)); stroke-width: 1; }
+.cd-grid line.major { stroke: color-mix(in srgb, var(--text) 10%, var(--bg)); }
+.cd-axis { stroke-width: 1; }
+.cd-axis.x { stroke: color-mix(in srgb, #f7768e 55%, var(--bg)); }
+.cd-axis.y { stroke: color-mix(in srgb, #9ece6a 55%, var(--bg)); }
+.cd-shape { fill: none; stroke: var(--cd-shape); stroke-width: 1.6; stroke-linecap: round; }
+.cd-shape.point { fill: var(--cd-shape); }
+.cd-shapes:not(.defined) .cd-shape { stroke: color-mix(in srgb, var(--cd-free) 70%, var(--text)); }
+.cd-shapes.broken .cd-shape { stroke: var(--cd-bad); }
+.cd-shape.construction { stroke: var(--muted) !important; stroke-dasharray: 5 4; stroke-width: 1.1; }
+.cd-shape.picked { stroke: var(--accent) !important; stroke-width: 2.6; }
+.cd-hull { fill: none; stroke: var(--faint); stroke-dasharray: 2 3; stroke-width: 1; }
+.cd-point { fill: var(--bg); stroke: var(--cd-shape); stroke-width: 1.4; cursor: grab; }
+.cd-point.free { stroke: var(--cd-free); }
+.cd-point.origin { fill: var(--cd-shape); }
+.cd-point.picked { fill: var(--accent); stroke: var(--accent); }
+.cd-dim .cd-dline, .cd-dim .cd-ext { stroke: var(--muted); stroke-width: 1; }
+.cd-dim .cd-ext { stroke-dasharray: 2 2; }
+.cd-dim-text { fill: var(--text); font: var(--z-xs) var(--zed); cursor: text; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
+.cd-dim.picked .cd-dim-text, .cd-glyph.picked text { fill: var(--accent); }
+.cd-dim.conflict .cd-dim-text, .cd-glyph.conflict text { fill: var(--cd-bad); }
+.cd-dim.redundant .cd-dim-text, .cd-glyph.redundant text { fill: var(--cd-warn); }
+.cd-glyph rect { fill: color-mix(in srgb, var(--text) 8%, var(--bg)); stroke: color-mix(in srgb, var(--text) 18%, var(--bg)); }
+.cd-glyph text { fill: var(--muted); font: 10px var(--zed); pointer-events: none; }
+.cd-glyph { cursor: pointer; }
+.cd-rubber line, .cd-rubber rect, .cd-rubber circle { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.cd-rubber .faint { stroke: var(--faint); }
+
+/* The settings. */
+.cd-inspector { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cd-tabs { display: flex; gap: 2px; padding: 8px 10px 4px; flex: none; }
+.cd-tabs button { height: 26px; padding: 0 10px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: var(--z-xs)/1 var(--zed); cursor: pointer; }
+.cd-tabs button[aria-selected="true"] { background: var(--row-hover); color: var(--text); }
+.cd-step { flex: 1 1 auto; min-height: 0; padding: 0 0 16px; }
+.cd-step[hidden], .cd-textpane[hidden] { display: none; }
+.cd-card { padding: 0 14px 10px; border-bottom: 1px solid var(--xl-line); }
+.cd-card .cd-head { padding-left: 0; }
+.cd-name { margin: 2px 0; color: var(--text); font: var(--z-xs)/1.4 var(--mono, ui-monospace, monospace); }
+.cd-muted { margin: 6px 0; color: var(--muted); font: var(--z-xs)/1.45 var(--zed); }
+.cd-error { margin: 6px 0; color: var(--cd-bad); font: var(--z-xs)/1.45 var(--zed); }
+.cd-code { margin: 6px 0; color: var(--text); font: var(--z-xs)/1.45 var(--mono, ui-monospace, monospace); word-break: break-all; }
+.cd-field { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 8px; margin: 6px 0; color: var(--muted); font: var(--z-xs)/1 var(--zed); }
+.cd-field input, .cd-field select, .cd-inline input {
+  height: 26px; min-width: 0; padding: 0 7px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head);
+  color: var(--text); font: var(--z-xs)/1 var(--mono, ui-monospace, monospace); outline: none;
+}
+.cd-field input:focus, .cd-field select:focus, .cd-inline input:focus { border-color: var(--accent); }
+.cd-ro { color: var(--text); }
+.cd-check { display: flex; align-items: center; gap: 6px; margin: 8px 0; color: var(--muted); font: var(--z-xs)/1 var(--zed); }
+.cd-inline { display: flex; gap: 6px; }
+.cd-inline input { flex: 1 1 0; }
+.cd-row-btns { display: flex; gap: 6px; margin-top: 10px; }
+.cd-btn { height: 26px; padding: 0 10px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head); color: var(--text);
+  font: var(--z-xs)/1 var(--zed); cursor: pointer; }
+.cd-btn:hover:not(:disabled) { background: var(--row-hover); }
+.cd-btn:disabled { opacity: .45; cursor: default; }
+.cd-btn.quiet { background: none; color: var(--muted); }
+.cd-bodies { margin: 4px 0; padding: 0; list-style: none; font: var(--z-xs)/1.6 var(--zed); }
+.cd-bodies li { display: flex; justify-content: space-between; gap: 8px; color: var(--text); }
+.cd-textpane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.cd-text { flex: 1 1 auto; min-height: 0; margin: 0 10px; padding: 8px 10px; border: 1px solid var(--xl-line); border-radius: 6px; background: var(--bg);
+  color: var(--text); font: var(--z-xs)/1.55 var(--mono, ui-monospace, monospace); resize: none; outline: none; tab-size: 2; }
+.cd-text:focus { border-color: color-mix(in srgb, var(--accent) 60%, var(--xl-line)); }
+.cd-diag { flex: none; max-height: 30%; overflow: auto; padding: 6px 12px 10px; font: var(--z-2xs)/1.5 var(--zed); }
+.cd-diag .bad { color: var(--cd-bad); }
+.cd-diag .note { color: var(--muted); }

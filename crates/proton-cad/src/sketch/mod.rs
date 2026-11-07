@@ -634,6 +634,22 @@ impl Built {
         }
     }
 
+    /// Every point's every name — `a.end` and `b.start` both, where they are
+    /// one — and where the unknowns `x` put it, in name order.
+    pub fn named_points(&self, x: &[f64]) -> Vec<(String, (f64, f64))> {
+        let mut out: Vec<(String, (f64, f64))> = self.names.iter().filter_map(|(n, t)| if let Thing::Point(p) = t { Some((n.clone(), (x[p.0], x[p.1]))) } else { None }).collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// The unknowns of the point `name`.
+    pub fn point_unknowns(&self, name: &str) -> Option<Pt> {
+        match self.names.get(name)? {
+            Thing::Point(p) => Some(*p),
+            _ => None,
+        }
+    }
+
     /// The ends of the line `name` — `mid`, `r.left`, `xaxis` — where the
     /// unknowns `x` put them.
     pub fn line(&self, name: &str, x: &[f64]) -> Option<((f64, f64), (f64, f64))> {
@@ -720,6 +736,37 @@ impl Built {
 
 fn spot((x, y): (f64, f64)) -> Spot {
     Spot::At(x, y)
+}
+
+/// The point `name` moved toward `to`, as a drag with the mouse moves it:
+/// held there while the rest are solved round it if they can be, else
+/// let go to where the constraints allow, as near as it can be. The
+/// sketch is written back when it solves; whether it did.
+pub fn drag(sketch: &mut Sketch, env: &Env, name: &str, to: (f64, f64)) -> Result<bool, Diag> {
+    let mut built = build(sketch, env)?;
+    let Some(p) = built.point_unknowns(name) else {
+        return Err(Diag::new(0, 0, format!("there is no point called `{name}`")));
+    };
+    if built.fixed[p.0] && built.fixed[p.1] {
+        return Ok(false);
+    }
+    (built.x[p.0], built.x[p.1]) = to;
+    built.fixed[p.0] = true;
+    built.fixed[p.1] = true;
+    let (report, x) = built.solve();
+    let x = if report.solved {
+        x
+    } else {
+        built.fixed[p.0] = false;
+        built.fixed[p.1] = false;
+        let (report, x) = built.solve();
+        if !report.solved {
+            return Ok(false);
+        }
+        x
+    };
+    built.write_back(sketch, &x);
+    Ok(true)
 }
 
 /// Solve a sketch with `env`'s parameters, writing where everything ended

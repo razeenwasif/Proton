@@ -3,9 +3,10 @@ import {studyChecks} from './suite-study.js';
 import {sheetChecks} from './suite-sheet.js';
 import {circuitChecks} from './suite-circuit.js';
 import {logicChecks} from './suite-logic.js';
+import {cadChecks} from './suite-cad.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = [...['codex', 'data', 'research', 'study', 'sheet', 'circuit', 'logic'].map((mode) => `proton.panes.${mode}`)];
+const layoutKeys = [...['codex', 'data', 'research', 'study', 'sheet', 'circuit', 'logic', 'cad'].map((mode) => `proton.panes.${mode}`)];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
 layoutKeys.forEach((key) => localStorage.removeItem(key));
 const restoreLayouts = () => savedLayouts.forEach(([key, value]) => {
@@ -1434,7 +1435,7 @@ await test('Research sits beside Data after Codex: ⌃3 opens it, in Codex\'s ch
   // Codex, Data and Research side by side, in the title bar and on the rail.
   for (const list of ['.tb-modes', '.mode-rail']) {
     const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
-    assert(order === 'codex,data,research,study,sheet,circuit,logic', `${list} is not in the new order: ${order}`);
+    assert(order === 'codex,data,research,study,sheet,circuit,logic,cad', `${list} is not in the new order: ${order}`);
   }
   assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Research is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
@@ -2162,6 +2163,7 @@ await studyChecks({test, assert, win, doc, $, settle, key, shown});
 await sheetChecks({test, assert, win, doc, $, settle, key, shown});
 await circuitChecks({test, assert, win, doc, $, settle, key, shown});
 await logicChecks({test, assert, win, doc, $, settle, key, shown});
+await cadChecks({test, assert, win, doc, $, settle, key, shown});
 await orderingChecks(test, assert);
 document.querySelector('#status').textContent = `${passed} passed · ${failed} failed`;
 document.title = `Proton UI tests: ${passed} passed, ${failed} failed`;

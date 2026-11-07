@@ -436,6 +436,19 @@ impl Cursor<'_> {
     }
 }
 
+/// Lines of a sketch on their own — shapes, constraints, comments — as the
+/// window adds them to one; mistakes at their line among these.
+pub fn sketch_lines(text: &str) -> Result<Vec<Noted<SketchItem>>, Diag> {
+    let lines: Vec<&str> = text.lines().collect();
+    let (items, _, _) = sketch_body(&lines, 0).or_else(|_| {
+        // No `end` of its own: the sketch's own lines, read up to the end.
+        let mut with_end = lines.clone();
+        with_end.push("end");
+        sketch_body(&with_end, 0)
+    })?;
+    Ok(items)
+}
+
 /// An expression on its own, as a dimension's value is typed in a box.
 pub fn expr(text: &str) -> Result<Expr, Diag> {
     let (toks, _) = lex::line(text, 1)?;

@@ -8,6 +8,7 @@ pub mod action;
 pub mod agent;
 pub mod block;
 pub mod bus;
+pub mod cad;
 pub mod chats;
 pub mod circuit;
 pub mod contract;

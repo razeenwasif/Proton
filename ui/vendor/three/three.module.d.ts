@@ -1,4 +1,4 @@
-// What ui/lab3d.js uses of three.js — described here so the type checker
+// What ui/lab3d.js and ui/cad-view.js use of three.js — described here so the type checker
 // reads this rather than two megabytes of library. Not the library's own
 // types: those are a separate package, many times the size of the code.
 
@@ -6,6 +6,9 @@ export type ColorLike = string | number | Color;
 
 export class Color {
   constructor(value?: ColorLike);
+  r: number;
+  g: number;
+  b: number;
 }
 
 export class Vector3 {
@@ -31,18 +34,31 @@ export class Matrix4 {
   compose(position: Vector3, quaternion: Quaternion, scale: Vector3): this;
 }
 
+export class Euler {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export class Object3D {
   position: Vector3;
   quaternion: Quaternion;
   scale: Vector3;
+  rotation: Euler;
+  up: Vector3;
   visible: boolean;
   add(...objects: Object3D[]): this;
+  remove(...objects: Object3D[]): this;
+  clear(): this;
 }
 
 export class Group extends Object3D {}
 export class Scene extends Object3D {}
 
-export class BufferAttribute {}
+export class BufferAttribute {
+  needsUpdate: boolean;
+  setXYZ(index: number, x: number, y: number, z: number): this;
+}
 export class Float32BufferAttribute extends BufferAttribute {
   constructor(array: ArrayLike<number>, itemSize: number);
 }
@@ -67,10 +83,11 @@ export class Material {
   dispose(): void;
 }
 export class MeshStandardMaterial extends Material {
-  constructor(parameters?: { color?: ColorLike; roughness?: number; metalness?: number; transparent?: boolean; opacity?: number; side?: number });
+  constructor(parameters?: { color?: ColorLike; roughness?: number; metalness?: number; transparent?: boolean; opacity?: number; side?: number;
+    vertexColors?: boolean; polygonOffset?: boolean; polygonOffsetFactor?: number; polygonOffsetUnits?: number });
 }
 export class LineBasicMaterial extends Material {
-  constructor(parameters?: { color?: ColorLike });
+  constructor(parameters?: { color?: ColorLike; transparent?: boolean; opacity?: number });
 }
 export const DoubleSide: number;
 
@@ -86,11 +103,35 @@ export class InstancedMesh extends Mesh {
 export class Line extends Object3D {
   constructor(geometry: BufferGeometry, material: Material);
 }
+export class LineSegments extends Line {}
+export class GridHelper extends LineSegments {
+  constructor(size?: number, divisions?: number, color1?: ColorLike, color2?: ColorLike);
+  geometry: BufferGeometry;
+  material: Material;
+}
+
+export class Vector2 {
+  constructor(x?: number, y?: number);
+  x: number;
+  y: number;
+}
+export interface Intersection {
+  distance: number;
+  faceIndex?: number | null;
+  object: Object3D;
+}
+export class Raycaster {
+  setFromCamera(coords: Vector2, camera: Camera): void;
+  intersectObjects(objects: Object3D[], recursive?: boolean): Intersection[];
+}
 
 export class Camera extends Object3D {}
 export class PerspectiveCamera extends Camera {
   constructor(fov: number, aspect: number, near: number, far: number);
   aspect: number;
+  fov: number;
+  near: number;
+  far: number;
   updateProjectionMatrix(): void;
 }
 

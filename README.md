@@ -31,7 +31,7 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃8` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -284,6 +284,18 @@ logic. A formula's table can be built in Circuit. The agent asks, solves,
 proves and writes with its logic tools, `@logic` sends the file and the line
 at the cursor, and Notebook makes logic practice, each problem checked by
 the engine before you see it. Edits are held until ⌘S.
+
+**CAD** · on ⌃8, parametric parts on a kernel of Proton's own
+(`crates/proton-cad`, planned in [`docs/CAD.md`](docs/CAD.md)). A `.part` file
+is text: parameters, sketches of lines, arcs and circles held by constraints
+and dimensions, and features made from them — extrudes and revolves so far,
+each body checked closed and its volume integrated exactly. The steps are
+listed on the left, each with its mistake; the part is drawn in 3D; a sketch
+opens flat on its plane, where the mouse draws and holds shapes, a dimension
+is typed over in place and a point dragged with the solver holding the rest,
+and the solver says how much is still free. Every edit is a line of the file,
+which the Text tab shows and takes typing. Bodies are written as STL or 3MF
+for a printer. Edits are held until ⌘S.
 
 ## The three things that hold it together
 

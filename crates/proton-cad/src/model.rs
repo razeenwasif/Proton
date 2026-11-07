@@ -18,7 +18,7 @@ use crate::frame::Frame;
 use crate::part::ast::{Diag, Item, Part, Units};
 use crate::part::expr::{self, eval};
 use crate::profile::{self, Profile};
-use crate::sketch::{self, Report};
+use crate::sketch::{self, Drawn, Report};
 use crate::surface::Surface;
 use crate::sweep;
 use crate::vec::{Vec2, Vec3};
@@ -27,14 +27,32 @@ use crate::vec::{Vec2, Vec3};
 pub struct SketchOut {
     pub name: String,
     pub line: usize,
+    /// Its place among the part's items.
+    pub item: usize,
     /// Where it is drawn, in millimetres.
     pub frame: Frame,
+    /// Why it could not be read into shapes and equations — a name used
+    /// twice, a point that is not there — if it could not.
+    pub error: Option<Diag>,
     pub report: Report,
     /// Its profile in millimetres, or why it has none.
     pub profile: Result<Profile, Diag>,
+    /// Its shapes, and where they are: in the sketch's own units, as its
+    /// file says them.
+    pub drawn: Vec<Drawn>,
+    pub x: Vec<f64>,
+    /// Every point by every name it has.
+    pub points: Vec<(String, Vec2)>,
     /// The sketch's lines, by name: what a revolve turns about. In the
     /// sketch's units.
     lines: HashMap<String, (Vec2, Vec2)>,
+}
+
+impl SketchOut {
+    /// A line of the sketch by name, in its units.
+    pub fn line_named(&self, name: &str) -> Option<(Vec2, Vec2)> {
+        self.lines.get(name).copied()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -107,7 +125,7 @@ pub fn build(part: &Part) -> Model {
         }
     }
     let k = m.units.mm();
-    for n in &part.items {
+    for (at, n) in part.items.iter().enumerate() {
         let line = n.line;
         match &n.item {
             Item::Name(s) => m.name = Some(s.clone()),
@@ -129,7 +147,10 @@ pub fn build(part: &Part) -> Model {
                 let built = match sketch::build(sk, &env) {
                     Ok(b) => b,
                     Err(d) => {
-                        m.errors.push(d);
+                        m.errors.push(d.clone());
+                        let unsolved = Report { solved: false, dof: 0, redundant: Vec::new(), conflicting: Vec::new(), free_points: Vec::new(), residual: f64::INFINITY };
+                        let profile = Err(Diag::new(d.line, d.col, format!("`{}` has a mistake: {}", sk.name, d.message)));
+                        m.sketches.push(SketchOut { name: sk.name.clone(), line, item: at, frame, error: Some(d), report: unsolved, profile, drawn: Vec::new(), x: Vec::new(), points: Vec::new(), lines: HashMap::new() });
                         continue;
                     }
                 };
@@ -145,7 +166,8 @@ pub fn build(part: &Part) -> Model {
                         lines.insert(name, (Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)));
                     }
                 }
-                m.sketches.push(SketchOut { name: sk.name.clone(), line, frame, report, profile, lines });
+                let points = built.named_points(&x).into_iter().map(|(n, (a, b))| (n, Vec2::new(a, b))).collect();
+                m.sketches.push(SketchOut { name: sk.name.clone(), line, item: at, frame, error: None, report, profile, drawn: built.drawn.clone(), x, points, lines });
             }
             Item::Extrude(e) => {
                 let made = (|| {
@@ -188,6 +210,9 @@ pub fn build(part: &Part) -> Model {
 
 fn sketch_for<'a>(m: &'a Model, name: &str) -> Result<&'a SketchOut, String> {
     let s = m.sketch(name).ok_or_else(|| format!("no sketch called `{name}` is drawn above"))?;
+    if let Some(d) = &s.error {
+        return Err(format!("`{name}` has a mistake on line {}: {}", d.line, d.message));
+    }
     if !s.report.solved {
         return Err(format!("`{name}` does not solve"));
     }

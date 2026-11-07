@@ -6,6 +6,7 @@ import {createStudyPreview} from './preview-study.js';
 import {createSheetPreview} from './preview-sheet.js';
 import {createCircuitPreview} from './preview-circuit.js';
 import {createLogicPreview} from './preview-logic.js';
+import {createCadPreview} from './preview-cad.js';
 
 export function createPreview(deliver) {
   let send;
@@ -14,6 +15,7 @@ export function createPreview(deliver) {
   const sheet = createSheetPreview(deliver);
   const circuit = createCircuitPreview(deliver);
   const logic = createLogicPreview(deliver);
+  const cad = createCadPreview(deliver);
   // Browser preview. Enough of the modal engine to keep the design prototype
   // honest — it must never grow past that: the real state machine is in
   // crates/proton-core/src/vim.rs and this is a demo stand-in, not a fork.
@@ -397,6 +399,7 @@ export function createPreview(deliver) {
         ...sheet.sync(),
         ...circuit.sync(),
         ...logic.sync(),
+        ...cad.sync(),
       ];
     }
     if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
@@ -404,6 +407,7 @@ export function createPreview(deliver) {
     if (command.type.startsWith("sheet")) return sheet.command(command);
     if (command.type.startsWith("circuit")) return circuit.command(command);
     if (command.type.startsWith("logic")) return logic.command(command);
+    if (command.type.startsWith("cad")) return cad.command(command);
     if (command.type === "runCell") {
       // The shape of a real run: the cell goes busy, and the answer arrives
       // later on its own — which is what the panel has to survive.
@@ -732,7 +736,7 @@ export function createPreview(deliver) {
     }
     if (command.type === "setMode") {
       state.mode = command.mode;
-      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "sheet" ? sheet.sync() : []), ...(state.mode === "circuit" ? circuit.sync() : []), ...(state.mode === "logic" ? logic.sync() : [])];
+      return [{ type: "modeChanged", mode: state.mode }, ...(state.mode === "sheet" ? sheet.sync() : []), ...(state.mode === "circuit" ? circuit.sync() : []), ...(state.mode === "logic" ? logic.sync() : []), ...(state.mode === "cad" ? cad.sync() : [])];
     }
     // A real traced step, dumped from the core by
     // `crates/proton-core/tests/dump_step.rs`. Real rather than invented,

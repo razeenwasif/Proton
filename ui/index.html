@@ -105,6 +105,10 @@
     <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 2.5L5 13.5h6l-.5 8 8.5-11h-6z"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-logic" viewBox="0 0 24 24"><path d="M6 4.5v15M6 9.5h12M6 14.5h12"/></symbol>
+    <symbol id="i-cad" viewBox="0 0 24 24"><path d="M12 3.5l7.5 4.25v8.5L12 20.5l-7.5-4.25v-8.5zM12 12l7.5-4.25M12 12v8.5M12 12L4.5 7.75"/></symbol>
+    <symbol id="i-sketch" viewBox="0 0 24 24"><path d="M4.5 19.5h15M6.5 17l9.5-9.5 2.5 2.5L9 19.5H6.5z"/></symbol>
+    <symbol id="i-extrude" viewBox="0 0 24 24"><path d="M5 15.5l7 3.5 7-3.5M5 15.5V9l7-3.5L19 9v6.5M12 12v7M12 12L5 9M12 12l7-3"/></symbol>
+    <symbol id="i-revolve" viewBox="0 0 24 24"><path d="M12 3v18M17.5 7.5a7 4 0 1 1-11 0M15.5 5l2 2.5-3 .5"/></symbol>
     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13.5a4 4 0 006 .5l2.5-2.5a4.2 4.2 0 00-6-6L11 7"/><path d="M14 10.5a4 4 0 00-6-.5L5.5 12.5a4.2 4.2 0 006 6L13 17"/></symbol>
     <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19.5a6 6 0 0112 0M16 5.2a3.2 3.2 0 010 5.6M17.5 19.5a6 6 0 00-2-4.5"/></symbol>
     <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5a4 4 0 01-.4-8A5.5 5.5 0 0117.4 10a3.8 3.8 0 01.4 8.5z"/></symbol>
@@ -201,6 +205,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="sheet"><svg class="i"><use href="#i-table"/></svg><span>Excel</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="circuit"><svg class="i"><use href="#i-bolt"/></svg><span>Circuit</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="logic"><svg class="i"><use href="#i-logic"/></svg><span>Logic</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="cad"><svg class="i"><use href="#i-cad"/></svg><span>CAD</span></button>
       </div>
 
       <div class="rail-drag" aria-hidden="true"></div>
@@ -1024,6 +1029,97 @@
       </aside>
     </section>
 
+    <!-- ══ CAD ═══════════════════════════════════════════════════════
+         A part: its steps on the left, in 3D in the middle — or a sketch
+         flat on its plane — and the chosen step's settings on the right,
+         with the part's text, which is what every edit writes. -->
+    <section class="workspace xl cd" data-ws="cad"
+             style="--col-l:240px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
+      <aside class="pane side xl-side cd-side">
+        <div class="cc-side-head" data-cad-adds hidden>
+          <button class="cc-new" data-cad-add="sketch" title="A new sketch: on XY, or on the face chosen in the view"><svg class="i"><use href="#i-sketch"/></svg>Sketch</button>
+          <button class="cc-new" data-cad-add="extrude" title="Extrude the chosen sketch"><svg class="i"><use href="#i-extrude"/></svg>Extrude</button>
+          <button class="cc-new" data-cad-add="revolve" title="Revolve the chosen sketch"><svg class="i"><use href="#i-revolve"/></svg>Revolve</button>
+        </div>
+        <!-- The part's parameters and steps, from Event::CadPart; with no
+             part open, the project's parts, from Event::CadHome. -->
+        <div class="scroll cd-history" data-cad-history></div>
+        <div class="scroll xl-list" data-cad-list></div>
+      </aside>
+
+      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
+
+      <main class="pane xl-main cd-main">
+        <div class="xl-home" data-cad-home>
+          <h2>CAD</h2>
+          <p>Parts drawn exactly. A part is a sketch or two — lines, arcs and circles held by constraints and dimensions — extruded or revolved into solids, each step in order on the left and each kept in a <code>.part</code> file that reads as text and diffs in Git. Draw on a plane with the mouse, type a dimension in place, and the solver says what is still free; the solids are checked closed and written as STL or 3MF for a printer.</p>
+          <form class="xl-form" data-cad-form>
+            <input type="text" placeholder="Name" aria-label="Part name" required>
+            <button type="submit">Make</button>
+          </form>
+          <div class="xl-found" data-cad-found></div>
+        </div>
+
+        <div class="xl-book" data-cad-part hidden>
+          <header class="xl-head">
+            <span class="xl-title" data-cad-title></span>
+            <i class="xl-dirty" data-cad-dirty title="Unsaved — ⌘S" hidden></i>
+            <span class="cd-crumb" data-cad-crumb></span>
+            <span class="grow"></span>
+            <!-- While a sketch is open: what to draw, and what to hold. -->
+            <span class="cd-tools" data-cad-tools hidden>
+              <button data-cad-tool="select" title="Select and drag  S" aria-pressed="true">Select</button>
+              <button data-cad-tool="line" title="Lines, one after another  L">Line</button>
+              <button data-cad-tool="rect" title="A rectangle by two corners  R">Rect</button>
+              <button data-cad-tool="circle" title="A circle by its centre and a point on it  C">Circle</button>
+              <button data-cad-tool="arc" title="An arc by its centre, start and end, anticlockwise  A">Arc</button>
+              <button data-cad-tool="point" title="A point  P">Point</button>
+              <i class="cd-sep"></i>
+              <button data-cad-hold="horizontal" title="Horizontal  H">H</button>
+              <button data-cad-hold="vertical" title="Vertical  V">V</button>
+              <button data-cad-hold="coincident" title="Coincident: two points one, or a point on a shape">⊙</button>
+              <button data-cad-hold="parallel" title="Parallel">∥</button>
+              <button data-cad-hold="perpendicular" title="Perpendicular">⊥</button>
+              <button data-cad-hold="tangent" title="Tangent">T</button>
+              <button data-cad-hold="equal" title="Equal">=</button>
+              <button data-cad-hold="concentric" title="Concentric">◎</button>
+              <button data-cad-hold="fix" title="Fixed where it is">⚓</button>
+              <button data-cad-hold="dimension" title="A dimension for what is chosen  D">↔</button>
+              <button data-cad-hold="construction" title="Construction, or not: guides that are not part of a profile  X">⋯</button>
+              <i class="cd-sep"></i>
+              <button class="cd-done" data-cad-done title="Done with the sketch  ⎋">Done</button>
+            </span>
+            <button class="tb-btn" data-cad-undo title="Undo  ⌘Z" aria-label="Undo"><svg class="i"><use href="#i-undo"/></svg></button>
+            <button class="tb-btn" data-cad-redo title="Redo  ⇧⌘Z" aria-label="Redo"><svg class="i"><use href="#i-redo"/></svg></button>
+            <button class="tb-btn" data-cad-fit title="Fit the part in view  F" aria-label="Fit the part in view"><svg class="i"><use href="#i-search"/></svg></button>
+            <button class="tb-btn" data-cad-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>
+            <button class="tb-btn" data-cad-close title="Close the part" aria-label="Close the part"><svg class="i"><use href="#i-close"/></svg></button>
+          </header>
+          <div class="cd-stage" data-cad-stage>
+            <canvas class="cd-3d" data-cad-canvas aria-label="The part in 3D"></canvas>
+            <svg class="cd-sketch" data-cad-sketch hidden aria-label="The sketch"></svg>
+            <input class="cd-value" data-cad-value hidden aria-label="A dimension's value">
+            <div class="cd-banner" data-cad-banner hidden></div>
+            <div class="cd-status" data-cad-status></div>
+          </div>
+        </div>
+      </main>
+
+      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
+
+      <aside class="pane cd-inspector" data-cad-inspector>
+        <div class="cd-tabs" role="tablist">
+          <button role="tab" data-cad-tab="step" aria-selected="true">Settings</button>
+          <button role="tab" data-cad-tab="text" aria-selected="false">Text</button>
+        </div>
+        <div class="scroll cd-step" data-cad-settings></div>
+        <div class="cd-textpane" data-cad-textpane hidden>
+          <textarea class="cd-text" data-cad-text spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" wrap="off" aria-label="The part's text"></textarea>
+          <div class="cd-diag" data-cad-diag aria-live="polite"></div>
+        </div>
+      </aside>
+    </section>
+
   </div>
 
   <!-- ══ title bar — Codex only ═══════════════════════════════════
@@ -1031,7 +1127,7 @@
        one ground from edge to edge. The title bar it does keep stands on its
        end down the right edge, so the code has the window's full height. It
        holds what the rails held that Codex still needs: the window controls,
-       the modes — so the window can be left by mouse as well as by ⌃1–⌃7 —
+       the modes — so the window can be left by mouse as well as by ⌃1–⌃8 —
        and the panel toggles a hidden statusline would otherwise take with
        it. The empty stretch between them is the window's drag surface.
        After the body in the source because it is after it on screen, so Tab
@@ -1052,6 +1148,7 @@
       <button class="mode" role="tab" aria-selected="false" data-mode="sheet" title="Excel  ⌃5"><span>Excel</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="circuit" title="Circuit  ⌃6"><span>Circuit</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="logic" title="Logic  ⌃7"><span>Logic</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="cad" title="CAD  ⌃8"><span>CAD</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">

@@ -353,6 +353,44 @@ fan grille of 53 holes checked in 14 ms, its mass in 11 ms, tessellated in
 7 ms for the screen (5,312 triangles) and 15 ms to 10 µm for a printer
 (10,208); a turned fitting to 10 µm in 6.5 ms.
 
+K3 — the mode, on ⌃8 after Logic. The core's `cad` module holds the part
+open: its text as it is and as saved, steps to undo, and the view it sends —
+the steps (parameters, sketches, features, each with its mistake or why it is
+not built yet), each sketch's shapes, constraints, dimensions and named
+points where the solver put them with its degrees of freedom and its
+profile's regions, and each body tessellated for the screen (points with the
+exact normals of their face, triangles, each triangle's face, edges, volume,
+area, centroid). The window's edits are lines of the language — `line l2
+l1.end r.tr`, `distance a b = 25`, `extrude plate from base distance t` —
+added, replaced or taken out by their place; a shape taken out takes its
+constraints with it and leaves points drawn from it where they were; a sketch
+or feature renamed is renamed where it is used; after each edit every sketch
+is solved and written back, so the file says where its shapes are. A point is
+dragged with the solver holding it where the mouse is, or letting it go to
+where the constraints allow; one step to undo when the mouse lets go. Typing in
+the Text tab is held too, keystrokes in a row one step; a line that does not
+read is marked and what last built stays on screen. ⌘S saves, the quit prompt
+names an unsaved part, Write STL and Write 3MF put the bodies beside the part to
+10 µm. The window (`ui/cad.js`, `cad-view.js`, `cad-sketch.js`) lists the
+steps, draws the part with three.js (faces named under the pointer, a cap
+chosen to sketch on), and opens a sketch flat on its plane in SVG: lines in
+runs, rectangles, circles, arcs and points, snapping to points already drawn
+(by name) and holding a nearly level or upright line so; the constraints and a
+dimension for what is chosen at what it measures now; dimensions typed over in
+place; ⌫ takes things out; what can still move drawn in the accent, what
+cannot hold in red. Tested: in the core (7), a part built by hand through the
+window's edits — a sketch, a rectangle, a hole, dimensions, an extrude, the
+hole dragged, its radius typed, a parameter — undone and redone, saved and read
+back to the byte, reopened; edits for another part ignored; typing held, a
+mistake keeping the last build; a shape taken out with its constraints; a
+rename carried to its uses; STL and 3MF written and read back; the quit prompt
+in the workspace. In the browser suite (9): ⌃8 and the chrome, the home page,
+steps and their mistakes, a step's settings writing its line, a sketch added
+and opened, lines, a rectangle, a circle and an arc drawn as their lines,
+constraints and dimensions, a value typed over, a drag, ⌫, the text, ⌘S and
+⌘Z, and the 3D view drawing the core's triangles; and 9 node tests of the
+editor's arithmetic. Not yet looked at in the installed app or in WebKit.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

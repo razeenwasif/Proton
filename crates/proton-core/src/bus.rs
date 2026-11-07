@@ -763,6 +763,53 @@ pub enum Command {
         table: String,
         note: String,
     },
+    /// A part made: `name.part`, its head and nothing drawn.
+    CadNew {
+        name: String,
+    },
+    /// A `.part` of the project opened.
+    CadOpen {
+        path: String,
+    },
+    /// The part put away; unsaved changes kept from it only with `discard`.
+    CadClose {
+        discard: bool,
+    },
+    /// The part written, as it is now.
+    CadSave,
+    /// The part's text as typed now: held until saved, keystrokes in a row
+    /// one step to undo.
+    CadText {
+        generation: u32,
+        text: String,
+    },
+    /// Edits made as one step to undo: lines of the language added,
+    /// replaced or taken out.
+    CadEdit {
+        generation: u32,
+        ops: Vec<crate::cad::CadOp>,
+    },
+    /// A sketch's point dragged to `(x, y)`, the solver holding the rest;
+    /// `done` as the mouse lets go, the drag one step to undo.
+    CadDrag {
+        generation: u32,
+        sketch: String,
+        point: String,
+        x: f64,
+        y: f64,
+        done: bool,
+    },
+    CadUndo {
+        generation: u32,
+    },
+    CadRedo {
+        generation: u32,
+    },
+    /// The part's bodies written beside it as `stl` or `3mf`, to 10 µm.
+    CadExport {
+        generation: u32,
+        format: String,
+    },
     /// A Logic file made: `name.logic`, a `theory` or a `worksheet` to
     /// start; or `name.proof`, a `proof`.
     LogicNew {
@@ -1719,6 +1766,14 @@ pub enum Event {
     /// every output in it.
     CellSelected {
         index: usize,
+    },
+    /// The project's `.part` files, for CAD's home page.
+    CadHome {
+        parts: Vec<crate::cad::CadFound>,
+    },
+    /// The part open, built and drawn — or none.
+    CadPart {
+        part: Option<Box<crate::cad::CadPartView>>,
     },
     /// The project's `.logic`, `.proof` and `.l4f` files, for Logic's home page.
     LogicHome {

@@ -319,6 +319,39 @@ fn logic_shows_its_files_answers_the_line_at_the_cursor_and_the_quit_prompt_name
 }
 
 #[test]
+fn cad_shows_its_parts_builds_the_open_one_and_the_quit_prompt_names_it_unsaved() {
+    let root = project("cad");
+    std::fs::create_dir_all(root.join("case")).unwrap();
+    std::fs::write(root.join("case/foot.part"), "part \"Foot\"\nsketch s on XY\n  circle c center (0, 0) radius 5\nend\nextrude f from s distance 2\n").unwrap();
+    let mut space = Workspace::rooted(root.clone());
+    let events = space.apply(Command::SetMode { mode: ModeId::Cad });
+    let layout = layout_in(&events).expect("a mode change carries its layout");
+    assert_eq!((layout.context, layout.stage, layout.dock, layout.document), (Slot::History, Slot::Viewport, Slot::Inspector, DocumentKind::Part));
+    let found = events.iter().find_map(|e| match e {
+        Event::CadHome { parts } => Some(parts.iter().map(|f| f.path.clone()).collect::<Vec<_>>()),
+        _ => None,
+    });
+    assert_eq!(found, Some(vec!["case/foot.part".to_string()]));
+    let part = space
+        .apply(Command::CadOpen { path: "case/foot.part".into() })
+        .into_iter()
+        .find_map(|e| match e {
+            Event::CadPart { part: Some(p) } => Some(p),
+            _ => None,
+        })
+        .expect("the part open");
+    assert_eq!(part.bodies.len(), 1);
+    assert!((part.bodies[0].volume - std::f64::consts::PI * 50.0).abs() < 1e-6);
+    let op = proton_core::cad::CadOp::Replace { index: part.steps[1].index, text: "extrude f from s distance 4".into() };
+    space.apply(Command::CadEdit { generation: part.generation, ops: vec![op] });
+    assert!(space.is_modified());
+    assert_eq!(space.unsaved(), vec!["case/foot.part".to_string()]);
+    assert!(space.save_unsaved().is_empty());
+    assert!(std::fs::read_to_string(root.join("case/foot.part")).unwrap().ends_with("extrude f from s distance 4\n"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn the_agents_logic_tools_ask_solve_prove_and_write_held_until_saved() {
     let root = project("logic-agent");
     let mut space = Workspace::rooted(root.clone());

@@ -75,6 +75,12 @@ pub enum Slot {
     Schematic,
     /// A logic file as typed, and what the statement at the cursor is.
     Worksheet,
+    /// A part's sketches and features in order, each step's mistake marked.
+    History,
+    /// A part in 3D, or a sketch flat on its plane.
+    Viewport,
+    /// The chosen step's settings, and the part's text.
+    Inspector,
 }
 
 /// How a mode's work persists.
@@ -106,6 +112,8 @@ pub enum DocumentKind {
     /// `.logic` theories and worksheets, `.proof` proofs and Logic4Fun's
     /// `.l4f`: a statement a line.
     LogicFile,
+    /// `Name.part`: parameters, sketches and features, a statement a line.
+    Part,
 }
 
 /// The whole of a mode, as anything outside it needs to know.
@@ -190,6 +198,14 @@ impl Layout {
                 Slot::Agent,
                 DocumentKind::LogicFile,
             ),
+            // The part's sketches and features in order, the part in 3D —
+            // or a sketch flat on its plane — and the step's settings.
+            ModeId::Cad => (
+                Slot::History,
+                Slot::Viewport,
+                Slot::Inspector,
+                DocumentKind::Part,
+            ),
         };
         Layout {
             mode,
@@ -210,7 +226,7 @@ impl Layout {
         match self.mode {
             // The noun is prose, so the editing verbs belong to the composer
             // rather than to the mode.
-            ModeId::Research | ModeId::Study | ModeId::Sheet | ModeId::Circuit | ModeId::Logic => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
+            ModeId::Research | ModeId::Study | ModeId::Sheet | ModeId::Circuit | ModeId::Logic | ModeId::Cad => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
             _ => true,
         }
     }

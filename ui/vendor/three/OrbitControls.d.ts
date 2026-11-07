@@ -1,4 +1,4 @@
-// What ui/lab3d.js uses of three.js's OrbitControls; see three.module.d.ts.
+// What ui/lab3d.js and ui/cad-view.js use of three.js's OrbitControls; see three.module.d.ts.
 import type { Camera, Vector3 } from "./three.module.js";
 
 export class OrbitControls {
@@ -6,6 +6,8 @@ export class OrbitControls {
   target: Vector3;
   minDistance: number;
   maxDistance: number;
+  enableDamping: boolean;
+  screenSpacePanning: boolean;
   update(): boolean;
   saveState(): void;
   reset(): void;
