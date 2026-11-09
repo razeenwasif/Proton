@@ -2034,6 +2034,11 @@ mod tests {
         assert!(refused.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.starts_with("the board breaks") && text.contains("short"))), "{refused:?}");
         c.apply(&root, Command::CadUndo { generation: b.generation });
         c.apply(&root, Command::CadSave);
+        // In 3D, as a part beside it: it builds, the board and four boxes.
+        let said = c.apply(&root, Command::CadExport { generation: b.generation, format: "part".into() });
+        assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "wrote hub-3d.part")), "{said:?}");
+        let m = model::build(&part::read(&std::fs::read_to_string(root.join("hub-3d.part")).unwrap()).unwrap());
+        assert!(m.errors.is_empty() && m.bodies.len() == 5, "{:?}", m.errors);
         // A track from the power pin to a fan's: one connection left.
         let (a, z) = (at("P1.1"), at("J1.2"));
         let line = format!("track +12V B.Cu width 1 ({}, {}) ({}, {}) ({}, {})", a.0, a.1, a.0, z.1, z.0, z.1);

@@ -202,12 +202,20 @@ pub fn export(b: &BoardBuilt, sch: &proton_board::Built, file: &std::path::Path,
             let shown_dir = std::path::Path::new(shown).with_file_name(format!("{stem}-fab")).to_string_lossy().replace('\\', "/");
             Ok(format!("{shown_dir}/ ({} files){}", files.len(), if left > 0 { format!(" — {left} connection{} not routed yet", if left == 1 { "" } else { "s" }) } else { String::new() }))
         }
+        "part" => {
+            // The board in 3D, as a part: opened, written as STEP, placed
+            // in an assembly like any.
+            let stem = file.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| "board".into());
+            let to = file.with_file_name(format!("{stem}-3d.part"));
+            std::fs::write(&to, proton_board::three_d::to_part(b, b.title.as_deref().unwrap_or(&stem))).map_err(|e| format!("{}: {e}", to.display()))?;
+            Ok(std::path::Path::new(shown).with_file_name(format!("{stem}-3d.part")).to_string_lossy().replace('\\', "/"))
+        }
         "svg" => {
             let to = file.with_extension("svg");
             std::fs::write(&to, proton_board::board::svg(b).svg).map_err(|e| format!("{}: {e}", to.display()))?;
             Ok(std::path::Path::new(shown).with_extension("svg").to_string_lossy().replace('\\', "/"))
         }
-        other => Err(format!("a board is written as Gerbers and drills (gerber) or SVG, not `{other}`")),
+        other => Err(format!("a board is written as Gerbers and drills (gerber), a 3D part (part) or SVG, not `{other}`")),
     }
 }
 

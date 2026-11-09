@@ -750,6 +750,9 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     before = win.commands.length;
     ws().querySelector('[data-cad-settings] [data-cad-export="gerber"]').click(); await settle();
     assert(sent(before, 'cadExport')[0]?.format === 'gerber', 'Gerbers and drills did not ask');
+    before = win.commands.length;
+    ws().querySelector('[data-cad-settings] [data-cad-export="part"]').click(); await settle();
+    assert(sent(before, 'cadExport')[0]?.format === 'part', '3D part did not ask');
     await win.pushEvents([brd({findings: [{line: 9, error: true, message: 'short: J1.2 (+12V) touches track GND (GND)'}]})]); await settle();
     assert(ws().querySelector('[data-cad-settings] [data-cad-export="gerber"]').disabled, 'a board that breaks a rule can be written');
     await win.pushEvents([{type: 'cadBoard', board: null}, part()]); await settle();

@@ -938,6 +938,22 @@ files refused; in the core, a first board written for a fab and read
 back, and a board with a short refused; in the browser, written, and not
 while a rule is broken.
 
+E4 — the board in 3D. `proton_board::three_d`: a board written as a
+`.part` — its outline sketched, each line starting where the last ends so
+it closes exactly, its cut-outs and every hole drawn in it, extruded to its
+thickness; each placed part a box the size of its footprint's body and its
+package's usual height (a chip 0.3–0.6, SOT-23 1.1, SOIC 1.75, TSSOP 1.2,
+LQFP 1.6, QFN 0.9, a pin header 8.5, a KK 254 11, a Mini-Fit Jr. 13), on top
+or, for the back, under it — for fit, not for drawings of the parts. So the
+board is built, drawn in 3D, written as STEP and placed in an assembly as
+any part is: a hub in the case it was cut to fit. In CAD a board writes
+`NAME-3d.part` beside it. Tested (3 + 1 + 1): the board's volume — its
+outline less its holes, its rounded corners within their chords — and
+thickness, checked whole; each box's height and place, on top and under,
+turned; written as STEP and read back, five bodies; placed in an assembly
+on a tray; in the core, a board's 3D part written and built; in the
+browser, asked for.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

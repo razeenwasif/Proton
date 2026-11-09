@@ -14,6 +14,7 @@
 //!   copper joined, its rules checked, and drawn.
 //! - [`gerber`]: a board written for a fab — Gerber X2, Excellon, the
 //!   bill of materials and placements — and read back.
+//! - [`three_d`]: a board as a `.part`, for 3D, STEP and assemblies.
 //! - [`netlist`]: its netlist for KiCad, and its bill of materials.
 
 pub mod board;
@@ -25,6 +26,7 @@ pub mod lang;
 pub mod netlist;
 pub mod sheet;
 pub mod symbol;
+pub mod three_d;
 
 pub use build::{build, Built, Finding, Level};
 pub use lang::{read, write, Schematic};
