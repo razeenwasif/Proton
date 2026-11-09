@@ -15,6 +15,7 @@
 //! - [`gerber`]: a board written for a fab — Gerber X2, Excellon, the
 //!   bill of materials and placements — and read back.
 //! - [`three_d`]: a board as a `.part`, for 3D, STEP and assemblies.
+//! - [`kicad`]: KiCad's symbol and footprint libraries read.
 //! - [`netlist`]: its netlist for KiCad, and its bill of materials.
 
 pub mod board;
@@ -22,6 +23,7 @@ pub mod board_lang;
 pub mod build;
 pub mod footprint;
 pub mod gerber;
+pub mod kicad;
 pub mod lang;
 pub mod netlist;
 pub mod sheet;

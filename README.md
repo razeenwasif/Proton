@@ -264,7 +264,9 @@ limits too — and what it writes is held like your own. A `.schematic` is
 the start of a custom board: parts from a library that has the PC's own
 connectors (ATX, EPS, PCIe, SATA, fan, ARGB and the front-panel USB
 headers), nets that say the current they carry, the electrical rules
-checked, the sheet drawn with each pin's net, and a netlist for KiCad.
+checked, the sheet drawn with each pin's net, and a netlist for KiCad —
+whose own symbol and footprint libraries it reads, from the project or
+where KiCad is installed.
 Footprints are worked out by IPC-7351B's equations. A schematic lays out
 its `.board` — cut, if you like, from a sketch of the part it fits in —
 where parts are dragged into place and tracks drawn from pad to pad, the

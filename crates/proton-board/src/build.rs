@@ -85,8 +85,14 @@ pub fn sheet_size(name: &str) -> (f64, f64) {
     proton_cad::drawing::size(&name.replace('_', "-")).unwrap_or((297.0, 210.0))
 }
 
-/// The schematic `s` built and checked.
+/// The schematic `s` built and checked, with no libraries but Proton's.
 pub fn build(s: &Schematic) -> Built {
+    build_with(s, &crate::kicad::Libraries::default())
+}
+
+/// The schematic built and checked, its `kicad` parts and `Library:Name`
+/// footprints taken from `libs`.
+pub fn build_with(s: &Schematic, libs: &crate::kicad::Libraries) -> Built {
     let mut findings = Vec::new();
     let err = |line: usize, m: String| Finding { line, level: Level::Error, message: m };
     let warn = |line: usize, m: String| Finding { line, level: Level::Warning, message: m };
@@ -108,7 +114,8 @@ pub fn build(s: &Schematic) -> Built {
             findings.push(err(l.line, format!("{} is a reference already", p.reference)));
             continue;
         }
-        let symbol = match make(&p.kind, &p.args) {
+        let made = if p.kind == "kicad" { libs.symbol(p.args.name.as_deref().unwrap_or("")) } else { make(&p.kind, &p.args) };
+        let symbol = match made {
             Ok(sym) => sym,
             Err(e) => {
                 findings.push(err(l.line, format!("{}: {e}", p.reference)));
@@ -125,7 +132,8 @@ pub fn build(s: &Schematic) -> Built {
         }
         // Its footprint: the line's, or its kind's own; its pads its pins.
         let named = p.footprint.clone().or_else(|| crate::footprint::default_for(&symbol).map(str::to_string));
-        let land = match named.as_deref().map(crate::footprint::footprint) {
+        let found = |n: &str| if n.contains(':') { libs.footprint(n) } else { crate::footprint::footprint(n) };
+        let land = match named.as_deref().map(found) {
             Some(Ok(f)) => {
                 let (no_pad, no_pin) = crate::footprint::mismatch(&symbol, &f);
                 if !no_pad.is_empty() {

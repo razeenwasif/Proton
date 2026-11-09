@@ -102,8 +102,9 @@ fn the_pc_connectors_are_their_standards_pin_for_pin() {
     assert_eq!(hp.pin("S3").map(|i| hp.pins[i].name.as_str()), Some("SENSE0"));
     assert!(hp.caution.is_some() && make("usb-c-header", &Args::default()).unwrap().caution.is_some());
     assert!(make("atx-24", &Args::default()).unwrap().caution.is_none());
-    // Every kind the library lists is made.
-    for (k, _, _) in kinds() {
+    // Every kind the library lists is made — a KiCad part from its library.
+    assert!(make("kicad", &Args::default()).unwrap_err().contains("read from its library"));
+    for (k, _, _) in kinds().into_iter().filter(|k| k.0 != "kicad") {
         let args = Args { size: Some((2, 5)), name: Some("X".into()), pins: make("fan-4pin", &Args::default()).unwrap().pins };
         let s = make(k, &args).unwrap_or_else(|e| panic!("{k}: {e}"));
         assert!(!s.pins.is_empty(), "{k}");

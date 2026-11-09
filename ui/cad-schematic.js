@@ -114,7 +114,8 @@ export function schematicSettingsHtml(s, st) {
     field("Size", `<select data-cad-sch-sheet aria-label="The sheet's size">${SHEETS.map((x) => `<option value="${esc(x)}"${x === s.sheet ? " selected" : ""}>${esc(x.replace("_", " "))}</option>`).join("")}</select>`) + `</section>` +
     `<form class="cd-card" data-cad-sch-part-form><div class="cd-head">Add a part</div>` +
     field("Kind", `<select name="kind" data-cad-sch-kind aria-label="What it is">${s.kinds.map((k) => `<option value="${esc(k.kind)}"${k.kind === kind?.kind ? " selected" : ""}>${esc(k.title)}</option>`).join("")}</select>`) +
-    (kind?.takes ? field(kind.kind === "ic" ? "Name and pins" : "Size", `<input name="takes" placeholder="${esc(kind.takes)}" spellcheck="false" aria-label="${esc(kind.takes)}">`) : "") +
+    (kind?.takes ? field(kind.kind === "ic" ? "Name and pins" : kind.kind === "kicad" ? "Library:Name" : "Size", `<input name="takes" placeholder="${esc(kind.takes)}" spellcheck="false" aria-label="${esc(kind.takes)}">`) : "") +
+    (kind?.kind === "kicad" ? `<p class="cd-muted">${s.libraries.length ? `KiCad's libraries found: ${s.libraries.map(esc).join(", ")}.` : "No KiCad libraries found: put a <code>.kicad_sym</code> or a <code>.pretty</code> folder in the project, or install KiCad."}</p>` : "") +
     field("Value", `<input name="value" placeholder="10k, 100n" spellcheck="false" aria-label="Its value">`) +
     field("Footprint", `<input name="footprint" placeholder="0603" spellcheck="false" aria-label="Its footprint">`) +
     `<div class="cd-row-btns"><button class="cd-btn" type="submit">Add part</button></div></form>` +

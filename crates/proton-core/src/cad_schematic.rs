@@ -110,6 +110,8 @@ pub struct CadSchematicView {
     pub nets: Vec<CadSchematicNet>,
     pub findings: Vec<CadFinding>,
     pub kinds: Vec<CadSymbolKind>,
+    /// KiCad's symbol and footprint libraries found, by nickname.
+    pub libraries: Vec<String>,
     pub text: String,
     pub dirty: bool,
     pub can_undo: bool,
@@ -193,6 +195,7 @@ pub fn view(s: &Schematic, b: &Built, path: &str, name: &str, generation: u32) -
         nets,
         findings: b.findings.iter().map(|f| CadFinding { line: f.line as u32, error: f.level == Level::Error, message: f.message.clone() }).collect(),
         kinds: kinds().into_iter().map(|(k, t, a)| CadSymbolKind { kind: k.into(), title: t.into(), takes: a.into() }).collect(),
+        libraries: Vec::new(),
         text: String::new(),
         dirty: false,
         can_undo: false,

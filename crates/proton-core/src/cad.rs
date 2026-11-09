@@ -613,15 +613,16 @@ impl Cads {
                         Err(e) => Err(format!("line {} does not read — mend it first: {}", e.line, e.message)),
                     },
                     Doc::Schematic => match proton_board::read(&open.text) {
-                        Ok(s) => crate::cad_schematic::export(&proton_board::build(&s), &open.path, &open.shown, &format),
+                        Ok(s) => crate::cad_schematic::export(&proton_board::build::build_with(&s, &proton_board::kicad::Libraries::find(&open.root)), &open.path, &open.shown, &format),
                         Err(e) => Err(format!("line {} does not read — mend it first: {}", e.line, e.message)),
                     },
                     Doc::Board => match proton_board::board_lang::read(&open.text) {
                         Ok(b) => {
                             let load = crate::cad_assembly::load_inside(&open.root);
-                            let built = proton_board::board::build(&b, &open.path, &load);
+                            let libs = proton_board::kicad::Libraries::find(&open.root);
+                            let built = proton_board::board::build_with(&b, &open.path, &load, &libs);
                             let dir = open.path.parent().unwrap_or(Path::new("")).to_path_buf();
-                            let sch = built.schematic.as_ref().and_then(|f| load(&dir.join(f)).ok()).and_then(|t| proton_board::read(&t).ok()).map(|s| proton_board::build(&s));
+                            let sch = built.schematic.as_ref().and_then(|f| load(&dir.join(f)).ok()).and_then(|t| proton_board::read(&t).ok()).map(|s| proton_board::build::build_with(&s, &libs));
                             match sch {
                                 Some(sch) => crate::cad_board::export(&built, &sch, &open.path, &open.shown, &format),
                                 None => Err("its schematic does not read: mend it first".into()),
@@ -744,7 +745,7 @@ impl Cads {
             Ok(b) => (b, None),
             Err(e) => (proton_board::board_lang::read(&open.saved).unwrap_or_default(), Some(CadDiag::from(&e))),
         };
-        let built = proton_board::board::build(&b, &open.path, &crate::cad_assembly::load_inside(&open.root));
+        let built = proton_board::board::build_with(&b, &open.path, &crate::cad_assembly::load_inside(&open.root), &proton_board::kicad::Libraries::find(&open.root));
         let mut v = crate::cad_board::view(&b, &built, &open.shown, &open.name, open.generation);
         v.text = open.text.clone();
         v.dirty = open.text != open.saved;
@@ -774,7 +775,7 @@ impl Cads {
                 Ok(s) => s,
                 Err(e) => return vec![notice(format!("line {} does not read — mend it first: {}", e.line, e.message), NoticeLevel::Warn)],
             };
-            let b = proton_board::build(&s);
+            let b = proton_board::build::build_with(&s, &proton_board::kicad::Libraries::find(&open.root));
             let of = open.path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
             let text = proton_board::board::first_board(b.title.as_deref().unwrap_or(&open.name), &of, &b);
             if let Err(e) = std::fs::write(&file, &text) {
@@ -795,8 +796,10 @@ impl Cads {
             Ok(s) => (s, None),
             Err(e) => (proton_board::read(&open.saved).unwrap_or_default(), Some(CadDiag::from(&e))),
         };
-        let b = proton_board::build(&s);
+        let libs = proton_board::kicad::Libraries::find(&open.root);
+        let b = proton_board::build::build_with(&s, &libs);
         let mut v = crate::cad_schematic::view(&s, &b, &open.shown, &open.name, open.generation);
+        v.libraries = libs.symbols.iter().map(|l| format!("{} (symbols)", l.0)).chain(libs.footprints.iter().map(|l| format!("{} (footprints)", l.0))).collect();
         v.text = open.text.clone();
         v.dirty = open.text != open.saved;
         v.can_undo = !open.undo.is_empty();
@@ -2058,6 +2061,20 @@ mod tests {
         let again = c.apply(&root, Command::CadMakeBoard { generation: g });
         assert!(again.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("which was there"))));
         assert!(board(&again).items.iter().any(|i| i.kind == "track"));
+    }
+
+    #[test]
+    fn a_schematic_takes_kicad_parts_from_the_projects_libraries() {
+        let root = scratch("kicad-libs");
+        std::fs::create_dir_all(root.join("lib/Mine.pretty")).unwrap();
+        std::fs::write(root.join("lib/Mine.kicad_sym"), "(kicad_symbol_lib (version 20220914)\n  (symbol \"Fuse\" (property \"Reference\" \"F\" (at 0 0 0))\n    (symbol \"Fuse_1_1\" (pin passive line (at -3.81 0 0) (length 1.27) (name \"~\") (number \"1\")) (pin passive line (at 3.81 0 180) (length 1.27) (name \"~\") (number \"2\")))))\n").unwrap();
+        std::fs::write(root.join("lib/Mine.pretty/F_1206.kicad_mod"), proton_board::footprint::kicad_mod(&proton_board::footprint::footprint("1206").unwrap())).unwrap();
+        std::fs::write(root.join("fuse.schematic"), "schematic \"Fused\"\npart F1 kicad \"Mine:Fuse\" footprint Mine:F_1206\npart J1 header 2 footprint header-1x2\nnet IN power J1.1, F1.1\nnet OUT F1.2, J1.2\n").unwrap();
+        let mut c = Cads::default();
+        let s = schematic(&c.apply(&root, Command::CadOpen { path: "fuse.schematic".into() }));
+        assert!(s.findings.is_empty(), "{:?}", s.findings);
+        assert_eq!((s.parts[0].kind.as_str(), s.parts[0].pads, s.parts[0].land_source.as_deref()), ("Mine:Fuse", 2, Some("a KiCad library")));
+        assert_eq!(s.libraries, vec!["Mine (symbols)".to_string(), "Mine (footprints)".to_string()]);
     }
 
     #[test]

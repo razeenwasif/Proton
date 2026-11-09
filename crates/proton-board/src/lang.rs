@@ -272,6 +272,9 @@ pub fn read(text: &str) -> Result<Schematic, Diag> {
                     };
                     args.size = Some(size.ok_or_else(|| Diag::new(no, at, format!("`{s}` is not a header's size: `4`, or `2x5`")))?);
                 }
+                if kind == "kicad" {
+                    args.name = Some(p.string("its library and name, `\"Device:R\"`")?);
+                }
                 if kind == "ic" {
                     args.name = Some(p.string("its name")?);
                     let at = p.col();
@@ -393,7 +396,11 @@ pub fn statement(item: &Item) -> String {
                 l.push_str(&if r == 1 { format!(" {n}") } else { format!(" {r}x{n}") });
             }
             if let Some(name) = &p.args.name {
-                l.push_str(&format!(" {} pins ({})", quoted(name), p.args.pins.iter().map(|x| format!("{} {} {}", x.number, x.name, x.kind.word())).collect::<Vec<_>>().join(", ")));
+                if p.kind == "kicad" {
+                    l.push_str(&format!(" {}", quoted(name)));
+                } else {
+                    l.push_str(&format!(" {} pins ({})", quoted(name), p.args.pins.iter().map(|x| format!("{} {} {}", x.number, x.name, x.kind.word())).collect::<Vec<_>>().join(", ")));
+                }
             }
             if let Some(v) = &p.value {
                 l.push_str(&format!(" value {}", value(v)));

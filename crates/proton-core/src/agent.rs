@@ -785,14 +785,15 @@ impl Agent {
                               NAME VIEW \"text\" at FACE`, `balloons VIEW`, `bom at (x, y)` — sheet millimetres from its \
                               bottom left. A .schematic: `schematic \"T\"`, `sheet A4`, `part REF KIND [value V] [footprint F] \
                               [at (x, y)] [turn 90]` — KIND resistor, capacitor, capacitor-polarised, inductor, diode, \
-                              led, zener, fuse, switch, crystal, npn, pnp, nmos, pmos, `header 4` or `header 2x5`, `ic \
+                              led, zener, fuse, switch, crystal, npn, pnp, nmos, pmos, `header 4` or `header 2x5`, `kicad \
+                              \"Library:Name\"` from KiCad's libraries in the project or installed, `ic \
                               \"NAME\" pins (1 NAME KIND, …)` with pin KINDs input, output, bidir, tristate, passive, \
                               power-in, power-out, open-collector, open-emitter, nc, and the PC's connectors atx-24, \
                               eps-8, pcie-6, pcie-8, 12v-2x6, sata-power, fan-4pin, argb-5v, usb2-header, usb3-header, \
                               usb-c-header; `net NAME [power] REF.PIN, REF.PIN … [current A]` (a pin by number or by \
                               its only name; `power` when a cable brings it), `nc REF.PIN, …`; footprints (IPC-7351B) \
                               0201–2512, SOT-23(-5, -6), SOIC-N, TSSOP-N, LQFP-N, QFN-N, header-RxN(-2.0), \
-                              mini-fit-jr-2xN, kk-254-N, the PC's connectors taking theirs; its rules check, pins \
+                              mini-fit-jr-2xN, kk-254-N or a KiCad library's `Library:Name`, the PC's connectors taking theirs; its rules check, pins \
                               against pads too, comes back with it. A .board (made from a schematic): `board \"T\"`, \
                               `of \"x.schematic\"`, `layers 2|4`, `copper 1` (oz), `rules clearance 0.2 track 0.25 via \
                               0.6/0.3 edge 0.3 rise 10`, `outline rect (0, 0) size (60, 40) [corner 2]` (or `points (x, \

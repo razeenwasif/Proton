@@ -15,7 +15,11 @@ export type CadSchematicView = { path: string, name: string, generation: number,
 /**
  * Every statement but blanks and comments, in order.
  */
-items: Array<CadDrawingItem>, parts: Array<CadSchematicPart>, nets: Array<CadSchematicNet>, findings: Array<CadFinding>, kinds: Array<CadSymbolKind>, text: string, dirty: boolean, canUndo: boolean, canRedo: boolean, 
+items: Array<CadDrawingItem>, parts: Array<CadSchematicPart>, nets: Array<CadSchematicNet>, findings: Array<CadFinding>, kinds: Array<CadSymbolKind>, 
+/**
+ * KiCad's symbol and footprint libraries found, by nickname.
+ */
+libraries: Array<string>, text: string, dirty: boolean, canUndo: boolean, canRedo: boolean, 
 /**
  * Where the text stops reading, if it does: the rest is what last read.
  */

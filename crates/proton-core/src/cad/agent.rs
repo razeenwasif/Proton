@@ -282,11 +282,11 @@ impl Cads {
                 assembly_said(&m, root)
             }
             Doc::Schematic => match proton_board::read(&src.text) {
-                Ok(s) => crate::cad_schematic::said(&proton_board::build(&s)),
+                Ok(s) => crate::cad_schematic::said(&proton_board::build::build_with(&s, &proton_board::kicad::Libraries::find(root))),
                 Err(e) => format!("It does not read: line {}: {}", e.line, e.message),
             },
             Doc::Board => match proton_board::board_lang::read(&src.text) {
-                Ok(b) => crate::cad_board::said(&proton_board::board::build(&b, &src.file, &crate::cad_assembly::load_inside(root))),
+                Ok(b) => crate::cad_board::said(&proton_board::board::build_with(&b, &src.file, &crate::cad_assembly::load_inside(root), &proton_board::kicad::Libraries::find(root))),
                 Err(e) => format!("It does not read: line {}: {}", e.line, e.message),
             },
             Doc::Drawing => {

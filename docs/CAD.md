@@ -954,6 +954,27 @@ turned; written as STEP and read back, five bodies; placed in an assembly
 on a tray; in the core, a board's 3D part written and built; in the
 browser, asked for.
 
+E5 — KiCad's libraries. `proton_board::kicad`: an S-expression reader;
+`.kicad_sym` symbols — their pins' numbers, names and electrical types
+(`power_in` a power input, `no_connect` not to be connected, `unspecified`
+and `free` passive), a symbol that `extends` another taking its pins, set
+out as KiCad sets them, left pins down the left; `.kicad_mod` footprints —
+pads' numbers, shapes, sizes, turns and drills (unplated holes are not
+pads), the courtyard's and body's boxes from their layers, KiCad's y turned
+up. Libraries are found in the project — any `.kicad_sym` file and
+`.pretty` folder three folders down — and in KiCad's own folders wherever
+it is installed (macOS, Linux, Windows). A schematic takes `part U1 kicad
+"Device:NE555P"` and `footprint Library:Name`; a library or a part not
+found is said, with what was looked for. KiCad is not installed on the Mac
+this was built on, so its files are tested as written in its format, and
+Proton's own KiCad footprints are read back the same. Tested (5 + 1): the
+S-expressions, strings escaped, three mistakes; a symbol library — a
+resistor, one extending it, the 555 with its pins' types and sides; a
+surface-mount and a through-hole footprint; five of Proton's footprints
+written and read back pad for pad; a project's libraries found and a
+timer's schematic of KiCad's parts built clean, and said to want them
+without; in the core, a project's own library's fuse and footprint used.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

@@ -277,6 +277,11 @@ fn sketch_outline(file: &Path, sketch: &str, load: Load) -> Result<Vec<Vec<P2>>,
 
 /// The board `b`, which is the file `here`, built and checked.
 pub fn build(b: &Board, here: &Path, load: Load) -> BoardBuilt {
+    build_with(b, here, load, &crate::kicad::Libraries::default())
+}
+
+/// The board built and checked, its schematic's KiCad parts from `libs`.
+pub fn build_with(b: &Board, here: &Path, load: Load, libs: &crate::kicad::Libraries) -> BoardBuilt {
     let mut findings: Vec<Finding> = Vec::new();
     let err = |line: usize, m: String| Finding { line, level: Level::Error, message: m };
     let warn = |line: usize, m: String| Finding { line, level: Level::Warning, message: m };
@@ -363,7 +368,7 @@ pub fn build(b: &Board, here: &Path, load: Load) -> BoardBuilt {
             None
         }
         Some(f) => match load(&dir.join(f)).and_then(|t| crate::read(&t).map_err(|d| format!("line {} of {f} does not read: {}", d.line, d.message))) {
-            Ok(s) => Some(crate::build(&s)),
+            Ok(s) => Some(crate::build::build_with(&s, libs)),
             Err(e) => {
                 findings.push(err(of_line, e));
                 None

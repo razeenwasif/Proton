@@ -160,6 +160,7 @@ pub fn kinds() -> Vec<(&'static str, &'static str, &'static str)> {
         ("pmos", "P-channel MOSFET (SOT-23: 1 G, 2 S, 3 D)", ""),
         ("header", "Pin header", "N, or ROWSxN"),
         ("ic", "A chip from its pins", "\"NAME\" pins (1 NAME KIND, …)"),
+        ("kicad", "A KiCad library's symbol", "\"Library:Name\""),
         ("atx-24", "ATX 24-pin power", ""),
         ("eps-8", "EPS 8-pin CPU power", ""),
         ("pcie-6", "PCIe 6-pin graphics power", ""),
@@ -349,6 +350,7 @@ pub fn make(kind: &str, args: &Args) -> Result<Symbol, String> {
             "an Intel NUC's signal table, read second hand",
             Some("the USB-C Key-A header's pinout is from a summary of Intel's NUC signal table, not read from it: check it against your board's manual before a board is made"),
         ),
+        "kicad" => return Err("a KiCad symbol is read from its library, and there is none here".into()),
         other => return Err(format!("`{other}` is not in the library: {}", kinds().iter().map(|k| k.0).collect::<Vec<_>>().join(", "))),
     })
 }
