@@ -771,6 +771,13 @@ pub enum Command {
     CadFit {
         generation: u32,
     },
+    /// A drawing of the part open, or the assembly's blueprint, written
+    /// beside it as `NAME.drawing` and opened — on blue with `blueprint`.
+    /// One there already is opened.
+    CadDraw {
+        generation: u32,
+        blueprint: bool,
+    },
     /// A `.part` or `.assembly` of the project opened.
     CadOpen {
         path: String,
@@ -1392,6 +1399,10 @@ pub enum Event {
     /// The assembly open, solved and drawn — or none.
     CadAssembly {
         assembly: Option<Box<crate::cad_assembly::CadAssemblyView>>,
+    },
+    /// The drawing open, laid out on its sheet — or none.
+    CadDrawing {
+        drawing: Option<Box<crate::cad_drawing::CadDrawingView>>,
     },
     /// The project's `.logic`, `.proof` and `.l4f` files, for Logic's home page.
     LogicHome {

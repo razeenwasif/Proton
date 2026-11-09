@@ -323,6 +323,16 @@ fn load_inside(root: &Path) -> impl Fn(&Path) -> Result<String, String> {
 }
 
 impl PartCache {
+    /// A drawing laid out, an assembly it is of built from the parts here
+    /// while their files are as they were.
+    pub fn drawing(&mut self, d: &proton_cad::drawing::lang::Drawing, here: &Path, root: &Path) -> proton_cad::drawing::build::Built {
+        let mut parts: HashMap<PathBuf, Arc<Built>> = self.built.iter().filter(|(p, (t, _))| mtime(p) == *t).map(|(p, (_, b))| (p.clone(), b.clone())).collect();
+        let load = load_inside(root);
+        let b = proton_cad::drawing::build::build_with(d, here, &load, &mut parts);
+        self.built = parts.into_iter().map(|(p, b)| (p.clone(), (mtime(&p), b))).collect();
+        b
+    }
+
     /// The assembly built, the parts it holds taken from here while their
     /// files are as they were.
     pub fn build(&mut self, a: &lang::Assembly, here: &Path, root: &Path) -> Model {
@@ -724,6 +734,27 @@ mod tests {
         let json = serde_json::to_string(&v).unwrap();
         let out = format!("/* The sample assembly the browser preview shows, as the core draws it —\n * written by `cargo test -p proton-core --lib dump_assembly_for_the_preview -- --ignored`;\n * not edited by hand. */\n\n/** @type {{any}} */\nexport const ASSEMBLY = {json};\n");
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/preview-cad-assembly.js");
+        std::fs::write(&path, out).unwrap();
+        println!("wrote {} ({} bytes)", path.display(), std::fs::metadata(&path).unwrap().len());
+    }
+
+    /// `cargo test -p proton-core --lib dump_drawing_for_the_preview -- --ignored`
+    /// writes `ui/preview-cad-drawing.js`: the sample assembly's blueprint.
+    #[test]
+    #[ignore]
+    fn dump_drawing_for_the_preview() {
+        let root = scratch("preview-drawing");
+        std::fs::write(root.join("parts/pin.part"), "part \"Pin\"\nmaterial steel\nsketch s on XY\n  circle c center (0, 0) radius = 2\nend\nextrude p from s distance 10\n").unwrap();
+        let text = "assembly \"Test rig\"\nunits mm\nclearance 0.5\n\npart plate from \"parts/plate.part\"\npart block from \"parts/block.part\"\npart pin from \"parts/pin.part\"\nplace block at (0, 0, 4)\nplace pin at (60, 30, 4)\nmate seat planar block.b.bottom to plate.plate.top\nmate left flush block.b.side(r.left) to plate.plate.side(r.left)\nmate stand planar pin.p.bottom to plate.plate.top\nexplode apart block by (0, 0, 30), pin by (0, 0, 60)\n";
+        std::fs::write(root.join("rig.assembly"), text).unwrap();
+        let mut c = Cads::default();
+        let g = view(&c.apply(&root, Command::CadOpen { path: "rig.assembly".into() })).generation;
+        let mut d = c.apply(&root, Command::CadDraw { generation: g, blueprint: true }).into_iter().rev().find_map(|e| if let Event::CadDrawing { drawing: Some(d) } = e { Some(*d) } else { None }).expect("the blueprint");
+        assert!(d.errors.is_empty(), "{:?}", d.errors);
+        d.generation = 0;
+        let json = serde_json::to_string(&d).unwrap();
+        let out = format!("/* The sample assembly's blueprint the browser preview shows, as the core draws it —\n * written by `cargo test -p proton-core --lib dump_drawing_for_the_preview -- --ignored`;\n * not edited by hand. */\n\n/** @type {{any}} */\nexport const DRAWING = {json};\n");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/preview-cad-drawing.js");
         std::fs::write(&path, out).unwrap();
         println!("wrote {} ({} bytes)", path.display(), std::fs::metadata(&path).unwrap().len());
     }

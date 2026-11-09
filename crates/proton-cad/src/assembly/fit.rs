@@ -280,6 +280,23 @@ fn deep(a: &Tree, b: &Tree) -> bool {
     })
 }
 
+/// The nearest points of two sets of solids, and how far apart: cut into
+/// triangles to a chord of `chord`.
+pub fn nearest_between(a: &[&crate::brep::Solid], b: &[&crate::brep::Solid], chord: f64) -> Option<(f64, Vec3, Vec3)> {
+    let tree = |ss: &[&crate::brep::Solid]| {
+        let mut tris = Vec::new();
+        for s in ss {
+            if let Ok(m) = tessellate(s, &Quality { chord, angle: 10f64.to_radians() }) {
+                for t in &m.triangles {
+                    tris.push([m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]]);
+                }
+            }
+        }
+        Tree::new(tris)
+    };
+    nearest(&tree(a), &tree(b), f64::INFINITY)
+}
+
 /// Every pair of parts that overlap or come nearer than `clearance`.
 pub fn fit(leaves: &[Leaf], clearance: f64) -> Vec<Clash> {
     // Each part in triangles where it is, finer than the clearance.

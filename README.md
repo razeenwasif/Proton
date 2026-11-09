@@ -251,7 +251,14 @@ board on ATX's holes, SFX supplies, graphics cards, fans, radiators, pumps,
 G1/4 fittings, ISO screws, the FormD T1 and its limits — each written into
 the folder as a part file like any other. Routes run hard or soft tube
 between fittings' sockets, bent to the tube's radius, with the length to
-cut and where to bend it, and draw the loop in the order the coolant goes. Edits are held until ⌘S.
+cut and where to bend it, and draw the loop in the order the coolant goes.
+A `.drawing` lays a part or an assembly out on a sheet: views projected with
+the edges behind dashed, sections hatched, details, dimensions measured on
+the model, a title block; for an assembly, its blueprint — four sides, an
+exploded view, a section, every part ballooned to the bill of materials and
+the tightest gaps measured — on paper or white on blue. Views are dragged
+where they go, and the sheet is written as PDF, SVG or DXF. Edits are held
+until ⌘S.
 
 ## The three things that hold it together
 

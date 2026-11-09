@@ -39,6 +39,7 @@ pub mod boolean;
 pub mod brep;
 pub mod bspline;
 pub mod curve;
+pub mod drawing;
 pub mod export;
 pub mod frame;
 pub mod intersect;

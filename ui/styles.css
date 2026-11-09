@@ -4028,6 +4028,9 @@ body { font-size: calc(13px * var(--ui-scale)); }
    still move in the accent, and what cannot hold in red. */
 .workspace.cd { --cd-shape: var(--text); --cd-free: var(--accent); --cd-bad: var(--err, #f7768e); --cd-warn: var(--warn, #e0af68); }
 .cd-side .cc-side-head[hidden], .cd-history[hidden], .cd-side .xl-list[hidden] { display: none; }
+/* A part has nine steps to add, a drawing four: they wrap, each its width. */
+.cd-side .cc-side-head { flex-wrap: wrap; gap: 4px; }
+.cd-side .cc-new { flex: 0 0 auto; gap: 5px; padding: 5px 7px; }
 .cd-history { flex: 1 1 auto; min-height: 0; padding: 2px 0 12px; }
 .cd-head { padding: 12px 14px 4px; color: var(--faint); font: 600 var(--z-2xs)/1 var(--zed); letter-spacing: .06em; text-transform: uppercase; }
 .cd-row {
@@ -4072,6 +4075,14 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cd-3d, .cd-sketch { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
 .cd-3d[hidden], .cd-sketch[hidden] { display: none; }
 .cd-sketch { background: var(--bg); cursor: crosshair; user-select: none; touch-action: none; }
+/* A drawing's sheet, zoomed and panned in the stage; the view chosen or
+   dragged outlined over it. */
+.cd-sheet { position: absolute; inset: 0; overflow: hidden; background: color-mix(in srgb, var(--text) 8%, var(--bg)); cursor: grab; user-select: none; touch-action: none; }
+.cd-sheet[hidden] { display: none; }
+.cd-sheet-svg { position: absolute; left: 0; top: 0; transform-origin: 0 0; box-shadow: 0 2px 14px rgba(0, 0, 0, 0.28); }
+.cd-sheet-pick { position: absolute; border: 1.5px dashed var(--accent); border-radius: 3px; background: color-mix(in srgb, var(--accent) 8%, transparent); pointer-events: none; z-index: 1; }
+.cd-sheet-pick[hidden] { display: none; }
+.cd-bad-text { color: var(--cd-bad); font: var(--z-xs)/1.45 var(--zed); margin: 4px 0 8px; }
 .cd-banner { position: absolute; top: 10px; left: 12px; right: 12px; padding: 7px 10px; border-radius: 6px;
   background: color-mix(in srgb, var(--cd-bad) 16%, var(--bg)); color: var(--text); font: var(--z-xs)/1.45 var(--zed); pointer-events: none; }
 .cd-banner[hidden] { display: none; }

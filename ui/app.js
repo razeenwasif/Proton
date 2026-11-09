@@ -3394,6 +3394,9 @@ function renderEvent(event) {
     case "cadAssembly":
       cad?.assembly(event);
       break;
+    case "cadDrawing":
+      cad?.drawing(event);
+      break;
     case "cadFamilies":
       cad?.families(event);
       break;

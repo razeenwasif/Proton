@@ -151,3 +151,32 @@ test('routes are written as the language has them, and ports and points read', a
   assert.equal(portOf('f1.body.top'), null);
   assert.deepEqual(points('1, 2, 3\n\n 4 5 6 \nbad\n7, 8'), [[1, 2, 3], [4, 5, 6]]);
 });
+
+import {moved, boxAt, itemOfBox, scaleOf, freshName, drawText} from '../../ui/cad-drawing.js';
+import {DRAWING} from '../../ui/preview-cad-drawing.js';
+
+test('a drawing\'s view is moved by its middle, a detail by its place, the parts list by its corner', () => {
+  const view = DRAWING.items.find((i) => i.name === 'front');
+  assert.equal(moved(view, 10.04, -5), 'view front front at (95, 125)');
+  assert.equal(moved({...view, kind: 'detail', text: 'detail c of f at (100, 170) radius 12 scale 2 place (60, 60)'}, 5, 5), 'detail c of f at (100, 170) radius 12 scale 2 place (65, 65)');
+  assert.equal(moved(DRAWING.items.find((i) => i.kind === 'bom'), -4, 0), 'bom at (580, 74)');
+  assert.equal(moved({...view, kind: 'dim', text: 'dim w f distance a to b'}, 1, 1), null);
+});
+
+test('the box under a point is the smallest, never the title block; boxes are their statements', () => {
+  assert.equal(boxAt(DRAWING, 85, 130)?.name, 'front');
+  assert.equal(boxAt(DRAWING, 500, 25), null, 'the title block is not picked');
+  assert.equal(boxAt(DRAWING, 300, 200), null);
+  assert.equal(itemOfBox(DRAWING, 'iso')?.kind, 'view', 'the view, not its balloons');
+  assert.equal(itemOfBox(DRAWING, 'bom')?.kind, 'bom');
+  assert.equal(itemOfBox(DRAWING, 'title'), null);
+});
+
+test('a drawing\'s scale is read as written, names are fresh, and lines are the language\'s', () => {
+  assert.equal(scaleOf('drawing "x"\nscale 1 / 2\n'), '1/2');
+  assert.equal(scaleOf('drawing "x"\n'), null);
+  assert.equal(freshName('v', ['v1', 'v2']), 'v3');
+  assert.equal(drawText.view('v1', 'top', 120.04, 80), 'view v1 top at (120, 80)');
+  assert.equal(drawText.dim('d1', 'f', 'diameter', 'plate.side(h1)', ''), 'dim d1 f diameter plate.side(h1)');
+  assert.equal(drawText.note('n1', 'f', 'say "hi"', 'm3'), 'note n1 f "say \'hi\'" at m3');
+});

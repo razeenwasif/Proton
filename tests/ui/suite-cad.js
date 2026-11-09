@@ -7,6 +7,7 @@
 
 import {PART} from '../../ui/preview-cad-part.js';
 import {ASSEMBLY} from '../../ui/preview-cad-assembly.js';
+import {DRAWING} from '../../ui/preview-cad-drawing.js';
 
 /** @param {{test: Function, assert: Function, win: any, doc: Document, $: (s: string) => any, settle: () => Promise<void>, key: Function, shown: (el: any) => boolean}} t */
 export async function cadChecks({test, assert, win, doc, $, settle, key, shown}) {
@@ -489,6 +490,113 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     ws().querySelector('[data-cad-settings] [data-cad-lib-make]').click(); await settle();
     assert(JSON.stringify(sent(before, 'cadLibrary')[0]) === JSON.stringify({type: 'cadLibrary', family: 'formd-t1', params: [], add: true}), `Make and add did not ask for it: ${JSON.stringify(sent(before, 'cadLibrary'))}`);
     await win.pushEvents([part()]); await settle();
+  });
+
+  /** The sample blueprint, as the core sends it. @param {Partial<any>} more */
+  const drw = (more = {}) => ({type: 'cadDrawing', drawing: {...structuredClone(DRAWING), generation: 21, dirty: false, ...more}});
+  /** A point of the sheet, millimetres from its bottom left, on the page. @param {number} x @param {number} y */
+  const onSheet = (x, y) => {
+    const el = ws().querySelector('[data-cad-sheet]'), r = el.getBoundingClientRect();
+    const ppm = el.querySelector('svg').getBoundingClientRect().width / DRAWING.width, s = debug().sheet;
+    return {clientX: r.left + s.x + x * ppm, clientY: r.top + s.y + (DRAWING.height - y) * ppm};
+  };
+
+  await test('A part\'s drawing, or an assembly\'s blueprint, is asked for from its settings', async () => {
+    await win.pushEvents([part(), {type: 'cadAssembly', assembly: null}, {type: 'cadDrawing', drawing: null}]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    let before = win.commands.length;
+    ws().querySelector('[data-cad-make-drawing="paper"]').click(); await settle();
+    assert(JSON.stringify(sent(before, 'cadDraw')[0]) === JSON.stringify({type: 'cadDraw', generation: 5, blueprint: false}), `Draw it did not ask: ${JSON.stringify(sent(before, 'cadDraw'))}`);
+    await win.pushEvents([{type: 'cadPart', part: null}, {type: 'cadAssembly', assembly: {...structuredClone(ASSEMBLY), generation: 9, dirty: false}}]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    before = win.commands.length;
+    ws().querySelector('[data-cad-make-drawing="blueprint"]').click(); await settle();
+    assert(sent(before, 'cadDraw')[0]?.blueprint === true, 'Blueprint did not ask for one on blue');
+  });
+
+  await test('A drawing shows its sheet and its statements; a view dragged is moved, the sheet zoomed about the pointer', async () => {
+    await win.pushEvents([{type: 'cadPart', part: null}, {type: 'cadAssembly', assembly: null}, drw()]); await settle();
+    const sheet = ws().querySelector('[data-cad-sheet]');
+    assert(shown(sheet) && sheet.querySelector('svg.cd-sheet-svg') && !shown(ws().querySelector('[data-cad-canvas]')), 'the sheet is not shown in place of the 3D view');
+    const rows = [...ws().querySelectorAll('.cd-history [data-cad-step]')].map((b) => b.querySelector('.cd-row-name').textContent);
+    assert(rows.join() === 'Test rig,front,top,right,iso,apart,a,balloons,parts list', `the statements are not listed: ${rows}`);
+    assert(ws().querySelector('[data-cad-crumb]').textContent === 'rig.assembly · A2 · 6 views · 0 dimensions', `the crumb: ${ws().querySelector('[data-cad-crumb]').textContent}`);
+    assert(shown(ws().querySelector('[data-cad-drw-add="view"]')) && !shown(ws().querySelector('[data-cad-add="sketch"]')), 'the drawing\'s buttons are not the ones shown');
+    // The front view, dragged 20 px right and 10 down.
+    const from = onSheet(85, 130), ppm = sheet.querySelector('svg').getBoundingClientRect().width / DRAWING.width;
+    const before = win.commands.length;
+    sheet.dispatchEvent(new win.PointerEvent('pointerdown', {...from, bubbles: true, pointerId: 4, button: 0}));
+    sheet.dispatchEvent(new win.PointerEvent('pointermove', {clientX: from.clientX + 20, clientY: from.clientY + 10, bubbles: true, pointerId: 4}));
+    assert(shown(ws().querySelector('[data-cad-sheet-pick]')), 'the view dragged is not outlined');
+    sheet.dispatchEvent(new win.PointerEvent('pointerup', {clientX: from.clientX + 20, clientY: from.clientY + 10, bubbles: true, pointerId: 4})); await settle();
+    const want = `view front front at (${+(85 + 20 / ppm).toFixed(1)}, ${+(130 - 10 / ppm).toFixed(1)})`;
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'replace', index: 6, text: want}]), `the view was not moved: ${JSON.stringify(ops(before))} — ${want}`);
+    assert(debug().step === 6, 'the view moved is not chosen');
+    // A click on it chooses it; on the sheet's blank, nothing.
+    await win.pushEvents([drw()]); await settle();
+    const top = onSheet(85, 310);
+    sheet.dispatchEvent(new win.PointerEvent('pointerdown', {...top, bubbles: true, pointerId: 4, button: 0}));
+    sheet.dispatchEvent(new win.PointerEvent('pointerup', {...top, bubbles: true, pointerId: 4})); await settle();
+    assert(debug().step === 7 && ws().querySelector('[data-cad-settings] [data-cad-drw-line="7"]')?.value === 'view top top at (85, 310)', 'a click did not choose the view');
+    // Zoomed: the point under the pointer stays under it.
+    // (A wheel's clientX is a whole pixel.)
+    const p = onSheet(300, 200), at = {clientX: Math.round(p.clientX), clientY: Math.round(p.clientY)};
+    const was = debug().sheet.zoom, under = debug().toSheet(at.clientX, at.clientY);
+    sheet.dispatchEvent(new win.WheelEvent('wheel', {...at, deltaY: -200, bubbles: true, cancelable: true})); await settle();
+    const now = debug().toSheet(at.clientX, at.clientY);
+    assert(debug().sheet.zoom > was && Math.abs(now[0] - under[0]) < 1e-6 && Math.abs(now[1] - under[1]) < 1e-6, `zooming moved the point: ${JSON.stringify([under, now])}`);
+    sheet.dispatchEvent(new win.MouseEvent('dblclick', {bubbles: true})); await settle();
+    assert(debug().sheet.zoom === 1, 'a double click did not fit the sheet');
+  });
+
+  await test('A drawing\'s settings write its lines: the sheet, a view, a dimension, a note, a statement typed; and it is written out', async () => {
+    await win.pushEvents([drw()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    const set = (/** @type {string} */ sel, /** @type {string} */ v) => {
+      const el = ws().querySelector(`[data-cad-settings] ${sel}`);
+      el.value = v;
+      el.dispatchEvent(new win.Event('change', {bubbles: true}));
+    };
+    let before = win.commands.length;
+    set('[data-cad-drw-sheet]', 'A1');
+    set('[data-cad-drw-style]', 'paper'); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'replace', index: 2, text: 'sheet A1'}, {op: 'replace', index: 5, text: 'style paper'}]), `the sheet's settings: ${JSON.stringify(ops(before))}`);
+    before = win.commands.length;
+    ws().querySelector('[data-cad-drw-view-form] [name=dir]').value = 'left';
+    ws().querySelector('[data-cad-drw-view-form]').requestSubmit(); await settle();
+    assert(ops(before)[0]?.text === 'view l1 left at (297, 210)', `a view added: ${JSON.stringify(ops(before))}`);
+    const dim = ws().querySelector('[data-cad-drw-dim-form]');
+    assert(dim.querySelector('[name=view]').value === 'front' && ws().querySelector('#cd-drw-faces option'), 'the dimension form does not offer the views and faces');
+    dim.querySelector('[name=kind]').value = 'clearance';
+    dim.querySelector('[name=a]').value = 'block';
+    before = win.commands.length;
+    dim.requestSubmit(); await settle();
+    assert(!ops(before).length && ws().querySelector('[data-cad-status]').textContent.includes('two parts'), 'a clearance with one part was sent');
+    dim.querySelector('[name=b]').value = 'plate';
+    dim.requestSubmit(); await settle();
+    assert(ops(before)[0]?.text === 'dim d1 front clearance block to plate', `a dimension added: ${JSON.stringify(ops(before))}`);
+    const note = ws().querySelector('[data-cad-drw-note-form]');
+    note.querySelector('[name=text]').value = 'M3 "tapped"';
+    note.querySelector('[name=at]').value = 'plate.plate.top';
+    before = win.commands.length;
+    note.requestSubmit(); await settle();
+    assert(ops(before)[0]?.text === 'note n1 front "M3 \'tapped\'" at plate.plate.top', `a note added: ${JSON.stringify(ops(before))}`);
+    for (const f of ['pdf', 'svg', 'dxf']) {
+      before = win.commands.length;
+      ws().querySelector(`[data-cad-settings] [data-cad-export="${f}"]`).click(); await settle();
+      assert(sent(before, 'cadExport')[0]?.format === f && sent(before, 'cadExport')[0]?.generation === 21, `Write ${f} did not ask`);
+    }
+    // A statement chosen: typed, or taken out.
+    ws().querySelector('.cd-history [data-cad-step="11"]').click(); await settle();
+    before = win.commands.length;
+    set('[data-cad-drw-line="11"]', 'section a along x = 50 at (500, 310)'); await settle();
+    ws().querySelector('[data-cad-settings] [data-cad-remove="11"]').click(); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'replace', index: 11, text: 'section a along x = 50 at (500, 310)'}, {op: 'remove', index: 11}]), `the statement's edits: ${JSON.stringify(ops(before))}`);
+    // What could not be drawn is said, at its line.
+    await win.pushEvents([drw({errors: [{line: 14, column: 1, message: '`d1`: no parts called `block` and `plate`'}], items: DRAWING.items.map((i) => (i.index === 13 ? {...i, error: 'no parts'} : i))})]); await settle();
+    assert(shown(ws().querySelector('[data-cad-banner]')) && ws().querySelector('[data-cad-banner]').textContent.includes('Line 14'), 'what could not be drawn is not said');
+    assert(ws().querySelector('.cd-history [data-cad-step="13"]').classList.contains('bad'), 'the statement that could not be drawn is not marked');
+    await win.pushEvents([{type: 'cadDrawing', drawing: null}, part()]); await settle();
   });
 
   await test('The 3D view draws the bodies as the core cut them, or says why it cannot', async () => {

@@ -50,7 +50,7 @@ pub struct CadFound {
     /// As the project names it.
     pub path: String,
     pub name: String,
-    /// `part` or `assembly`.
+    /// `part`, `assembly` or `drawing`.
     pub kind: String,
 }
 
@@ -302,6 +302,7 @@ pub enum CadOp {
 enum Doc {
     Part,
     Assembly,
+    Drawing,
 }
 
 #[derive(Debug)]
@@ -325,6 +326,8 @@ struct Open {
     drag_from: Option<String>,
     /// What the text last built, shown while what is typed does not read.
     good: Option<CadPartView>,
+    /// A drawing's sheet as last laid out, and the text it is of.
+    drawn: Option<(String, Box<proton_cad::drawing::build::Built>)>,
 }
 
 /// The part open in CAD, in a project.
@@ -409,7 +412,11 @@ impl Cads {
                 }
                 match std::fs::read_to_string(&file) {
                     Ok(text) => {
-                        let kind = if file.extension().and_then(|e| e.to_str()) == Some(crate::cad_assembly::EXTENSION) { Doc::Assembly } else { Doc::Part };
+                        let kind = match file.extension().and_then(|e| e.to_str()) {
+                            Some(crate::cad_assembly::EXTENSION) => Doc::Assembly,
+                            Some(crate::cad_drawing::EXTENSION) => Doc::Drawing,
+                            _ => Doc::Part,
+                        };
                         self.show(root, file, text, kind);
                         self.doc_events()
                     }
@@ -441,6 +448,24 @@ impl Cads {
                 open.clashes = None;
                 open.text = text;
                 open.typing = true;
+                self.doc_events()
+            }
+            Command::CadDraw { generation, blueprint } => self.draw(root, generation, blueprint),
+            Command::CadEdit { generation, ops } if self.open.as_ref().is_some_and(|o| o.kind == Doc::Drawing) => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
+                let mut d = match proton_cad::drawing::lang::read(&open.text) {
+                    Ok(d) => d,
+                    Err(e) => return vec![notice(format!("line {} does not read — mend it first: {}", e.line, e.message), NoticeLevel::Warn)],
+                };
+                for op in ops {
+                    if let Err(why) = crate::cad_drawing::edit(&mut d, op) {
+                        let mut out = vec![notice(why, NoticeLevel::Warn)];
+                        out.extend(self.doc_events());
+                        return out;
+                    }
+                }
+                let text = proton_cad::drawing::lang::write(&d);
+                record(open, text);
                 self.doc_events()
             }
             Command::CadEdit { generation, ops } if self.open.as_ref().is_some_and(|o| o.kind == Doc::Assembly) => {
@@ -533,7 +558,17 @@ impl Cads {
             }
             Command::CadExport { generation, format } => {
                 let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
-                let done = if open.kind == Doc::Assembly { export_assembly(open, &mut self.parts, &format) } else { export(open, &format) };
+                let done = match open.kind {
+                    Doc::Assembly => export_assembly(open, &mut self.parts, &format),
+                    Doc::Drawing => match proton_cad::drawing::lang::read(&open.text) {
+                        Ok(d) => {
+                            let built = self.parts.drawing(&d, &open.path, &open.root);
+                            crate::cad_drawing::export(&built, &open.path, &open.shown, &format)
+                        }
+                        Err(e) => Err(format!("line {} does not read — mend it first: {}", e.line, e.message)),
+                    },
+                    Doc::Part => export(open, &format),
+                };
                 match done {
                     Ok(written) => vec![notice(format!("wrote {written}"), NoticeLevel::Info), Event::CadHome { parts: find(root) }],
                     Err(why) => vec![notice(why, NoticeLevel::Warn)],
@@ -590,6 +625,7 @@ impl Cads {
             typing: false,
             drag_from: None,
             good: None,
+            drawn: None,
         });
     }
 
@@ -623,7 +659,92 @@ impl Cads {
     /// What is open, as the window draws it: the part, or the assembly —
     /// the other said to be none.
     pub fn doc_events(&mut self) -> Vec<Event> {
-        vec![self.part_event(), self.assembly_event()]
+        vec![self.part_event(), self.assembly_event(), self.drawing_event()]
+    }
+
+    /// The drawing on screen, laid out on its sheet.
+    pub fn drawing_event(&mut self) -> Event {
+        let Some(open) = self.open.as_mut().filter(|o| o.kind == Doc::Drawing) else { return Event::CadDrawing { drawing: None } };
+        let (text, error) = match proton_cad::drawing::lang::read(&open.text) {
+            Ok(_) => (open.text.clone(), None),
+            // What last read, with where the text stops reading.
+            Err(e) => (open.drawn.as_ref().map(|d| d.0.clone()).unwrap_or_else(|| open.saved.clone()), Some(CadDiag::from(&e))),
+        };
+        let d = proton_cad::drawing::lang::read(&text).unwrap_or_default();
+        if open.drawn.as_ref().is_none_or(|x| x.0 != text) {
+            let built = self.parts.drawing(&d, &open.path, &open.root);
+            open.drawn = Some((text, Box::new(built)));
+        }
+        let built = &open.drawn.as_ref().expect("laid out").1;
+        let mut v = crate::cad_drawing::view(&d, built, &open.shown, &open.name, open.generation);
+        v.text = open.text.clone();
+        v.dirty = open.text != open.saved;
+        v.can_undo = !open.undo.is_empty();
+        v.can_redo = !open.redo.is_empty();
+        v.error = error;
+        Event::CadDrawing { drawing: Some(Box::new(v)) }
+    }
+
+    /// A drawing of the part or assembly open — its views, or for an
+    /// assembly its blueprint — written beside it and opened; one there
+    /// already is opened as it is.
+    fn draw(&mut self, root: &Path, generation: u32, blue: bool) -> Vec<Event> {
+        let Some(open) = self.open.as_ref().filter(|o| o.generation == generation && o.kind != Doc::Drawing) else { return Vec::new() };
+        if open.text != open.saved {
+            return vec![notice("save it first: its drawing reads it from its file".into(), NoticeLevel::Warn)];
+        }
+        let file = open.path.with_extension(crate::cad_drawing::EXTENSION);
+        let of = open.path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        let rel = Path::new(&open.shown).with_extension(crate::cad_drawing::EXTENSION).to_string_lossy().replace('\\', "/");
+        if !file.exists() {
+            let text = match open.kind {
+                Doc::Part => {
+                    let p = match part::read(&open.text) {
+                        Ok(p) => p,
+                        Err(d) => return vec![notice(format!("line {} does not read — mend it first: {}", d.line, d.message), NoticeLevel::Warn)],
+                    };
+                    let title = p.items.iter().find_map(|n| if let Item::Name(t) = &n.item { Some(t.clone()) } else { None }).unwrap_or_else(|| open.name.clone());
+                    let m = model::build(&p);
+                    let mut b = Aabb::empty();
+                    for body in &m.bodies {
+                        let x = body.solid.bounds();
+                        if !x.is_empty() {
+                            b.include(x.min);
+                            b.include(x.max);
+                        }
+                    }
+                    if b.is_empty() {
+                        return vec![notice("there is nothing built to draw yet".into(), NoticeLevel::Warn)];
+                    }
+                    crate::cad_drawing::for_part(&of, &title, &b, blue)
+                }
+                _ => {
+                    let a = match proton_cad::assembly::read(&open.text) {
+                        Ok(a) => a,
+                        Err(d) => return vec![notice(format!("line {} does not read — mend it first: {}", d.line, d.message), NoticeLevel::Warn)],
+                    };
+                    let title = a.items.iter().find_map(|n| if let proton_cad::assembly::lang::Item::Name(t) = &n.item { Some(t.clone()) } else { None }).unwrap_or_else(|| open.name.clone());
+                    let m = self.parts.build(&a, &open.path, &open.root);
+                    crate::cad_drawing::for_assembly(&of, &title, &m, blue)
+                }
+            };
+            if let Err(e) = std::fs::write(&file, &text) {
+                return vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)];
+            }
+            self.show(root, file, text, Doc::Drawing);
+            let mut out = vec![notice(format!("made {rel}"), NoticeLevel::Info), Event::CadHome { parts: find(root) }];
+            out.extend(self.doc_events());
+            return out;
+        }
+        match std::fs::read_to_string(&file) {
+            Ok(text) => {
+                self.show(root, file, text, Doc::Drawing);
+                let mut out = vec![notice(format!("opened {rel}, which was there"), NoticeLevel::Info)];
+                out.extend(self.doc_events());
+                out
+            }
+            Err(e) => vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)],
+        }
     }
 
     /// The assembly on screen, solved and drawn.
@@ -1382,6 +1503,7 @@ fn find(root: &Path) -> Vec<CadFound> {
             let kind = match path.extension().and_then(|e| e.to_str()) {
                 Some(EXTENSION) => "part",
                 Some(crate::cad_assembly::EXTENSION) => "assembly",
+                Some(crate::cad_drawing::EXTENSION) => "drawing",
                 _ => continue,
             };
             let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
@@ -1624,6 +1746,75 @@ mod tests {
         let (title, objects) = threemf::read(&std::fs::read(root.join("peg.3mf")).unwrap()).unwrap();
         assert_eq!(title, "Peg");
         assert_eq!(objects.iter().map(|o| o.0.as_str()).collect::<Vec<_>>(), ["r", "e"]);
+    }
+
+    fn drawing(events: &[Event]) -> crate::cad_drawing::CadDrawingView {
+        events.iter().rev().find_map(|e| if let Event::CadDrawing { drawing: Some(d) } = e { Some((**d).clone()) } else { None }).expect("a drawing event")
+    }
+
+    #[test]
+    fn a_part_is_drawn_edited_and_written_for_the_shop() {
+        let root = scratch("drawing");
+        let mut c = Cads::default();
+        let g = view(&c.apply(&root, Command::CadNew { name: "Plate".into() })).generation;
+        edit(&mut c, &root, g, vec![CadOp::Insert { at: None, text: "sketch s on XY\n  rect r corner origin size = (100, 60)\n  circle h center (10, 10) radius 2.2\nend\nextrude plate from s distance 4".into() }]);
+        // Unsaved, it is not drawn: the drawing reads the file.
+        let said = c.apply(&root, Command::CadDraw { generation: g, blueprint: false });
+        assert!(said.iter().any(|e| matches!(e, Event::Notice { text: message, .. } if message.contains("save it first"))));
+        c.apply(&root, Command::CadSave);
+        let out = c.apply(&root, Command::CadDraw { generation: g, blueprint: false });
+        assert!(out.iter().any(|e| matches!(e, Event::CadHome { parts } if parts.iter().any(|p| p.kind == "drawing" && p.path == "plate.drawing"))));
+        assert!(out.iter().any(|e| matches!(e, Event::CadPart { part: None })), "the part is put away");
+        let d = drawing(&out);
+        assert_eq!((d.path.as_str(), d.of.as_deref(), d.sheet.as_str(), d.width, d.blueprint, d.dirty), ("plate.drawing", Some("plate.part"), "A3", 420.0, false, false));
+        assert!(d.errors.is_empty(), "{:?}", d.errors);
+        assert_eq!(d.items.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), ["front", "top", "right", "iso"]);
+        assert!(d.svg.starts_with("<svg") && d.boxes.iter().any(|b| b.name == "top"));
+        // A dimension added: one step to undo, drawn, its line listed.
+        let d = drawing(&c.apply(&root, Command::CadEdit { generation: d.generation, ops: vec![CadOp::Insert { at: None, text: "dim w top distance plate.side(r.left) to plate.side(r.right)".into() }] }));
+        assert!(d.dirty && d.can_undo && d.errors.is_empty(), "{:?}", d.errors);
+        assert!(d.svg.contains(">100</text>"));
+        let w = d.items.iter().find(|i| i.name == "w").unwrap();
+        assert_eq!((w.kind.as_str(), w.text.as_str()), ("dim", "dim w top distance plate.side(r.left) to plate.side(r.right)"));
+        // A mistake typed keeps the last sheet, and says where.
+        let bad = drawing(&c.apply(&root, Command::CadText { generation: d.generation, text: format!("{}view x sideways at (1, 2)\n", d.text) }));
+        assert!(bad.error.as_ref().is_some_and(|e| e.line as usize == d.text.lines().count() + 1), "{:?}", bad.error);
+        assert_eq!(bad.svg, d.svg);
+        // One that reads but cannot be drawn is said at its line.
+        let wrong = drawing(&c.apply(&root, Command::CadText { generation: d.generation, text: format!("{}dim z top diameter nothing\n", d.text) }));
+        let z = wrong.items.iter().find(|i| i.name == "z").unwrap();
+        assert!(z.error.as_ref().is_some_and(|e| e.contains("names no face")), "{z:?}");
+        c.apply(&root, Command::CadUndo { generation: d.generation });
+        c.apply(&root, Command::CadSave);
+        assert!(std::fs::read_to_string(root.join("plate.drawing")).unwrap().contains("dim w top distance"));
+        for f in ["pdf", "svg", "dxf"] {
+            let said = c.apply(&root, Command::CadExport { generation: d.generation, format: f.into() });
+            assert!(said.iter().any(|e| matches!(e, Event::Notice { text: message, .. } if message == &format!("wrote plate.{f}"))), "{said:?}");
+        }
+        assert!(std::fs::read(root.join("plate.pdf")).unwrap().starts_with(b"%PDF-1.4"));
+        assert!(proton_cad::drawing::out::read_dxf(&std::fs::read_to_string(root.join("plate.dxf")).unwrap()).unwrap().iter().any(|e| e.0 == "CIRCLE"));
+        // Drawn again, the one there is opened, not written over.
+        c.apply(&root, Command::CadOpen { path: "plate.part".into() });
+        let g = view(&c.apply(&root, Command::CadOpen { path: "plate.part".into() })).generation;
+        let again = c.apply(&root, Command::CadDraw { generation: g, blueprint: true });
+        assert!(again.iter().any(|e| matches!(e, Event::Notice { text: message, .. } if message.contains("which was there"))));
+        assert!(drawing(&again).items.iter().any(|i| i.name == "w"));
+    }
+
+    #[test]
+    fn an_assemblys_blueprint_is_drawn_on_blue() {
+        let root = scratch("blueprint");
+        std::fs::write(root.join("plate.part"), "part \"Plate\"\nsketch s on XY\n  rect r corner origin size = (100, 60)\nend\nextrude plate from s distance 4\n").unwrap();
+        std::fs::write(root.join("block.part"), "part \"Block\"\nsketch s on XY\n  rect r corner origin size = (20, 10)\nend\nextrude b from s distance 8\n").unwrap();
+        std::fs::write(root.join("bench.assembly"), "assembly \"Bench\"\nunits mm\npart plate from \"plate.part\"\npart block from \"block.part\"\nground plate\nplace block at (30, 20, 4)\n").unwrap();
+        let mut c = Cads::default();
+        let out = c.apply(&root, Command::CadOpen { path: "bench.assembly".into() });
+        let g = out.iter().find_map(|e| if let Event::CadAssembly { assembly: Some(a) } = e { Some(a.generation) } else { None }).unwrap();
+        let d = drawing(&c.apply(&root, Command::CadDraw { generation: g, blueprint: true }));
+        assert!(d.blueprint && d.errors.is_empty(), "{:?}", d.errors);
+        assert_eq!((d.path.as_str(), d.sheet.as_str(), d.title.as_deref()), ("bench.drawing", "A2", Some("Bench")));
+        assert!(d.items.iter().any(|i| i.kind == "bom") && d.items.iter().any(|i| i.kind == "balloons"));
+        assert!(d.svg.contains("#1d4e89") && d.svg.contains(">Block</text>"));
     }
 }
 

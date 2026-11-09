@@ -699,6 +699,63 @@ fit check, two clear of everything not, and the tube to cut counted; routes
 read and printed back, and four mistakes; in the browser, a tube routed
 from two sockets picked, and a route's bends listed and its points written.
 
+K10 — drawings. A `.drawing` file is what a sheet shows, one statement a
+line: `drawing "T"`, `of "FILE"` (a part or an assembly), `sheet A4…A0,
+ANSI_A…ANSI_D`, `scale 1/2`, `angle first|third`, `style paper|blueprint`;
+`view NAME front|back|top|bottom|left|right|iso at (x, y) [scale S]
+[hidden] [exploded NAME]`; `section NAME along x|y|z = V at (x, y) [from
++|-]`; `detail NAME of VIEW at (x, y) radius R scale S place (x, y)`; `dim
+NAME VIEW distance|diameter|radius|angle|clearance A [to B] [offset D]`;
+`note NAME VIEW "text" at A`; `balloons VIEW`; `bom at (x, y)`. A view is
+the solids projected: every edge sampled along its own curve, and a curved
+face's outline found where its tessellation folds away from the eye
+(chained into runs); each sample seen if a ray from it to the eye meets no
+triangle (a tree of boxes), so a line is cut where it passes behind
+something, and dashed there if the view shows hidden lines. Seams are not
+drawn; a smooth join only where it is the outline, edge on. Lines on each
+other are drawn once — a box's bottom edges under its top's, a hole's ends
+seen edge on along the outline — and a hidden line only where nothing seen
+is on it. A hole seen end on is a circle, kept a circle to the DXF for a
+machine to drill; round faces more than 135° about their axis get centre
+marks or axes (holes and bosses, not rounds). A section cuts by Proton's
+boolean and hatches the cut faces at 45°. The solids are cut, tessellated
+and put in the ray tree once, for all the views that show them alike.
+Dimensions are measured on the model — a distance between parallel faces,
+a round face's diameter or radius, the angle between faces, an assembly's
+parts' nearest gap — and drawn outside their view with arrows and
+extension lines, the view's name under them. The frame, a title block with
+the projection symbol, the bill of materials as a table, and balloons
+numbered as its rows, out from the view's middle and clear of each other.
+`standard` lays out a part's front, top, right and isometric views on A3 at
+the scale that fits; `blueprint` an assembly's on A2: four views, an
+exploded one, a section through the middle, balloons, the bill of materials
+and the six tightest gaps measured, on blue if asked. Written by Proton's
+own writers: SVG; PDF 1.4 (Helvetica, WinAnsi for Ø ° ×, the line kinds'
+dashes); DXF R12, a layer and line type for each kind of line. In the
+window a part's settings draw it, and an assembly's make its blueprint,
+as `NAME.drawing` beside it (one there already is opened); the drawing's
+page shows the sheet to zoom and pan, lists its views, dimensions and notes
+with what could not be drawn, takes a view dragged to move it, adds views,
+sections, dimensions (faces offered by name) and notes, and writes PDF, SVG
+and DXF beside it. Measured (opt-level 2): a 120 mm plate with 64 rounded
+holes on A3, four views and a section, in 0.59 s — 797 lines and circles,
+SVG 161 KB, PDF 149 KB, DXF 272 KB written in 8 ms. Tested (9 + 2 + 3 + 3):
+the six square views and the isometric against the box's corners projected
+by hand, each edge once; a hole's circle end on, its sides dashed behind
+from the front, its axis past the plate; a section hatched only where it
+cuts, at 45°, not in the holes; dimensions saying 100, 60, 4, Ø4.4, R2.2
+and 90°, and what cannot be measured said at its line; the language read
+and written back, and seven mistakes; SVG, PDF (every object where the
+cross-reference says, the stream's length, Ø as \330) and DXF read back,
+entity for primitive, layer for line kind; a part's drawing within its
+sheet, its views apart; a blueprint's views, balloons as many as the bill's
+rows and clear of the view; in the core, a part drawn, edited, a mistake
+kept on the last sheet, written as PDF, SVG and DXF, and drawn again opened;
+an assembly's blueprint on blue; in the browser, drawings asked for, the
+sheet shown, a view dragged and moved, zoom about the pointer, the sheet's
+settings, a view, a dimension and a note added, written out, a statement
+typed and taken out, what could not be drawn marked.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

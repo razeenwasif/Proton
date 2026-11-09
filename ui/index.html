@@ -1013,6 +1013,10 @@
           <button class="cc-new" data-cad-asm-only data-cad-asm-add="part" title="Add a part or an assembly of the folder" hidden><svg class="i"><use href="#i-extrude"/></svg>Part</button>
           <button class="cc-new" data-cad-asm-only data-cad-asm-add="fit" title="Check where parts overlap, or are nearer than the clearance" hidden><svg class="i"><use href="#i-check"/></svg>Check fit</button>
           <button class="cc-new" data-cad-asm-only data-cad-asm-add="explode" title="An exploded view, for drawings" hidden><svg class="i"><use href="#i-mirror"/></svg>Explode</button>
+          <button class="cc-new" data-cad-drw-only data-cad-drw-add="view" title="Another view: drag it where it goes" hidden><svg class="i"><use href="#i-eye"/></svg>View</button>
+          <button class="cc-new" data-cad-drw-only data-cad-drw-section title="A section through the part, hatched where it is cut" hidden><svg class="i"><use href="#i-layers"/></svg>Section</button>
+          <button class="cc-new" data-cad-drw-only data-cad-drw-add="dim" title="A dimension: what it measures, in which view" hidden><svg class="i"><use href="#i-columns"/></svg>Dimension</button>
+          <button class="cc-new" data-cad-drw-only data-cad-drw-add="note" title="A note pointing at a face or hole" hidden><svg class="i"><use href="#i-text"/></svg>Note</button>
         </div>
         <!-- The part's parameters and steps, from Event::CadPart; with no
              part open, the project's parts, from Event::CadHome. -->
@@ -1073,6 +1077,7 @@
           <div class="cd-stage" data-cad-stage>
             <canvas class="cd-3d" data-cad-canvas aria-label="The part in 3D"></canvas>
             <svg class="cd-sketch" data-cad-sketch hidden aria-label="The sketch"></svg>
+            <div class="cd-sheet" data-cad-sheet hidden aria-label="The drawing's sheet"><div class="cd-sheet-pick" data-cad-sheet-pick hidden></div></div>
             <input class="cd-value" data-cad-value hidden aria-label="A dimension's value">
             <div class="cd-banner" data-cad-banner hidden></div>
             <div class="cd-status" data-cad-status></div>
