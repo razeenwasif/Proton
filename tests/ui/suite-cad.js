@@ -357,11 +357,12 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     assert(shown(ws().querySelector('[data-cad-part]')) && !shown(ws().querySelector('[data-cad-home]')), 'the assembly is not shown');
     assert(ws().querySelector('[data-cad-title]').textContent === 'Test rig', 'the assembly is not named by its title');
     const rows = [...ws().querySelectorAll('.cd-history [data-cad-step]')].map((r) => r.dataset.cadStep);
-    assert(rows.join() === 'part,4,5,6,9,10,11,12', `the instances, mates and views are not listed: ${rows}`);
-    assert(ws().querySelector('[data-cad-crumb]').textContent.includes('4 freedoms left'), 'the freedoms left are not said');
+    assert(rows.join() === 'part,4,5,6,13,14,9,10,11,17,12', `the instances, mates, routes and views are not listed: ${rows}`);
+    assert(ws().querySelector('[data-cad-crumb]').textContent.includes(`${ASSEMBLY.dof} freedoms left`), 'the freedoms left are not said');
     assert(!shown(ws().querySelector('[data-cad-add="sketch"]')) && shown(ws().querySelector('[data-cad-asm-add="fit"]')), 'the part\'s buttons are offered for an assembly');
     const settings = ws().querySelector('[data-cad-settings]');
-    assert(settings.textContent.includes('block, pin can still move') && settings.querySelector('.cd-bom')?.textContent.includes('Pin'), 'the assembly\'s card does not say what moves, or list its parts');
+    assert(settings.textContent.includes('block, pin, f1, f2 can still move') && settings.querySelector('.cd-bom')?.textContent.includes('Pin'), 'the assembly\'s card does not say what moves, or list its parts');
+    assert(settings.querySelector('.cd-bom')?.textContent.includes('Hard tube 14/16 · 203 mm') && settings.querySelector('svg.cd-loop'), 'the tube to cut, or the loop, is not shown');
     // Two faces picked in the view: mated.
     const plate = ASSEMBLY.bodies.find((b) => b.name === 'plate'), pin = ASSEMBLY.bodies.find((b) => b.name === 'pin');
     debug().pickFace('pin', pin.faces.findIndex((f) => f.name === 'p.side(c)'), null);
@@ -439,6 +440,27 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     home.requestSubmit(); await settle();
     assert(sent(before, 'cadNewAssembly')[0]?.name === 'Rig two', 'the form did not make an assembly');
     await win.pushEvents([part()]); await settle();
+  });
+
+  await test('A tube is routed between two sockets picked; a route lists its bends and writes its points', async () => {
+    const asm = (more = {}) => ({type: 'cadAssembly', assembly: {...structuredClone(ASSEMBLY), generation: 11, dirty: false, ...more}});
+    await win.pushEvents([{type: 'cadPart', part: null}, asm()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    // Two sockets picked: a tube routed between them.
+    const f1 = ASSEMBLY.bodies.find((b) => b.name === 'f1'), socket = f1.faces.findIndex((f) => f.name === 'socket.side(wall1)');
+    debug().pickFace('f1', socket, null);
+    debug().pickFace('f2', socket, null); await settle();
+    let early = win.commands.length;
+    ws().querySelector('[data-cad-route-kind="hard"]').click(); await settle();
+    assert(JSON.stringify(ops(early)) === JSON.stringify([{op: 'insert', at: null, text: 'route t2 hard 14/16 from f1.socket to f2.socket'}]), `the route was not written: ${JSON.stringify(ops(early))}`);
+    // A route's settings: its bends listed, its radius and points written.
+    ws().querySelector('.cd-history [data-cad-step="17"]').click(); await settle();
+    assert(ws().querySelectorAll('[data-cad-settings] .cd-bom tr').length === 3, 'the route\'s bends are not listed');
+    early = win.commands.length;
+    const via = ws().querySelector('[data-cad-settings] [data-cad-a-f="via"]');
+    via.value = '12, 45, 100\n92, 45, 100';
+    via.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(ops(early)[0]?.text === 'route t1 hard 14/16 from f1.socket to f2.socket via (12, 45, 100), (92, 45, 100) bend 30', `the points did not write the line: ${JSON.stringify(ops(early))}`);
   });
 
   await test('The library makes a part from its families: on the home page to open, in an assembly to add', async () => {

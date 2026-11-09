@@ -249,7 +249,9 @@ near, lists the parts in a bill of materials, and takes itself apart for an
 exploded view. A library makes parts from published standards — a Mini-ITX
 board on ATX's holes, SFX supplies, graphics cards, fans, radiators, pumps,
 G1/4 fittings, ISO screws, the FormD T1 and its limits — each written into
-the folder as a part file like any other. Edits are held until ⌘S.
+the folder as a part file like any other. Routes run hard or soft tube
+between fittings' sockets, bent to the tube's radius, with the length to
+cut and where to bend it, and draw the loop in the order the coolant goes. Edits are held until ⌘S.
 
 ## The three things that hold it together
 

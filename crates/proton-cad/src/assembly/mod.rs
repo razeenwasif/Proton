@@ -5,10 +5,13 @@
 //!   freedoms counted, placements written back, the bill of materials.
 //! - [`fit`]: where parts overlap, and where they are nearer than the
 //!   clearance wanted.
+//! - [`route`]: the loop's tubes between fittings' sockets, bent to their
+//!   radius, with cut and bend lists, and the loop's order.
 
 pub mod fit;
 pub mod lang;
 pub mod model;
+pub mod route;
 
 pub use lang::{read, write, Assembly};
 pub use model::{build, build_with, write_back, Model};

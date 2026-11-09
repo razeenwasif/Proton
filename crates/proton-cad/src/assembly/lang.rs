@@ -49,6 +49,34 @@ pub enum Item {
     Place(Place),
     Mate(Mate),
     Explode(Explode),
+    Route(Route),
+}
+
+/// Hard tube, bent; or soft, laid in curves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tube {
+    Hard,
+    Soft,
+}
+
+/// `route NAME hard|soft ID/OD from PORT to PORT [via (x, y, z), …] [bend
+/// R] [lead L] [insert I]`: a tube between two fittings' sockets — a port
+/// is an instance's hole by name, `cpu_fit.socket`, or a round face —
+/// through the points given, in the assembly's coordinates; bent to `R`
+/// at its centre line, straight `L` out of each fitting, pushed `I` into
+/// each. Written in the way the coolant goes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Route {
+    pub name: String,
+    pub tube: Tube,
+    /// `14/16`: inside and outside diameters, mm.
+    pub size: String,
+    pub from: String,
+    pub to: String,
+    pub via: Vec<[f64; 3]>,
+    pub bend: Option<Expr>,
+    pub lead: Option<Expr>,
+    pub insert: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,7 +312,45 @@ pub fn read(text: &str) -> Result<Assembly, Diag> {
                 }
                 Item::Explode(Explode { name, moves })
             }
-            w => return Err(p.err_at(1, format!("`{w}` is not a statement of an assembly: assembly, units, param, clearance, part, ground, place, mate or explode"))),
+            "route" => {
+                let name = p.ident("the route's name")?;
+                let tube = match p.ident("`hard` or `soft`")?.as_str() {
+                    "hard" => Tube::Hard,
+                    "soft" => Tube::Soft,
+                    _ => return Err(p.err_at(1, "a route's tube is `hard` or `soft`")),
+                };
+                let size = {
+                    let a = signed(&mut p)?;
+                    p.sym('/')?;
+                    let b = signed(&mut p)?;
+                    if !(a > 0.0 && b > a) {
+                        return Err(p.err_at(1, "a tube is its inside and outside diameters, the outside the larger: `14/16`"));
+                    }
+                    format!("{}/{}", num(a), num(b))
+                };
+                p.keyword("from")?;
+                let from = p.path("the port it starts at")?;
+                p.keyword("to")?;
+                let to = p.path("the port it ends at")?;
+                let mut route = Route { name, tube, size, from, to, via: Vec::new(), bend: None, lead: None, insert: None };
+                while !p.at_end() {
+                    match p.ident("`via`, `bend`, `lead` or `insert`")?.as_str() {
+                        "via" => loop {
+                            route.via.push(triple(&mut p)?);
+                            if !p.peek_sym(',') {
+                                break;
+                            }
+                            p.i += 1;
+                        },
+                        "bend" => route.bend = Some(p.expr()?),
+                        "lead" => route.lead = Some(p.expr()?),
+                        "insert" => route.insert = Some(p.expr()?),
+                        w => return Err(p.err_at(1, format!("`{w}`: a route goes on with `via`, `bend`, `lead` or `insert`"))),
+                    }
+                }
+                Item::Route(route)
+            }
+            w => return Err(p.err_at(1, format!("`{w}` is not a statement of an assembly: assembly, units, param, clearance, part, ground, place, mate, explode or route"))),
         };
         p.done()?;
         items.push(Noted { item, note, line: lineno });
@@ -325,6 +391,19 @@ pub fn write(a: &Assembly) -> String {
                 let mut l = format!("mate {} {} {} to {}", m.name, m.kind.word(), m.a, m.b);
                 if let Some(v) = &m.value {
                     l.push_str(&if m.kind.valued() { format!(" = {}", print_expr(v)) } else { format!(" offset {}", print_expr(v)) });
+                }
+                l
+            }
+            Item::Route(r) => {
+                let t = |v: [f64; 3]| format!("({}, {}, {})", num(v[0]), num(v[1]), num(v[2]));
+                let mut l = format!("route {} {} {} from {} to {}", r.name, if r.tube == Tube::Hard { "hard" } else { "soft" }, r.size, r.from, r.to);
+                if !r.via.is_empty() {
+                    l.push_str(&format!(" via {}", r.via.iter().map(|v| t(*v)).collect::<Vec<_>>().join(", ")));
+                }
+                for (w, e) in [("bend", &r.bend), ("lead", &r.lead), ("insert", &r.insert)] {
+                    if let Some(e) = e {
+                        l.push_str(&format!(" {w} {}", print_expr(e)));
+                    }
                 }
                 l
             }

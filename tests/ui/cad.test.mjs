@@ -141,3 +141,13 @@ test('an assembly\'s lines are written as its language has them', async () => {
   assert.deepEqual(offsets(ASSEMBLY, 'apart'), {block: [0, 0, 30], pin: [0, 0, 60]});
   assert.deepEqual(offsets(ASSEMBLY, null), {});
 });
+
+test('routes are written as the language has them, and ports and points read', async () => {
+  const {asmText, portOf, points} = await import('../../ui/cad-assembly.js');
+  assert.equal(asmText.route('t1', 'hard', '14/16', 'a.socket', 'b.socket'), 'route t1 hard 14/16 from a.socket to b.socket');
+  assert.equal(asmText.route('t1', 'soft', '10/13', 'a.socket', 'b.socket', [[1, 2, 3], [4.5, 0, -1]], {bend: '40', lead: '', insert: '12'}), 'route t1 soft 10/13 from a.socket to b.socket via (1, 2, 3), (4.5, 0, -1) bend 40 insert 12');
+  assert.equal(portOf('f1.socket.side(wall1)'), 'f1.socket');
+  assert.equal(portOf('loop.pump.inlet.side(wall2)'), 'loop.pump.inlet');
+  assert.equal(portOf('f1.body.top'), null);
+  assert.deepEqual(points('1, 2, 3\n\n 4 5 6 \nbad\n7, 8'), [[1, 2, 3], [4, 5, 6]]);
+});

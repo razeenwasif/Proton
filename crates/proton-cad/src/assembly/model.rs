@@ -73,7 +73,8 @@ pub struct MateOut {
     pub redundant: bool,
 }
 
-/// A row of the bill of materials: a part, how many, which instances.
+/// A row of the bill of materials: a part, how many, which instances —
+/// for tube, how much to cut in all.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BomRow {
     pub part: String,
@@ -81,6 +82,20 @@ pub struct BomRow {
     pub material: Option<String>,
     pub count: usize,
     pub instances: Vec<String>,
+    pub length: Option<f64>,
+}
+
+/// A route as built, or why not.
+#[derive(Debug, Clone)]
+pub struct RouteOut {
+    pub name: String,
+    pub line: usize,
+    pub tube: super::lang::Tube,
+    pub size: String,
+    pub from: String,
+    pub to: String,
+    pub built: Option<super::route::Built>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +113,9 @@ pub struct Model {
     pub conflicting: Vec<String>,
     /// Each exploded view: how far each instance moves in it.
     pub explodes: Vec<(String, Vec<(String, Vec3)>)>,
+    pub routes: Vec<RouteOut>,
+    /// The loop the routes make.
+    pub order: super::route::Order,
     pub errors: Vec<Diag>,
 }
 
@@ -106,12 +124,20 @@ impl Model {
         self.instances.iter().find(|i| i.name == name)
     }
 
-    /// Every part where it is, through every assembly in it.
+    /// Every part where it is, through every assembly in it, and every
+    /// route's tube.
     pub fn leaves(&self) -> Vec<Leaf> {
-        self.instances
+        let mut out: Vec<Leaf> = self
+            .instances
             .iter()
             .flat_map(|i| i.leaves.iter().map(move |l| Leaf { name: if i.source == Source::Part { i.name.clone() } else { format!("{}.{}", i.name, l.name) }, part: l.part.clone(), place: l.place.then(&i.place) }))
-            .collect()
+            .collect();
+        for r in &self.routes {
+            if let Some(b) = &r.built {
+                out.push(super::route::leaf(&r.name, &r.size, r.tube, b.solid.clone()));
+            }
+        }
+        out
     }
 
     /// What it is made of: each part, how many, and which.
@@ -130,7 +156,15 @@ impl Model {
                     material: l.part.material.clone(),
                     count: 1,
                     instances: vec![l.name],
+                    length: None,
                 }),
+            }
+        }
+        // Tube: how much to cut, in all.
+        for row in &mut rows {
+            let cut: f64 = self.routes.iter().filter(|r| row.instances.contains(&r.name)).filter_map(|r| r.built.as_ref().map(|b| b.cut)).sum();
+            if cut > 0.0 {
+                row.length = Some(cut);
             }
         }
         rows
@@ -415,7 +449,20 @@ pub fn build_with(a: &Assembly, here: &Path, load: Load, parts: &mut HashMap<Pat
 }
 
 fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
-    let mut m = Model { name: None, units: Units::Mm, clearance: 0.0, instances: Vec::new(), mates: Vec::new(), dof: 0, solved: true, conflicting: Vec::new(), explodes: Vec::new(), errors: Vec::new() };
+    let mut m = Model {
+        name: None,
+        units: Units::Mm,
+        clearance: 0.0,
+        instances: Vec::new(),
+        mates: Vec::new(),
+        dof: 0,
+        solved: true,
+        conflicting: Vec::new(),
+        explodes: Vec::new(),
+        routes: Vec::new(),
+        order: super::route::Order { parts: Vec::new(), closed: false, notes: Vec::new() },
+        errors: Vec::new(),
+    };
     let dir = here.parent().unwrap_or(Path::new("")).to_path_buf();
     for n in &a.items {
         if let Item::Units(u) = n.item {
@@ -478,7 +525,7 @@ fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
             Item::Place(p) => {
                 places.insert(p.name.clone(), p.placement);
             }
-            Item::Mate(_) | Item::Explode(_) | Item::Units(_) | Item::Blank | Item::Comment(_) => {}
+            Item::Mate(_) | Item::Explode(_) | Item::Route(_) | Item::Units(_) | Item::Blank | Item::Comment(_) => {}
         }
     }
     for (name, pl) in &places {
@@ -599,6 +646,36 @@ fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
             inst.place = inst.place.then(&movers[i].motion(&x));
         }
     }
+
+    // The routes, between the fittings where the mates put them.
+    for n_item in &a.items {
+        let Item::Route(r) = &n_item.item else { continue };
+        let built = (|| -> Result<super::route::Built, String> {
+            if m.routes.iter().any(|x| x.name == r.name) || m.instance(&r.name).is_some() {
+                return Err(format!("`{}` is a name already", r.name));
+            }
+            let (id, od) = super::route::size(&r.size)?;
+            let from = super::route::port(&m.instances, &r.from)?;
+            let to = super::route::port(&m.instances, &r.to)?;
+            let val = |e: &Option<crate::part::ast::Expr>| -> Result<Option<f64>, String> { e.as_ref().map(|e| eval(e, &env).map(|x| x * k)).transpose() };
+            let via: Vec<Vec3> = r.via.iter().map(|v| Vec3::new(v[0], v[1], v[2]) * k).collect();
+            super::route::build(&from, &to, &via, r.tube, id, od, val(&r.bend)?, val(&r.lead)?, val(&r.insert)?, &r.name)
+        })();
+        let (built, error) = match built {
+            Ok(b) => (Some(b), None),
+            Err(e) => {
+                m.errors.push(Diag::new(n_item.line, 1, format!("`{}`: {e}", r.name)));
+                (None, Some(e))
+            }
+        };
+        m.routes.push(RouteOut { name: r.name.clone(), line: n_item.line, tube: r.tube, size: r.size.clone(), from: r.from.clone(), to: r.to.clone(), built, error });
+    }
+    let ends: Vec<(String, String, String)> = m
+        .routes
+        .iter()
+        .map(|r| (r.name.clone(), r.from.split('.').next().unwrap_or("").to_string(), r.to.split('.').next().unwrap_or("").to_string()))
+        .collect();
+    m.order = super::route::order(&ends);
 
     // The exploded views.
     for n_item in &a.items {

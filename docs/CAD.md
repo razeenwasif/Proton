@@ -666,6 +666,39 @@ cooler table and every rule; in the core, a library part written, made again
 to the same file, opened, and added to an assembly by its path from there;
 in the browser, a family chosen, a value changed, made, and made and added.
 
+K9 — routes. `route NAME hard|soft ID/OD from PORT to PORT [via (x, y, z), …]
+[bend R] [lead L] [insert I]` runs a tube between two fittings' sockets,
+written the way the coolant goes. A port is an instance's hole by name,
+`cpu_fit.socket` (its wall, `socket.side(wall1)`), or a round face: its
+point is the centre of the socket's mouth — the circle a flat face square to
+it meets — and its way out that face's outward normal, where the mates put
+the instance. The centre line runs straight out of the first socket for its
+lead, through the points given, and straight into the last; each corner is
+bent to the radius (hard tube 2.5 × its outside diameter, soft 4 ×, unless
+given), a corner needing more straight than it has refused with how much,
+and the tube is its ring swept along the line — cylinders and tori, exact,
+by K5's sweep, in space. A hard tube's cut list is its length along the
+centre line with 10 mm (or `insert`) pushed into each fitting; its bend list
+gives each bend's start along the tube as cut, its angle, its radius, and
+its twist about the tube from the bend before. Tubes are parts of the
+assembly: checked for fit like any (their ends on their fittings touch, and
+fit), drawn, written to STEP, and counted in the bill of materials with the
+tube to cut in all. The loop is the routes followed from the first's start,
+part to part, in the order the coolant meets them, and says where it stops
+or which routes are off it. In the window two sockets picked in the view
+route a hard or a soft tube; a route's settings take its tube, its ends, its
+points one a line and its radius, and list its bends; the assembly's page
+draws the loop as a ring, arrows the way the coolant goes, each tube with
+its length to cut. Tested (7 + 2 + 2): a straight tube's length, cut and
+volume; an L bent at 40 — 60 + 20π + 88 mm, its bend 70 from the end as cut
+— and at 30 with 12 pushed in; two bends in planes square to each other
+twisted a quarter turn, a U none, an S a half; bends too close, a tube too
+big for its socket and a port that is not one refused; a loop closed in the
+coolant's order and one open, said so; a tube through a block found by the
+fit check, two clear of everything not, and the tube to cut counted; routes
+read and printed back, and four mistakes; in the browser, a tube routed
+from two sockets picked, and a route's bends listed and its points written.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

@@ -10,7 +10,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { createSketcher, fresh } from "./cad-sketch.js";
-import { asmText, historyHtml, libraryHtml, libraryParams, lineIndex, offsets, relPath, settingsHtml } from "./cad-assembly.js";
+import { asmText, historyHtml, libraryHtml, libraryParams, lineIndex, offsets, points, portOf, relPath, settingsHtml } from "./cad-assembly.js";
 
 /** @typedef {import("./bindings/CadFound").CadFound} Found */
 /** @typedef {import("./bindings/CadPartView").CadPartView} PartView */
@@ -144,6 +144,7 @@ export function createCad(host) {
     /** Faces picked in an assembly to mate, by reference. @type {string[]} */ picks: [],
     /** The exploded view shown, by name. @type {string | null} */ exploded: null,
     /** A mate's value as typed. */ mateSize: "",
+    /** What the 3D view last drew of an assembly. */ drawn: "",
     /** The library's families. @type {import("./bindings/CadFamily").CadFamily[]} */ families: [],
     /** The family chosen in the library, and its values as typed. @type {string | null} */ family: null,
     /** @type {Record<string, string>} */ libValues: {},
@@ -193,6 +194,7 @@ export function createCad(host) {
     ...(state.asm?.instances ?? []).map((i) => i.name),
     ...(state.asm?.mates ?? []).map((m) => m.name),
     ...(state.asm?.explodes ?? []).map((e) => e.name),
+    ...(state.asm?.routes ?? []).map((r) => r.name),
   ];
 
   function renderHistory() {
@@ -373,6 +375,7 @@ export function createCad(host) {
     const inst = a.instances.find((i) => i.index === state.step);
     const mate = a.mates.find((m) => m.index === state.step);
     const view3 = a.explodes.find((e) => e.index === state.step);
+    const route = a.routes.find((r) => r.index === state.step);
     /** @type {Op[]} */
     const ops = [];
     if (inst) {
@@ -392,6 +395,10 @@ export function createCad(host) {
     } else if (mate) {
       const text = asmText.mate(v("name")?.value.trim() || mate.name, v("kind")?.value ?? mate.kind, v("a")?.value.trim() || mate.a, v("b")?.value.trim() || mate.b, v("value")?.value ?? mate.value ?? "");
       if (text !== mate.text) ops.push({ op: "replace", index: mate.index, text });
+    } else if (route) {
+      const via = v("via") ? points(/** @type {HTMLInputElement} */ (v("via")).value) : route.via;
+      const text = asmText.route(v("name")?.value.trim() || route.name, v("kind")?.value ?? route.kind, v("size")?.value ?? route.size, v("from")?.value.trim() || route.from, v("to")?.value.trim() || route.to, via, { bend: v("bend")?.value ?? route.bend ?? "", lead: route.lead ?? "", insert: route.insert ?? "" });
+      if (text !== route.text) ops.push({ op: "replace", index: route.index, text });
     } else if (view3) {
       const text = v("line")?.value.trim().replace(/\s*\n\s*/g, " ") ?? "";
       if (text && text !== view3.text) ops.push({ op: "replace", index: view3.index, text });
@@ -512,7 +519,13 @@ export function createCad(host) {
           if (f >= 0) marked.push([b.name, f]);
         }
       }
-      view.show(/** @type {any} */ ({ bodies: a.bodies, sketches: [], bounds: a.bounds }), { offsets: offsets(a, state.exploded), marked });
+      // Drawn again only when what it shows changes: a choice in the
+      // settings is not a new scene.
+      const shown = JSON.stringify([a.generation, a.text, state.picks, state.exploded]);
+      if (shown !== state.drawn) {
+        state.drawn = shown;
+        view.show(/** @type {any} */ ({ bodies: a.bodies, sketches: [], bounds: a.bounds }), { offsets: offsets(a, state.exploded), marked });
+      }
       if (state.fitted !== a.generation) {
         state.fitted = a.generation;
         view.fit(a.bounds);
@@ -529,6 +542,7 @@ export function createCad(host) {
       return;
     }
     if (view) {
+      state.drawn = "";
       const chosen = p.steps.find((s) => s.index === state.step);
       view.show(p, {
         sketch: chosen?.kind === "sketch" ? chosen.index : null,
@@ -712,6 +726,15 @@ export function createCad(host) {
       if (!f) return;
       host.dispatch({ type: "cadLibrary", family: f.name, params: libraryParams(f, state.libValues), add: !!state.asm && !!t.closest("[data-cad-settings]") });
       return;
+    }
+    const routeBtn = /** @type {HTMLElement | null} */ (t.closest("[data-cad-route-kind]"));
+    if (routeBtn && state.asm && state.picks.length === 2) {
+      const [a, b] = state.picks.map((p) => portOf(p) ?? p);
+      const hard = routeBtn.dataset.cadRouteKind === "hard";
+      const name = fresh("t", names());
+      state.picks = [];
+      state.want = { name, open: false };
+      return edit([{ op: "insert", at: null, text: asmText.route(name, hard ? "hard" : "soft", hard ? "14/16" : "10/13", a, b) }]);
     }
     const kindBtn = /** @type {HTMLElement | null} */ (t.closest("[data-cad-mate-kind]"));
     if (kindBtn && state.asm && state.picks.length === 2) {
@@ -946,7 +969,7 @@ export function createCad(host) {
           sketcher.leave();
         }
         const want = state.want;
-        const all = [...e.assembly.instances, ...e.assembly.mates, ...e.assembly.explodes];
+        const all = [...e.assembly.instances, ...e.assembly.mates, ...e.assembly.explodes, ...e.assembly.routes];
         const got = want && all.find((x) => x.name === want.name);
         if (want && got) {
           state.want = null;

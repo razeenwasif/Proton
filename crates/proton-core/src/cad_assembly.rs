@@ -97,7 +97,7 @@ pub struct CadExplode {
 }
 
 /// A row of the bill of materials.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct CadBomRow {
@@ -106,6 +106,58 @@ pub struct CadBomRow {
     pub material: Option<String>,
     pub count: u32,
     pub instances: Vec<String>,
+    /// Tube to cut in all, mm.
+    pub length: Option<f64>,
+}
+
+/// A bend of a hard tube: where it starts along the tube as cut, how far it
+/// turns, its radius, and how far it is turned from the bend before.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CadBend {
+    pub at: f64,
+    pub angle: f64,
+    pub radius: f64,
+    pub twist: f64,
+}
+
+/// A route: its line's fields, and its tube as built.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CadRoute {
+    pub index: u32,
+    pub line: u32,
+    pub name: String,
+    /// `hard` or `soft`.
+    pub kind: String,
+    pub size: String,
+    pub from: String,
+    pub to: String,
+    /// Its points, as written.
+    pub via: Vec<Vec<f64>>,
+    pub bend: Option<String>,
+    pub lead: Option<String>,
+    pub insert: Option<String>,
+    /// Along its centre line, and to cut, mm.
+    pub length: Option<f64>,
+    pub cut: Option<f64>,
+    pub bends: Vec<CadBend>,
+    pub error: Option<String>,
+    pub text: String,
+}
+
+/// The loop: its parts in the order the coolant meets them, each with the
+/// route that leaves it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CadLoop {
+    pub parts: Vec<String>,
+    pub routes: Vec<Option<String>>,
+    pub closed: bool,
+    pub notes: Vec<String>,
 }
 
 /// Two parts that do not fit: overlapping, or nearer than the clearance.
@@ -141,6 +193,10 @@ pub struct CadAssemblyView {
     pub instances: Vec<CadInstance>,
     pub mates: Vec<CadMate>,
     pub explodes: Vec<CadExplode>,
+    pub routes: Vec<CadRoute>,
+    #[serde(rename = "loop")]
+    #[ts(rename = "loop")]
+    pub coolant: CadLoop,
     /// Every part's bodies where they are, each named for its part:
     /// `board`, `loop.pump`.
     pub bodies: Vec<CadBody>,
@@ -285,6 +341,7 @@ fn item_name(i: &Item) -> Option<&str> {
         Item::Instance(x) => Some(&x.name),
         Item::Mate(m) => Some(&m.name),
         Item::Explode(e) => Some(&e.name),
+        Item::Route(r) => Some(&r.name),
         _ => None,
     }
 }
@@ -307,6 +364,10 @@ fn rename(a: &mut lang::Assembly, old: &str, new: &str) {
                 fix(&mut m.b);
             }
             Item::Explode(e) => e.moves.iter_mut().for_each(|(w, _)| fix(w)),
+            Item::Route(r) => {
+                fix(&mut r.from);
+                fix(&mut r.to);
+            }
             _ => {}
         }
     }
@@ -437,6 +498,7 @@ pub fn view(a: &lang::Assembly, m: &Model, path: &str, name: &str, generation: u
         .collect();
     let mut mates = Vec::new();
     let mut explodes = Vec::new();
+    let mut routes = Vec::new();
     for (idx, n) in a.items.iter().enumerate() {
         match &n.item {
             Item::Mate(x) => {
@@ -452,6 +514,28 @@ pub fn view(a: &lang::Assembly, m: &Model, path: &str, name: &str, generation: u
                     residual: out.map_or(f64::NAN, |o| o.residual),
                     error: out.and_then(|o| o.error.clone()).or_else(|| error_at(n.line)),
                     redundant: out.is_some_and(|o| o.redundant),
+                    text: line_of(&n.item),
+                });
+            }
+            Item::Route(r) => {
+                let out = m.routes.iter().find(|o| o.name == r.name && o.line == n.line);
+                let b = out.and_then(|o| o.built.as_ref());
+                routes.push(CadRoute {
+                    index: idx as u32,
+                    line: n.line as u32,
+                    name: r.name.clone(),
+                    kind: if r.tube == lang::Tube::Hard { "hard" } else { "soft" }.into(),
+                    size: r.size.clone(),
+                    from: r.from.clone(),
+                    to: r.to.clone(),
+                    via: r.via.iter().map(|v| v.to_vec()).collect(),
+                    bend: r.bend.as_ref().map(print::expr),
+                    lead: r.lead.as_ref().map(print::expr),
+                    insert: r.insert.as_ref().map(print::expr),
+                    length: b.map(|b| b.length),
+                    cut: b.map(|b| b.cut),
+                    bends: b.map(|b| b.bends.iter().map(|x| CadBend { at: x.at, angle: x.angle, radius: x.radius, twist: x.twist }).collect()).unwrap_or_default(),
+                    error: out.and_then(|o| o.error.clone()),
                     text: line_of(&n.item),
                 });
             }
@@ -494,11 +578,13 @@ pub fn view(a: &lang::Assembly, m: &Model, path: &str, name: &str, generation: u
         instances,
         mates,
         explodes,
+        routes,
+        coolant: CadLoop { parts: m.order.parts.iter().map(|p| p.0.clone()).collect(), routes: m.order.parts.iter().map(|p| p.1.clone()).collect(), closed: m.order.closed, notes: m.order.notes.clone() },
         bodies,
         dof: m.dof as u32,
         solved: m.solved,
         conflicting: m.conflicting.clone(),
-        bom: m.bom().into_iter().map(|r| CadBomRow { part: r.part, path: r.path, material: r.material, count: r.count as u32, instances: r.instances }).collect(),
+        bom: m.bom().into_iter().map(|r| CadBomRow { part: r.part, path: r.path, material: r.material, count: r.count as u32, instances: r.instances, length: r.length }).collect(),
         clashes,
         clearance: m.clearance,
         errors: m.errors.iter().map(CadDiag::from).collect(),
@@ -619,7 +705,8 @@ mod tests {
     fn dump_assembly_for_the_preview() {
         let root = scratch("preview");
         std::fs::write(root.join("parts/pin.part"), "part \"Pin\"\nmaterial steel\nsketch s on XY\n  circle c center (0, 0) radius = 2\nend\nextrude p from s distance 10\n").unwrap();
-        let text = "assembly \"Test rig\"\nunits mm\nclearance 0.5\n\npart plate from \"parts/plate.part\"\npart block from \"parts/block.part\"\npart pin from \"parts/pin.part\"\nplace block at (0, 0, 4)\nplace pin at (60, 30, 4)\nmate seat planar block.b.bottom to plate.plate.top\nmate left flush block.b.side(r.left) to plate.plate.side(r.left)\nmate stand planar pin.p.bottom to plate.plate.top\nexplode apart block by (0, 0, 30), pin by (0, 0, 60)\n";
+        std::fs::write(root.join("parts/fit.part"), proton_cad::library::make("fitting", &[]).unwrap().text).unwrap();
+        let text = "assembly \"Test rig\"\nunits mm\nclearance 0.5\n\npart plate from \"parts/plate.part\"\npart block from \"parts/block.part\"\npart pin from \"parts/pin.part\"\nplace block at (0, 0, 4)\nplace pin at (60, 30, 4)\nmate seat planar block.b.bottom to plate.plate.top\nmate left flush block.b.side(r.left) to plate.plate.side(r.left)\nmate stand planar pin.p.bottom to plate.plate.top\nexplode apart block by (0, 0, 30), pin by (0, 0, 60)\npart f1 from \"parts/fit.part\"\npart f2 from \"parts/fit.part\"\nplace f1 at (12, 45, 4)\nplace f2 at (92, 45, 4)\nroute t1 hard 14/16 from f1.socket to f2.socket via (12, 45, 90), (92, 45, 90) bend 30\n";
         std::fs::write(root.join("rig.assembly"), text).unwrap();
         let mut c = Cads::default();
         let mut v = view(&c.apply(&root, Command::CadOpen { path: "rig.assembly".into() }));

@@ -5,13 +5,15 @@ import type { CadClash } from "./CadClash";
 import type { CadDiag } from "./CadDiag";
 import type { CadExplode } from "./CadExplode";
 import type { CadInstance } from "./CadInstance";
+import type { CadLoop } from "./CadLoop";
 import type { CadMate } from "./CadMate";
+import type { CadRoute } from "./CadRoute";
 
 /**
  * The assembly open: its text, its instances and mates solved, its parts
  * drawn where they are.
  */
-export type CadAssemblyView = { path: string, name: string, title: string | null, units: string, generation: number, dirty: boolean, text: string, error: CadDiag | null, instances: Array<CadInstance>, mates: Array<CadMate>, explodes: Array<CadExplode>, 
+export type CadAssemblyView = { path: string, name: string, title: string | null, units: string, generation: number, dirty: boolean, text: string, error: CadDiag | null, instances: Array<CadInstance>, mates: Array<CadMate>, explodes: Array<CadExplode>, routes: Array<CadRoute>, loop: CadLoop, 
 /**
  * Every part's bodies where they are, each named for its part:
  * `board`, `loop.pump`.

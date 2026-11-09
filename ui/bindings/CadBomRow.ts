@@ -3,4 +3,8 @@
 /**
  * A row of the bill of materials.
  */
-export type CadBomRow = { part: string, path: string, material: string | null, count: number, instances: Array<string>, };
+export type CadBomRow = { part: string, path: string, material: string | null, count: number, instances: Array<string>, 
+/**
+ * Tube to cut in all, mm.
+ */
+length: number | null, };
