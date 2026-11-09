@@ -1458,6 +1458,8 @@ impl Workspace {
             }
 
             command @ (Command::CadNew { .. }
+            | Command::CadNewAssembly { .. }
+            | Command::CadFit { .. }
             | Command::CadOpen { .. }
             | Command::CadClose { .. }
             | Command::CadSave

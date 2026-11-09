@@ -4152,6 +4152,13 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cd-line { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 6px 8px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head);
   color: var(--text); font: var(--z-xs)/1.45 var(--mono, ui-monospace, monospace); resize: vertical; outline: none; }
 .cd-line:focus { border-color: var(--accent); }
+.cd-triple { display: flex; gap: 4px; }
+.cd-triple input { width: 0; flex: 1; min-width: 0; }
+.cd-mate-kinds { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.cd-bom { width: 100%; border-collapse: collapse; font-size: var(--z-xs); }
+.cd-bom th, .cd-bom td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--xl-line); }
+.cd-clashes { margin: 4px 0; padding-left: 16px; font-size: var(--z-xs); }
+.cd-clashes .bad { color: var(--red, #f7768e); }
 .cd-picks { margin: 4px 0 8px; padding: 0; list-style: none; font: var(--z-xs)/1.5 var(--mono, ui-monospace, monospace); color: var(--muted); max-height: 9em; overflow: auto; }
 .cd-picks li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cd-card code { font: var(--z-xs) var(--mono, ui-monospace, monospace); }

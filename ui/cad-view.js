@@ -100,6 +100,8 @@ export async function mountView(canvas, host) {
   let pickedEdges = [];
   /** Faces of the chosen step, by name: a fillet's own. @type {string[]} */
   let stepFaces = [];
+  /** Faces marked by body name and face: an assembly's picked to mate. @type {[string, number][]} */
+  let marked = [];
   let grid = /** @type {any} */ (null);
   let hovered = /** @type {[number, number] | null} */ (null);
   let picked = /** @type {[number, number] | null} */ (null);
@@ -143,6 +145,11 @@ export async function mountView(canvas, host) {
     for (let i = 0; i < bodies.length; i++) {
       for (let f = 0; f < bodies[i].faces.length; f++) paint([i, f], stepFaces.includes(bodies[i].faces[f].name) ? STEP : BODY);
     }
+    for (const [name, f] of marked) {
+      bodies.forEach((b, i) => {
+        if (b.name === name) paint([i, f], PICKED);
+      });
+    }
     paint(hovered, HOVER);
     paint(picked, PICKED);
     // The edges marked: rebuilt, as few as there are.
@@ -167,11 +174,13 @@ export async function mountView(canvas, host) {
     draw();
   }
 
-  /** @param {PartView} part @param {{sketch?: number | null, edges?: [string, number][], faces?: string[]}} [opts] */
+  /** @param {PartView} part @param {{sketch?: number | null, edges?: [string, number][], faces?: string[], offsets?: Record<string, number[]>, marked?: [string, number][]}} [opts] */
   function show(part, opts = {}) {
     clear();
     pickedEdges = opts.edges ?? [];
     stepFaces = opts.faces ?? [];
+    marked = opts.marked ?? [];
+    const away = opts.offsets ?? {};
     hoveredEdge = null;
     for (const b of part.bodies) {
       const g = keep(new THREE.BufferGeometry());
@@ -182,6 +191,9 @@ export async function mountView(canvas, host) {
       g.setIndex(b.indices);
       const m = keep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, side: THREE.DoubleSide }));
       const mesh = new THREE.Mesh(g, m);
+      // An exploded view moves each part away, its edges with it.
+      const by = away[b.name];
+      if (by) mesh.position.set(by[0], by[1], by[2]);
       world.add(mesh);
       // Which points each face has: what is coloured when it is hovered.
       const facePoints = b.faces.map(() => /** @type {Set<number>} */ (new Set()));
@@ -193,7 +205,9 @@ export async function mountView(canvas, host) {
       for (const e of b.edges) for (let i = 0; i + 5 < e.length; i += 3) lines.push(e[i], e[i + 1], e[i + 2], e[i + 3], e[i + 4], e[i + 5]);
       const eg = keep(new THREE.BufferGeometry());
       eg.setAttribute("position", new THREE.Float32BufferAttribute(lines, 3));
-      world.add(new THREE.LineSegments(eg, keep(new THREE.LineBasicMaterial({ color: EDGE }))));
+      const lines3 = new THREE.LineSegments(eg, keep(new THREE.LineBasicMaterial({ color: EDGE })));
+      if (by) lines3.position.set(by[0], by[1], by[2]);
+      world.add(lines3);
     }
     for (const s of part.sketches) {
       const color = s.index === opts.sketch ? PICKED_SKETCH : SKETCH;

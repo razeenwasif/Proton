@@ -46,6 +46,7 @@
     "preview-logic.js",
     "cad.js",
     "cad-view.js",
+    "cad-assembly.js",
     "cad-sketch.js",
     "preview-cad.js",
     "kmap.js",

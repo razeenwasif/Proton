@@ -96,13 +96,20 @@ fn columns(n: usize, fixed: &[bool]) -> (Vec<Option<usize>>, usize) {
 
 /// Solve `eqs` for the unknowns not `fixed`, starting from `x`, in place.
 pub fn solve(eqs: &[&Equation], x: &mut [f64], fixed: &[bool]) -> Outcome {
+    solve_to(eqs, x, fixed, MET)
+}
+
+/// As [`solve`], going on toward residuals as small as `aim` while steps
+/// still make them smaller; solved, still, at [`MET`].
+pub fn solve_to(eqs: &[&Equation], x: &mut [f64], fixed: &[bool], aim: f64) -> Outcome {
+    let aim = aim.min(MET);
     let (free, _) = columns(x.len(), fixed);
     let back: Vec<usize> = (0..x.len()).filter(|&v| !fixed[v]).collect();
     let mut f = residuals(eqs, x);
     let mut lambda = 1e-9;
     for it in 0..300 {
         let worst = max_abs(&f);
-        if worst <= MET {
+        if worst <= aim {
             return Outcome { converged: true, residual: worst, iterations: it };
         }
         let rows: Vec<Vec<(usize, f64)>> = eqs.iter().map(|e| gradient(e, x, &free)).collect();

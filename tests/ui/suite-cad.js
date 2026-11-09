@@ -6,6 +6,7 @@
  * checked is what the window sends back. */
 
 import {PART} from '../../ui/preview-cad-part.js';
+import {ASSEMBLY} from '../../ui/preview-cad-assembly.js';
 
 /** @param {{test: Function, assert: Function, win: any, doc: Document, $: (s: string) => any, settle: () => Promise<void>, key: Function, shown: (el: any) => boolean}} t */
 export async function cadChecks({test, assert, win, doc, $, settle, key, shown}) {
@@ -348,6 +349,96 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     ws().querySelector('[data-cad-add="sweep"]').click(); await settle();
     ws().querySelector('[data-cad-add="loft"]').click(); await settle();
     assert(JSON.stringify(ops(before).map((o) => o.text)) === JSON.stringify(['sweep w1 from post along base', 'loft l1 from base to post']), `Sweep and Loft did not write their lines: ${JSON.stringify(ops(before))}`);
+  });
+
+  await test('An assembly lists its instances and mates; faces picked are mated; an instance placed, held, renamed and taken out writes its lines; the fit is checked', async () => {
+    const asm = (more = {}) => ({type: 'cadAssembly', assembly: {...structuredClone(ASSEMBLY), generation: 9, dirty: false, ...more}});
+    await win.pushEvents([{type: 'cadPart', part: null}, asm()]); await settle();
+    assert(shown(ws().querySelector('[data-cad-part]')) && !shown(ws().querySelector('[data-cad-home]')), 'the assembly is not shown');
+    assert(ws().querySelector('[data-cad-title]').textContent === 'Test rig', 'the assembly is not named by its title');
+    const rows = [...ws().querySelectorAll('.cd-history [data-cad-step]')].map((r) => r.dataset.cadStep);
+    assert(rows.join() === 'part,4,5,6,9,10,11,12', `the instances, mates and views are not listed: ${rows}`);
+    assert(ws().querySelector('[data-cad-crumb]').textContent.includes('4 freedoms left'), 'the freedoms left are not said');
+    assert(!shown(ws().querySelector('[data-cad-add="sketch"]')) && shown(ws().querySelector('[data-cad-asm-add="fit"]')), 'the part\'s buttons are offered for an assembly');
+    const settings = ws().querySelector('[data-cad-settings]');
+    assert(settings.textContent.includes('block, pin can still move') && settings.querySelector('.cd-bom')?.textContent.includes('Pin'), 'the assembly\'s card does not say what moves, or list its parts');
+    // Two faces picked in the view: mated.
+    const plate = ASSEMBLY.bodies.find((b) => b.name === 'plate'), pin = ASSEMBLY.bodies.find((b) => b.name === 'pin');
+    debug().pickFace('pin', pin.faces.findIndex((f) => f.name === 'p.side(c)'), null);
+    debug().pickFace('plate', plate.faces.findIndex((f) => f.name === 'plate.side(r.left)'), null); await settle();
+    assert(debug().picks.join() === 'pin.p.side(c),plate.plate.side(r.left)', `the faces were not picked: ${debug().picks}`);
+    let before = win.commands.length;
+    const value = ws().querySelector('[data-cad-mate-value]');
+    value.value = '3';
+    value.dispatchEvent(new win.Event('change', {bubbles: true}));
+    ws().querySelector('[data-cad-mate-kind="distance"]').click(); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'insert', at: null, text: 'mate m1 distance pin.p.side(c) to plate.plate.side(r.left) = 3'}]), `the mate was not written: ${JSON.stringify(ops(before))}`);
+    assert(!debug().picks.length, 'the faces stay picked after their mate');
+    // A second face of the same part replaces the first.
+    debug().pickFace('pin', 0, null);
+    debug().pickFace('pin', 1, null); await settle();
+    assert(debug().picks.length === 1 && debug().picks[0] === `pin.${pin.faces[1].name}`, `two faces of one part were picked to mate: ${debug().picks}`);
+    ws().querySelector('[data-cad-unpick]').click(); await settle();
+    // An instance placed, held still and renamed.
+    ws().querySelector('.cd-history [data-cad-step="6"]').click(); await settle();
+    const at = ws().querySelector('[data-cad-settings] [data-cad-a-f="at0"]');
+    assert(at?.value === '60', 'where the pin is is not shown');
+    before = win.commands.length;
+    at.value = '70';
+    at.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'replace', index: 8, text: 'place pin at (70, 30, 4)'}]), `moving it did not write its place: ${JSON.stringify(ops(before))}`);
+    await win.pushEvents([asm()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="6"]').click(); await settle();
+    before = win.commands.length;
+    const ground = ws().querySelector('[data-cad-settings] [data-cad-a-f="ground"]');
+    ground.checked = true;
+    ground.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'insert', at: 7, text: 'ground pin'}]), `holding it still did not write its line: ${JSON.stringify(ops(before))}`);
+    await win.pushEvents([asm()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="6"]').click(); await settle();
+    before = win.commands.length;
+    const nm = ws().querySelector('[data-cad-settings] [data-cad-a-f="name"]');
+    nm.value = 'peg';
+    nm.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(ops(before)[0]?.text === 'part peg from "parts/pin.part"', `renaming did not write its line: ${JSON.stringify(ops(before))}`);
+    // Taken out: with its place.
+    await win.pushEvents([asm()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="6"]').click(); await settle();
+    before = win.commands.length;
+    ws().querySelector('[data-cad-settings] [data-cad-remove]').click(); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'remove', index: 8}, {op: 'remove', index: 6}]), `the pin did not go with its place: ${JSON.stringify(ops(before))}`);
+    // A mate's settings write its line.
+    await win.pushEvents([asm()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="9"]').click(); await settle();
+    before = win.commands.length;
+    const kind = ws().querySelector('[data-cad-settings] [data-cad-a-f="kind"]');
+    kind.value = 'distance';
+    kind.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(ops(before)[0]?.text === 'mate seat distance block.b.bottom to plate.plate.top = 0', `the mate's kind did not write its line: ${JSON.stringify(ops(before))}`);
+    // A part of the folder added; the fit checked; the view taken apart.
+    await win.pushEvents([{type: 'cadHome', parts: [{path: 'parts/plate.part', name: 'plate', kind: 'part'}, {path: 'rig.assembly', name: 'rig', kind: 'assembly'}]}, asm({path: 'rig.assembly'})]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    const form = ws().querySelector('[data-cad-add-instance]');
+    before = win.commands.length;
+    form.requestSubmit(); await settle();
+    assert(ops(before)[0]?.text === 'part plate1 from "parts/plate.part"', `adding a part did not write its line: ${JSON.stringify(ops(before))}`);
+    before = win.commands.length;
+    ws().querySelector('[data-cad-fit-check]').click(); await settle();
+    assert(sent(before, 'cadFit')[0]?.generation === 9, 'Check fit did not ask');
+    await win.pushEvents([asm({clashes: [{a: 'plate', b: 'block', overlap: true, volume: 400, gap: 0, at: [0, 0, 0, 0, 0, 0]}]})]); await settle();
+    assert(ws().querySelector('.cd-clashes')?.textContent.includes('overlap 400.00 mm³'), 'what the fit check found is not listed');
+    ws().querySelector('.cd-history [data-cad-step="12"]').click(); await settle();
+    ws().querySelector('[data-cad-explode]').click(); await settle();
+    assert(debug().exploded === 'apart' && ws().querySelector('[data-cad-crumb]').textContent.includes('exploded: apart'), 'the view was not taken apart');
+    // The home page makes an assembly.
+    await win.pushEvents([{type: 'cadAssembly', assembly: null}]); await settle();
+    const home = ws().querySelector('[data-cad-form]');
+    home.querySelector('input').value = 'Rig two';
+    home.querySelector('[data-cad-kind]').value = 'assembly';
+    before = win.commands.length;
+    home.requestSubmit(); await settle();
+    assert(sent(before, 'cadNewAssembly')[0]?.name === 'Rig two', 'the form did not make an assembly');
+    await win.pushEvents([part()]); await settle();
   });
 
   await test('The 3D view draws the bodies as the core cut them, or says why it cannot', async () => {

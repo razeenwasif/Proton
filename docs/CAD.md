@@ -180,9 +180,18 @@ shell's inside `NAME.inside(FACE)` and the sides of its openings
 or a hole placed on it finds it after an edit, and one that is gone is said
 to be, with why.
 
-An `.assembly` lists instances — a part or assembly file, or a library
-part with its parameters — and the mates between them (fastened, revolute,
-slider, cylindrical, planar, distance, angle). A route belongs to an
+An `.assembly` lists instances — `part NAME from "FILE"`, `assembly NAME
+from "FILE"`, paths from the assembly's folder — where each is (`place NAME
+at (x, y, z) turn (a, b, c)`, turned about x, then y, then z, in degrees,
+written back by the solver), what is held still (`ground NAME`, else the
+first), the least gap wanted (`clearance 1`), the mates between them (`mate
+NAME KIND A to B`, with `= VALUE` for a `distance` or an `angle` and
+`offset VALUE` for a `planar`, `flush`, `revolute` or `slider`; `fastened`,
+`parallel`, `perpendicular`, `cylindrical` and `concentric` take neither),
+and exploded views (`explode NAME INSTANCE by (x, y, z), …`). A mate's ends
+are an instance's faces by name, `board.plate.bottom`, an assembly's part's
+`loop.pump.body.top`, the part's own `XY`, `XZ`, `YZ`, `x`, `y` and `z`, or
+for `fastened` the instance itself. A route belongs to an
 assembly and names the fittings it runs between. A `.drawing` names a
 part or assembly, its sheet, its views and its dimensions. A `.schematic`
 and a `.board` are symbols, nets, footprints, tracks and zones, by name.
@@ -567,6 +576,53 @@ them, and in metres; a free-form face, no solids, a face turned wrong and
 not a STEP file each refused. Measured (release): 64 rounded holes, 134
 faces, 168 KB, written in 54 ms and read and checked in 92 ms. Not yet done:
 a file opened in another CAD program by hand — none is on this Mac.
+
+K7 — assemblies. An assembly's instances are read from their files and built
+once until a file changes; an assembly inside another is built and placed
+whole. Each instance not held still has six unknowns — a turn about its
+middle and a move, from where it is placed — and each mate is equations
+between the instances it holds: a flat face as its plane, a round one as its
+axis (and where the face is centred along it), moved as the instances move —
+normals opposed or aligned and a point's height over the other plane for
+`planar`, `flush` and `distance`; directions crossed to nothing and a point's
+offset from the other axis crossed to nothing for `cylindrical`, with the
+centres' heights along it for `revolute` and the faces' x crossed for
+`slider`; a dot product for `angle` and `perpendicular`; three points carried
+together for `fastened`. They are solved by the sketch solver's damped
+least-length steps, carried on toward 10⁻¹³ so mated faces lie on each other
+and not a few tenths of a nanometre apart; what no mate holds stays where it
+was. The rows say how many freedoms are left — a row smaller than 10⁻⁸ is
+rounding, not a gradient, and adds none — which instances can still move,
+and which mates add nothing; when the mates cannot all hold, a smallest set
+of them is named. Every placement the solver moved is written back, so the
+file says where everything is, and solved again it does not move. The fit
+check cuts every part into triangles as fine as the clearance asks and walks
+two trees of boxes for each pair: triangles that cross, or a part inside
+another, overlap, by the exact intersection's volume; faces lying on one
+another overlap nothing; a gap under the clearance is named with its two
+nearest points. The bill of materials counts each part file. In the window an
+assembly lists its instances, mates and views; two faces picked on two parts
+in the view are mated by a button for each kind; an instance's place, turn,
+holding still and name, and a mate's kind, ends and value, write their lines;
+a part of the folder is added by name; Check fit lists what it finds; an
+exploded view moves its parts apart in 3D; STEP, STL and 3MF write every part
+where it is. Tested (12 + 2 + 1): the language read and printed back with
+every statement and seven mistakes at their lines; a planar mate seating a
+block and leaving it three freedoms; three mates holding it in a corner
+exactly; a pin in a hole — cylindrical (two freedoms), revolute (centred, one),
+slider (one); gaps, angles and fastenings; mates that cannot all hold named,
+one that adds nothing marked, mistakes at their lines; placements written
+back and solved again to themselves; an assembly inside another, its parts
+mated to and counted in the bill of materials, and one that holds itself
+refused; overlaps measured exactly (400 mm³), a 0.5 mm gap found, touching
+and far apart passed; an exploded view; a flush offset's sense; in the core,
+an assembly made, mated, renamed, checked, written as STEP and read back,
+saved, reopened, and a part changed on disk built again; in the browser, the
+assembly's page, faces picked and mated, an instance placed, held, renamed
+and taken out, a mate's kind changed, a part added, the fit checked, a view
+taken apart, an assembly made from the home page. Measured (release): 26
+parts held by 75 mates solved in 10 ms, and their fit checked in 24 ms — 20
+overlaps of 80 mm³ found, as set.
 
 | | What | Tested by |
 |---|---|---|

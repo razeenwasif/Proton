@@ -10,12 +10,14 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { createSketcher, fresh } from "./cad-sketch.js";
+import { asmText, historyHtml, lineIndex, offsets, relPath, settingsHtml } from "./cad-assembly.js";
 
 /** @typedef {import("./bindings/CadFound").CadFound} Found */
 /** @typedef {import("./bindings/CadPartView").CadPartView} PartView */
 /** @typedef {import("./bindings/CadStep").CadStep} Step */
 /** @typedef {import("./bindings/CadSketchView").CadSketchView} SketchView */
 /** @typedef {import("./bindings/CadOp").CadOp} Op */
+/** @typedef {import("./bindings/CadAssemblyView").CadAssemblyView} AssemblyView */
 
 /** How long typing must stop before the text is sent. */
 const TEXT_WAIT = 300;
@@ -137,6 +139,10 @@ export function createCad(host) {
     /** Why there is no 3D view, if there is none. @type {string | null} */ noView: null,
     /** Edges picked in the view to round or chamfer, by body and name. @type {{body: string, pick: string}[]} */ edges: [],
     /** The radius or distance they get. */ edgeSize: "1",
+    /** The assembly open, if one is. @type {AssemblyView | null} */ asm: null,
+    /** Faces picked in an assembly to mate, by reference. @type {string[]} */ picks: [],
+    /** The exploded view shown, by name. @type {string | null} */ exploded: null,
+    /** A mate's value as typed. */ mateSize: "",
   };
   /** @type {Awaited<ReturnType<typeof import("./cad-view.js").mountView>> | null} */
   let view = null;
@@ -144,10 +150,10 @@ export function createCad(host) {
   let viewing = null;
   let textTimer = 0;
 
-  const generation = () => state.part?.generation ?? 0;
+  const generation = () => state.part?.generation ?? state.asm?.generation ?? 0;
   /** @param {Op[]} ops */
   const edit = (ops) => {
-    if (state.part) host.dispatch({ type: "cadEdit", generation: generation(), ops });
+    if (state.part || state.asm) host.dispatch({ type: "cadEdit", generation: generation(), ops });
   };
   const status = (/** @type {string} */ text) => (els.status.textContent = text);
   const sketchView = () => state.part?.sketches.find((s) => s.index === state.sketching) ?? null;
@@ -168,7 +174,7 @@ export function createCad(host) {
 
   function renderList() {
     const rows = state.parts
-      .map((f) => `<button class="xl-row${f.path === state.part?.path ? " on" : ""}" data-cad-open="${esc(f.path)}" title="${esc(f.path)}">${icon("cad")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">${esc(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")}</span></button>`)
+      .map((f) => `<button class="xl-row${f.path === (state.part ?? state.asm)?.path ? " on" : ""}" data-cad-open="${esc(f.path)}" title="${esc(f.path)}">${icon(f.kind === "assembly" ? "pattern" : "cad")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">${esc(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")}</span></button>`)
       .join("");
     els.list.innerHTML = rows || `<p class="xl-empty">No .part files in this folder yet.</p>`;
     els.found.innerHTML = rows;
@@ -176,9 +182,19 @@ export function createCad(host) {
 
   /* ── the part ─────────────────────────────────────────────────── */
 
-  const names = () => [...(state.part?.steps ?? []).map((s) => s.name), ...(state.part?.params ?? []).map((p) => p.name)];
+  const names = () => [
+    ...(state.part?.steps ?? []).map((s) => s.name),
+    ...(state.part?.params ?? []).map((p) => p.name),
+    ...(state.asm?.instances ?? []).map((i) => i.name),
+    ...(state.asm?.mates ?? []).map((m) => m.name),
+    ...(state.asm?.explodes ?? []).map((e) => e.name),
+  ];
 
   function renderHistory() {
+    if (state.asm) {
+      els.history.innerHTML = historyHtml(state.asm, state.step);
+      return;
+    }
     const p = state.part;
     if (!p) {
       els.history.innerHTML = "";
@@ -204,6 +220,10 @@ export function createCad(host) {
   const options = (/** @type {string[]} */ xs, /** @type {string | null | undefined} */ on) => xs.map((x) => `<option${x === on ? " selected" : ""}>${esc(x)}</option>`).join("");
 
   function renderStep() {
+    if (state.asm) {
+      els.step.innerHTML = settingsHtml(state.asm, { step: state.step, picks: state.picks, exploded: state.exploded, found: state.parts, size: state.mateSize });
+      return;
+    }
     const p = state.part;
     if (!p) {
       els.step.innerHTML = "";
@@ -339,7 +359,57 @@ export function createCad(host) {
     void t;
   }
 
+  /** A setting of the instance, mate or view chosen changed: its line
+   *  written again. */
+  function changedAssembly() {
+    const a = state.asm;
+    if (!a) return;
+    const v = (/** @type {string} */ k) => /** @type {HTMLInputElement | null} */ (els.step.querySelector(`[data-cad-a-f="${k}"]`));
+    const inst = a.instances.find((i) => i.index === state.step);
+    const mate = a.mates.find((m) => m.index === state.step);
+    const view3 = a.explodes.find((e) => e.index === state.step);
+    /** @type {Op[]} */
+    const ops = [];
+    if (inst) {
+      const name = v("name")?.value.trim() || inst.name;
+      const at = [0, 1, 2].map((k) => Number(v(`at${k}`)?.value ?? inst.at[k]) || 0);
+      const turn = [0, 1, 2].map((k) => Number(v(`turn${k}`)?.value ?? inst.turn[k]) || 0);
+      const ground = !!v("ground")?.checked;
+      const place = lineIndex(a.text, `place ${inst.name} `);
+      const held = lineIndex(a.text, `ground ${inst.name}`);
+      const moved = at.some((x, k) => x !== inst.at[k]) || turn.some((x, k) => x !== inst.turn[k]);
+      if (moved) ops.push(place >= 0 ? { op: "replace", index: place, text: asmText.place(inst.name, at, turn) } : { op: "insert", at: inst.index + 1, text: asmText.place(inst.name, at, turn) });
+      if (ground !== inst.ground) {
+        if (ground) ops.push({ op: "insert", at: inst.index + 1, text: asmText.ground(inst.name) });
+        else if (held >= 0) ops.push({ op: "remove", index: held });
+      }
+      if (name !== inst.name) ops.push({ op: "replace", index: inst.index, text: asmText.instance(name, inst.path, inst.kind === "assembly" ? "assembly" : "part") });
+    } else if (mate) {
+      const text = asmText.mate(v("name")?.value.trim() || mate.name, v("kind")?.value ?? mate.kind, v("a")?.value.trim() || mate.a, v("b")?.value.trim() || mate.b, v("value")?.value ?? mate.value ?? "");
+      if (text !== mate.text) ops.push({ op: "replace", index: mate.index, text });
+    } else if (view3) {
+      const text = v("line")?.value.trim().replace(/\s*\n\s*/g, " ") ?? "";
+      if (text && text !== view3.text) ops.push({ op: "replace", index: view3.index, text });
+    }
+    if (ops.length) edit(ops);
+  }
+
   function renderHead() {
+    if (state.asm) {
+      const a = state.asm;
+      els.title.textContent = a.title ?? a.name;
+      els.title.title = a.path;
+      els.dirty.hidden = !a.dirty;
+      els.undo.disabled = !a.canUndo;
+      els.redo.disabled = !a.canRedo;
+      els.tools.hidden = true;
+      els.crumb.textContent = `${a.bom.reduce((n, r) => n + r.count, 0)} parts · ${!a.solved ? "the mates cannot all hold" : a.dof === 0 ? "fully held" : `${a.dof} freedom${a.dof === 1 ? "" : "s"} left`}${state.exploded ? ` · exploded: ${state.exploded}` : ""}`;
+      els.crumb.classList.toggle("bad", !a.solved);
+      const problems = a.error ? [`Line ${a.error.line} does not read: ${a.error.message} — what is shown is what it was saved as.`] : a.errors.map((d) => `Line ${d.line}: ${d.message}`);
+      els.banner.hidden = !problems.length;
+      els.banner.innerHTML = problems.slice(0, 3).map((x) => `<div>${esc(x)}</div>`).join("") + (problems.length > 3 ? `<div>…and ${problems.length - 3} more</div>` : "");
+      return;
+    }
     const p = state.part;
     if (!p) return;
     els.title.textContent = p.title ?? p.name;
@@ -360,11 +430,11 @@ export function createCad(host) {
   }
 
   function renderText() {
-    const p = state.part;
+    const p = state.part ?? state.asm;
     if (!p) return;
     const focused = document.activeElement === els.text;
     if (els.text.value !== p.text && !(focused && Date.now() - state.typedAt < 1500)) els.text.value = p.text;
-    els.diag.innerHTML = [p.error, ...p.errors, ...p.notes].filter(Boolean).map((d) => `<div class="${d === p.error || p.errors.includes(/** @type {any} */ (d)) ? "bad" : "note"}">${d?.line}: ${esc(d?.message ?? "")}</div>`).join("");
+    els.diag.innerHTML = [p.error, ...p.errors, ...("notes" in p ? p.notes : [])].filter(Boolean).map((d) => `<div class="${d === p.error || p.errors.includes(/** @type {any} */ (d)) ? "bad" : "note"}">${d?.line}: ${esc(d?.message ?? "")}</div>`).join("");
   }
 
   function renderTabs() {
@@ -398,6 +468,18 @@ export function createCad(host) {
   /** A face clicked in the view, or nothing: chosen, or for a shell chosen
    *  opened or closed again. @param {string | null} body @param {number | null} face @param {number[] | null} point */
   function pickFace(body, face, point) {
+    if (state.asm) {
+      const f = body == null || face == null ? null : state.asm.bodies.find((b) => b.name === body)?.faces[face];
+      if (!f || body == null) return;
+      const ref = `${body}.${f.name}`;
+      if (state.picks.includes(ref)) state.picks = state.picks.filter((x) => x !== ref);
+      else if (state.picks.length && state.picks[0].split(".")[0] === body.split(".")[0]) state.picks = [ref];
+      else state.picks = [...state.picks.slice(0, 1), ref];
+      state.step = null;
+      renderStep();
+      renderStage();
+      return;
+    }
     const f = body == null || face == null ? null : state.part?.bodies.find((b) => b.name === body)?.faces[face];
     const chosen = state.part?.steps.find((x) => x.index === state.step);
     // A shell chosen: the face opened, or closed again.
@@ -411,6 +493,27 @@ export function createCad(host) {
   }
 
   function renderStage() {
+    if (state.asm) {
+      const a = state.asm;
+      els.sketch.toggleAttribute("hidden", true);
+      els.canvas.hidden = !!state.noView;
+      if (!view) return void ensureView();
+      /** @type {[string, number][]} */
+      const marked = [];
+      for (const ref of state.picks) {
+        for (const b of a.bodies) {
+          if (!ref.startsWith(`${b.name}.`)) continue;
+          const f = b.faces.findIndex((x) => x.name === ref.slice(b.name.length + 1));
+          if (f >= 0) marked.push([b.name, f]);
+        }
+      }
+      view.show(/** @type {any} */ ({ bodies: a.bodies, sketches: [], bounds: a.bounds }), { offsets: offsets(a, state.exploded), marked });
+      if (state.fitted !== a.generation) {
+        state.fitted = a.generation;
+        view.fit(a.bounds);
+      }
+      return;
+    }
     const p = state.part;
     if (!p) return;
     const sv = sketchView();
@@ -436,7 +539,9 @@ export function createCad(host) {
   }
 
   function render() {
-    const p = state.part;
+    const p = state.part ?? state.asm;
+    ws.querySelectorAll("[data-cad-part-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !!state.asm));
+    ws.querySelectorAll("[data-cad-asm-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.asm));
     els.home.hidden = !!p;
     els.part.hidden = !p;
     els.list.hidden = !!p;
@@ -588,6 +693,52 @@ export function createCad(host) {
       else render();
       return;
     }
+    const kindBtn = /** @type {HTMLElement | null} */ (t.closest("[data-cad-mate-kind]"));
+    if (kindBtn && state.asm && state.picks.length === 2) {
+      const kind = kindBtn.dataset.cadMateKind ?? "planar";
+      const [a, b] = kind === "fastened" ? state.picks.map((x) => x.split(".")[0]) : state.picks;
+      const name = fresh("m", names());
+      state.picks = [];
+      state.want = { name, open: false };
+      return edit([{ op: "insert", at: null, text: asmText.mate(name, kind, a, b, state.mateSize) }]);
+    }
+    if (t.closest("[data-cad-unpick]")) {
+      state.picks = [];
+      renderStep();
+      return renderStage();
+    }
+    if (t.closest("[data-cad-fit-check]")) return void host.dispatch({ type: "cadFit", generation: generation() });
+    const ex = /** @type {HTMLElement | null} */ (t.closest("[data-cad-explode]"));
+    if (ex) {
+      state.exploded = state.exploded === ex.dataset.cadExplode ? null : ex.dataset.cadExplode ?? null;
+      return render();
+    }
+    const asmAdd = /** @type {HTMLElement | null} */ (t.closest("[data-cad-asm-add]"));
+    if (asmAdd && state.asm) {
+      const what = asmAdd.dataset.cadAsmAdd;
+      if (what === "fit") return void host.dispatch({ type: "cadFit", generation: generation() });
+      if (what === "explode") {
+        const last = state.asm.instances.at(-1);
+        if (!last) return status("Add a part first.");
+        const name = fresh("apart", names());
+        state.want = { name, open: false };
+        return edit([{ op: "insert", at: null, text: `explode ${name} ${last.name} by (0, 0, 50)` }]);
+      }
+      state.step = null;
+      state.picks = [];
+      render();
+      /** @type {HTMLElement | null} */ (els.step.querySelector("[data-cad-add-instance] select"))?.focus();
+      return;
+    }
+    const removeAsm = /** @type {HTMLElement | null} */ (t.closest("[data-cad-remove]"));
+    if (removeAsm && state.asm) {
+      // An instance goes with its placement and its holding still.
+      const i = Number(removeAsm.dataset.cadRemove);
+      const inst = state.asm.instances.find((x) => x.index === i);
+      const gone = [i, ...(inst ? [lineIndex(state.asm.text, `place ${inst.name} `), lineIndex(state.asm.text, `ground ${inst.name}`)] : [])].filter((x) => x >= 0).sort((x, y) => y - x);
+      state.step = null;
+      return edit(gone.map((index) => ({ op: "remove", index })));
+    }
     if (t.closest("[data-cad-round]")) return addStep("fillet");
     if (t.closest("[data-cad-chamfer]")) return addStep("chamfer");
     if (t.closest("[data-cad-unpick-edges]")) {
@@ -646,7 +797,10 @@ export function createCad(host) {
       leaveSketch();
       return void host.dispatch({ type: "cadClose", discard: false });
     }
-    if (t.closest("[data-cad-fit]")) return state.sketching != null ? sketcher.fit() : state.part && view?.fit(state.part.bounds);
+    if (t.closest("[data-cad-fit]")) {
+      const d = state.part ?? state.asm;
+      return state.sketching != null ? sketcher.fit() : d && view?.fit(d.bounds);
+    }
     const tab = /** @type {HTMLElement | null} */ (t.closest("[data-cad-tab]"));
     if (tab) {
       state.tab = /** @type {any} */ (tab.dataset.cadTab);
@@ -663,6 +817,8 @@ export function createCad(host) {
   ws.addEventListener("change", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
     if (t.matches("[data-cad-f]")) changed(t);
+    if (t.matches("[data-cad-a-f]")) changedAssembly();
+    if (t.matches("[data-cad-mate-value]")) state.mateSize = /** @type {HTMLInputElement} */ (t).value;
     if (t.matches("[data-cad-edge-size]")) state.edgeSize = /** @type {HTMLInputElement} */ (t).value;
     if (t.matches("[data-cad-param-value]")) {
       const name = /** @type {HTMLElement} */ (t).dataset.cadParamValue ?? "";
@@ -676,7 +832,17 @@ export function createCad(host) {
     e.preventDefault();
     if (form === els.form) {
       const name = /** @type {HTMLInputElement} */ (form.querySelector("input")).value.trim();
-      if (name) host.dispatch({ type: "cadNew", name });
+      const kind = /** @type {HTMLSelectElement | null} */ (form.querySelector("[data-cad-kind]"))?.value;
+      if (name) host.dispatch({ type: kind === "assembly" ? "cadNewAssembly" : "cadNew", name });
+    } else if (form.matches("[data-cad-add-instance]") && state.asm) {
+      const sel = /** @type {HTMLSelectElement} */ (form.elements.namedItem("path"));
+      const found = state.parts.find((f) => f.path === sel.value);
+      if (!found) return status("Choose a part to add.");
+      const typed = /** @type {HTMLInputElement} */ (form.elements.namedItem("name")).value.trim();
+      const base = (typed || found.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^([0-9])/, "_$1");
+      const name = names().includes(base) ? fresh(base, names()) : base;
+      state.want = { name, open: false };
+      edit([{ op: "insert", at: null, text: asmText.instance(name, relPath(state.asm.path, found.path), found.kind === "assembly" ? "assembly" : "part") }]);
     } else if (form.matches("[data-cad-param-form]")) {
       const name = /** @type {HTMLInputElement} */ (form.elements.namedItem("name")).value.trim();
       const value = /** @type {HTMLInputElement} */ (form.elements.namedItem("value")).value.trim();
@@ -694,18 +860,19 @@ export function createCad(host) {
   ws.addEventListener("keydown", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
     const typing = t.closest("input, textarea, select");
-    if (state.part && e.metaKey && e.key.toLowerCase() === "s") {
+    const open = state.part ?? state.asm;
+    if (open && e.metaKey && e.key.toLowerCase() === "s") {
       e.preventDefault();
       sendText();
       host.dispatch({ type: "cadSave" });
       return;
     }
-    if (state.part && e.metaKey && e.key.toLowerCase() === "z" && !typing) {
+    if (open && e.metaKey && e.key.toLowerCase() === "z" && !typing) {
       e.preventDefault();
       host.dispatch({ type: e.shiftKey ? "cadRedo" : "cadUndo", generation: generation() });
       return;
     }
-    if (typing || !state.part) return;
+    if (typing || !open) return;
     if (state.sketching != null && sketcher.key(e)) {
       e.preventDefault();
       e.stopPropagation();
@@ -714,7 +881,7 @@ export function createCad(host) {
     }
     if (state.sketching == null && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "f") {
       e.preventDefault();
-      view?.fit(state.part.bounds);
+      view?.fit(open.bounds);
     }
   });
 
@@ -731,16 +898,52 @@ export function createCad(host) {
       state.parts = e.parts;
       renderList();
     },
+    /** @param {{assembly: AssemblyView | null}} e */
+    assembly(e) {
+      const was = state.asm?.generation;
+      state.asm = e.assembly;
+      if (!e.assembly) {
+        if (was != null) {
+          state.step = null;
+          state.picks = [];
+          state.exploded = null;
+        }
+      } else {
+        state.part = null;
+        if (was !== e.assembly.generation) {
+          state.step = null;
+          state.picks = [];
+          state.exploded = null;
+          state.sketching = null;
+          sketcher.leave();
+        }
+        const want = state.want;
+        const all = [...e.assembly.instances, ...e.assembly.mates, ...e.assembly.explodes];
+        const got = want && all.find((x) => x.name === want.name);
+        if (want && got) {
+          state.want = null;
+          state.step = got.index;
+        }
+        if (state.step != null && !all.some((x) => x.index === state.step)) state.step = null;
+        if (state.exploded && !e.assembly.explodes.some((x) => x.name === state.exploded)) state.exploded = null;
+      }
+      render();
+    },
     /** @param {{part: PartView | null}} e */
     part(e) {
       const was = state.part?.generation;
       state.part = e.part;
       if (!e.part) {
-        state.step = null;
-        state.sketching = null;
-        state.face = null;
-        sketcher.leave();
+        // No part: closed — or an assembly open instead, whose own event
+        // says what is chosen in it.
+        if (was != null) {
+          state.step = null;
+          state.sketching = null;
+          state.face = null;
+          sketcher.leave();
+        }
       } else {
+        state.asm = null;
         if (was !== e.part.generation) {
           state.step = null;
           state.sketching = null;
@@ -762,13 +965,13 @@ export function createCad(host) {
       render();
     },
     shown() {
-      if (state.part) requestAnimationFrame(() => {
+      if (state.part || state.asm) requestAnimationFrame(() => {
         view?.resize();
         if (state.sketching != null) sketcher.resize();
       });
     },
     debug() {
-      return { part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
+      return { asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
     },
   };
 }

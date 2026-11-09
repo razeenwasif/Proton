@@ -241,7 +241,12 @@ is typed over in place and a point dragged with the solver holding the rest,
 and the solver says how much is still free; in 3D an edge under the pointer
 is picked to round or chamfer. Every edit is a line of the file,
 which the Text tab shows and takes typing. Bodies are written as STL or 3MF
-for a printer, or as STEP, exact, for a machinist or another CAD program. Edits are held until ⌘S.
+for a printer, or as STEP, exact, for a machinist or another CAD program.
+An `.assembly` places parts by mates — two faces picked and held flat,
+flush, on one axis, a gap or an angle apart — solved by the same solver,
+which says what can still move; it checks where parts overlap or come too
+near, lists the parts in a bill of materials, and takes itself apart for an
+exploded view. Edits are held until ⌘S.
 
 ## The three things that hold it together
 

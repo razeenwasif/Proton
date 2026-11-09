@@ -754,7 +754,16 @@ pub enum Command {
     CadNew {
         name: String,
     },
-    /// A `.part` of the project opened.
+    /// An assembly made: `name.assembly`, its head and nothing in it.
+    CadNewAssembly {
+        name: String,
+    },
+    /// The open assembly's parts checked for overlaps and for gaps nearer
+    /// than its clearance.
+    CadFit {
+        generation: u32,
+    },
+    /// A `.part` or `.assembly` of the project opened.
     CadOpen {
         path: String,
     },
@@ -1360,13 +1369,17 @@ pub enum Event {
     CellSelected {
         index: usize,
     },
-    /// The project's `.part` files, for CAD's home page.
+    /// The project's `.part` and `.assembly` files, for CAD's home page.
     CadHome {
         parts: Vec<crate::cad::CadFound>,
     },
     /// The part open, built and drawn — or none.
     CadPart {
         part: Option<Box<crate::cad::CadPartView>>,
+    },
+    /// The assembly open, solved and drawn — or none.
+    CadAssembly {
+        assembly: Option<Box<crate::cad_assembly::CadAssemblyView>>,
     },
     /// The project's `.logic`, `.proof` and `.l4f` files, for Logic's home page.
     LogicHome {

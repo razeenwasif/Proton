@@ -122,3 +122,22 @@ test('rounds, chamfers, shells, sweeps and lofts are written as the language has
   assert.deepEqual(toggled(['a', 'b'], 'a'), ['b']);
   assert.deepEqual(toggled(['a'], 'b'), ['a', 'b']);
 });
+
+test('an assembly\'s lines are written as its language has them', async () => {
+  const {asmText, relPath, lineIndex, offsets} = await import('../../ui/cad-assembly.js');
+  const {ASSEMBLY} = await import('../../ui/preview-cad-assembly.js');
+  assert.equal(asmText.instance('pin', 'parts/pin.part'), 'part pin from "parts/pin.part"');
+  assert.equal(asmText.instance('loop', 'loop.assembly', 'assembly'), 'assembly loop from "loop.assembly"');
+  assert.equal(asmText.place('pin', [1.5, 0, -2]), 'place pin at (1.5, 0, -2)');
+  assert.equal(asmText.place('pin', [0, 0, 0], [0, 0, 90.0000000001]), 'place pin at (0, 0, 0) turn (0, 0, 90)');
+  assert.equal(asmText.mate('m', 'planar', 'a.top', 'b.bottom', ''), 'mate m planar a.top to b.bottom');
+  assert.equal(asmText.mate('m', 'planar', 'a.top', 'b.bottom', '2'), 'mate m planar a.top to b.bottom offset 2');
+  assert.equal(asmText.mate('m', 'angle', 'a.top', 'b.top', ''), 'mate m angle a.top to b.top = 90');
+  assert.equal(asmText.mate('m', 'concentric', 'a.side(c)', 'b.side(c)', '4'), 'mate m concentric a.side(c) to b.side(c)');
+  assert.equal(relPath('rig.assembly', 'parts/pin.part'), 'parts/pin.part');
+  assert.equal(relPath('builds/t1/rig.assembly', 'parts/pin.part'), '../../parts/pin.part');
+  assert.equal(relPath('builds/rig.assembly', 'builds/sub/pin.part'), 'sub/pin.part');
+  assert.equal(lineIndex('a\n  place pin at (0, 0, 0)\nb', 'place pin '), 1);
+  assert.deepEqual(offsets(ASSEMBLY, 'apart'), {block: [0, 0, 30], pin: [0, 0, 60]});
+  assert.deepEqual(offsets(ASSEMBLY, null), {});
+});

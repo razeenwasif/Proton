@@ -394,48 +394,49 @@ fn sketch_item(p: &mut Cursor) -> Result<SketchItem, Diag> {
     Ok(SketchItem::Constraint(Constraint { kind, refs, value }))
 }
 
-struct Cursor<'a> {
-    toks: &'a [Token],
-    i: usize,
-    line: usize,
-    text: &'a str,
-    end_col: usize,
+/// A line's tokens being read: shared with the `.assembly` language.
+pub(crate) struct Cursor<'a> {
+    pub(crate) toks: &'a [Token],
+    pub(crate) i: usize,
+    pub(crate) line: usize,
+    pub(crate) text: &'a str,
+    pub(crate) end_col: usize,
 }
 
 impl Cursor<'_> {
-    fn col(&self) -> usize {
+    pub(crate) fn col(&self) -> usize {
         self.toks.get(self.i).map_or(self.end_col, |t| t.col)
     }
 
-    fn err_here(&self, msg: impl Into<String>) -> Diag {
+    pub(crate) fn err_here(&self, msg: impl Into<String>) -> Diag {
         Diag::new(self.line, self.col(), msg)
     }
 
     /// A mistake at the token `back` before the next.
-    fn err_at(&self, back: usize, msg: impl Into<String>) -> Diag {
+    pub(crate) fn err_at(&self, back: usize, msg: impl Into<String>) -> Diag {
         let at = self.i.saturating_sub(back).min(self.toks.len());
         Diag::new(self.line, self.toks.get(at).map_or(self.end_col, |t| t.col), msg)
     }
 
-    fn at_end(&self) -> bool {
+    pub(crate) fn at_end(&self) -> bool {
         self.i >= self.toks.len()
     }
 
-    fn next(&mut self) -> Option<Tok> {
+    pub(crate) fn next(&mut self) -> Option<Tok> {
         let t = self.toks.get(self.i)?.tok.clone();
         self.i += 1;
         Some(t)
     }
 
-    fn peek_sym(&self, c: char) -> bool {
+    pub(crate) fn peek_sym(&self, c: char) -> bool {
         matches!(self.toks.get(self.i), Some(Token { tok: Tok::Sym(s), .. }) if *s == c)
     }
 
-    fn peek_ident(&self, w: &str) -> bool {
+    pub(crate) fn peek_ident(&self, w: &str) -> bool {
         matches!(self.toks.get(self.i), Some(Token { tok: Tok::Ident(s), .. }) if s == w)
     }
 
-    fn ident(&mut self, what: &str) -> Result<String, Diag> {
+    pub(crate) fn ident(&mut self, what: &str) -> Result<String, Diag> {
         match self.toks.get(self.i) {
             Some(Token { tok: Tok::Ident(s), .. }) => {
                 self.i += 1;
@@ -445,7 +446,7 @@ impl Cursor<'_> {
         }
     }
 
-    fn keyword(&mut self, w: &str) -> Result<(), Diag> {
+    pub(crate) fn keyword(&mut self, w: &str) -> Result<(), Diag> {
         if self.peek_ident(w) {
             self.i += 1;
             Ok(())
@@ -454,7 +455,7 @@ impl Cursor<'_> {
         }
     }
 
-    fn sym(&mut self, c: char) -> Result<(), Diag> {
+    pub(crate) fn sym(&mut self, c: char) -> Result<(), Diag> {
         if self.peek_sym(c) {
             self.i += 1;
             Ok(())
@@ -463,7 +464,7 @@ impl Cursor<'_> {
         }
     }
 
-    fn done(&self) -> Result<(), Diag> {
+    pub(crate) fn done(&self) -> Result<(), Diag> {
         if self.at_end() {
             Ok(())
         } else {
@@ -472,7 +473,7 @@ impl Cursor<'_> {
     }
 
     /// The rest of the line as written, before its comment; `None` if empty.
-    fn rest(&mut self, note: Option<&str>) -> Option<String> {
+    pub(crate) fn rest(&mut self, note: Option<&str>) -> Option<String> {
         let at = self.toks.get(self.i)?.at;
         let end = note.map_or(self.text.len(), |n| self.text.len() - n.len() - 1);
         self.i = self.toks.len();
@@ -481,7 +482,7 @@ impl Cursor<'_> {
     }
 
     /// `name`, `name.part`, `name.2`, `plate.side(r.left)`.
-    fn path(&mut self, what: &str) -> Result<String, Diag> {
+    pub(crate) fn path(&mut self, what: &str) -> Result<String, Diag> {
         let mut s = self.ident(what)?;
         loop {
             if self.peek_sym('.') {
@@ -504,7 +505,7 @@ impl Cursor<'_> {
 
     /// Whether the next token starts where the last one ended: `side(l2)`,
     /// not `l1.end (80, 40)`.
-    fn touching(&self) -> bool {
+    pub(crate) fn touching(&self) -> bool {
         let (Some(prev), Some(next)) = (self.i.checked_sub(1).and_then(|i| self.toks.get(i)), self.toks.get(self.i)) else { return false };
         let len = match &prev.tok {
             Tok::Ident(w) => w.chars().count(),
@@ -515,7 +516,7 @@ impl Cursor<'_> {
     }
 
     /// Edges, a comma between: `F & G`, `B.edges`, `F.edges(parallel z)`.
-    fn edge_picks(&mut self) -> Result<Vec<EdgePick>, Diag> {
+    pub(crate) fn edge_picks(&mut self) -> Result<Vec<EdgePick>, Diag> {
         let mut out = vec![self.edge_pick()?];
         while self.peek_sym(',') {
             self.i += 1;
@@ -524,7 +525,7 @@ impl Cursor<'_> {
         Ok(out)
     }
 
-    fn edge_pick(&mut self) -> Result<EdgePick, Diag> {
+    pub(crate) fn edge_pick(&mut self) -> Result<EdgePick, Diag> {
         let a = self.path("a face, or a body's or face's `.edges`")?;
         if self.peek_sym('&') {
             self.i += 1;
@@ -561,7 +562,7 @@ impl Cursor<'_> {
     }
 
     /// `a, b, c`: names, a comma between.
-    fn names(&mut self, what: &str) -> Result<Vec<String>, Diag> {
+    pub(crate) fn names(&mut self, what: &str) -> Result<Vec<String>, Diag> {
         let mut out = vec![self.ident(what)?];
         while self.peek_sym(',') {
             self.i += 1;
@@ -571,7 +572,7 @@ impl Cursor<'_> {
     }
 
     /// `join BODY`, `cut BODY` or `intersect BODY`, if it is there.
-    fn made_into(&mut self) -> Result<Option<(Combine, String)>, Diag> {
+    pub(crate) fn made_into(&mut self) -> Result<Option<(Combine, String)>, Diag> {
         let Some(Token { tok: Tok::Ident(w), .. }) = self.toks.get(self.i) else { return Ok(None) };
         let Some(how) = Combine::from_word(w) else { return Ok(None) };
         self.i += 1;
@@ -580,7 +581,7 @@ impl Cursor<'_> {
 
     /// The line as written from here to the first of `stop`, as one word:
     /// a size like `M2.5` or `G1/4`.
-    fn raw_until(&mut self, stop: &[&str], what: &str) -> Result<String, Diag> {
+    pub(crate) fn raw_until(&mut self, stop: &[&str], what: &str) -> Result<String, Diag> {
         let from = self.i;
         while self.i < self.toks.len() && !stop.iter().any(|w| self.peek_ident(w)) {
             self.i += 1;
@@ -594,7 +595,7 @@ impl Cursor<'_> {
     }
 
     /// A number, with a minus if it has one.
-    fn signed(&mut self) -> Result<f64, Diag> {
+    pub(crate) fn signed(&mut self) -> Result<f64, Diag> {
         let neg = self.peek_sym('-');
         if neg {
             self.i += 1;
@@ -606,7 +607,7 @@ impl Cursor<'_> {
     }
 
     /// `(x, y)`
-    fn pair(&mut self) -> Result<(f64, f64), Diag> {
+    pub(crate) fn pair(&mut self) -> Result<(f64, f64), Diag> {
         self.sym('(')?;
         let x = self.signed()?;
         self.sym(',')?;
@@ -615,7 +616,7 @@ impl Cursor<'_> {
         Ok((x, y))
     }
 
-    fn spot(&mut self) -> Result<Spot, Diag> {
+    pub(crate) fn spot(&mut self) -> Result<Spot, Diag> {
         if self.peek_sym('(') {
             let (x, y) = self.pair()?;
             Ok(Spot::At(x, y))
@@ -639,7 +640,7 @@ impl Cursor<'_> {
         }
     }
 
-    fn term(&mut self) -> Result<Expr, Diag> {
+    pub(crate) fn term(&mut self) -> Result<Expr, Diag> {
         let mut e = self.unary()?;
         loop {
             let op = if self.peek_sym('*') {
@@ -654,7 +655,7 @@ impl Cursor<'_> {
         }
     }
 
-    fn unary(&mut self) -> Result<Expr, Diag> {
+    pub(crate) fn unary(&mut self) -> Result<Expr, Diag> {
         if self.peek_sym('-') {
             self.i += 1;
             return Ok(Expr::Neg(Box::new(self.unary()?)));

@@ -42,7 +42,7 @@ use crate::workspace::notice;
 /// A part's file ends so.
 pub const EXTENSION: &str = "part";
 
-/// A part found in the folder, for the home page.
+/// A part or assembly found in the folder, for the home page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/")]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +50,8 @@ pub struct CadFound {
     /// As the project names it.
     pub path: String,
     pub name: String,
+    /// `part` or `assembly`.
+    pub kind: String,
 }
 
 /// Something wrong, or not built yet, and where: lines and columns from 1.
@@ -295,8 +297,20 @@ pub enum CadOp {
     Param { name: String, value: String },
 }
 
+/// What kind of file is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Doc {
+    Part,
+    Assembly,
+}
+
 #[derive(Debug)]
 struct Open {
+    kind: Doc,
+    /// The project it is in: an assembly reads its parts from there.
+    root: PathBuf,
+    /// An assembly's last fit check, until it changes.
+    clashes: Option<Vec<crate::cad_assembly::CadClash>>,
     path: PathBuf,
     shown: String,
     name: String,
@@ -318,6 +332,7 @@ struct Open {
 pub struct Cads {
     open: Option<Open>,
     generations: u32,
+    parts: crate::cad_assembly::PartCache,
 }
 
 const START: &str = "units mm\n";
@@ -328,12 +343,32 @@ impl Cads {
     }
 
     pub fn events(&mut self, root: &Path) -> Vec<Event> {
-        vec![Event::CadHome { parts: find(root) }, self.part_event()]
+        let mut out = vec![Event::CadHome { parts: find(root) }];
+        out.extend(self.doc_events());
+        out
     }
 
     pub fn apply(&mut self, root: &Path, command: Command) -> Vec<Event> {
         match command {
-            Command::CadNew { name } => self.new_part(root, &name),
+            Command::CadNew { name } => self.new_doc(root, &name, Doc::Part),
+            Command::CadNewAssembly { name } => self.new_doc(root, &name, Doc::Assembly),
+            Command::CadFit { generation } => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation && o.kind == Doc::Assembly) else { return Vec::new() };
+                let a = match proton_cad::assembly::read(&open.text) {
+                    Ok(a) => a,
+                    Err(d) => return vec![notice(format!("line {} does not read — mend it first: {}", d.line, d.message), NoticeLevel::Warn)],
+                };
+                let m = self.parts.build(&a, &open.path, &open.root);
+                let found = crate::cad_assembly::clashes(&m);
+                let said = match (found.iter().filter(|c| c.overlap).count(), found.iter().filter(|c| !c.overlap).count()) {
+                    (0, 0) => "everything fits".to_string(),
+                    (o, g) => format!("{o} overlapping, {g} nearer than the clearance"),
+                };
+                open.clashes = Some(found);
+                let mut out = vec![notice(said, NoticeLevel::Info)];
+                out.extend(self.doc_events());
+                out
+            }
             Command::CadOpen { path } => {
                 let file = match inside(root, &path) {
                     Ok(f) => f,
@@ -347,8 +382,9 @@ impl Cads {
                 }
                 match std::fs::read_to_string(&file) {
                     Ok(text) => {
-                        self.show(root, file, text);
-                        vec![self.part_event()]
+                        let kind = if file.extension().and_then(|e| e.to_str()) == Some(crate::cad_assembly::EXTENSION) { Doc::Assembly } else { Doc::Part };
+                        self.show(root, file, text, kind);
+                        self.doc_events()
                     }
                     Err(e) => vec![notice(format!("{path}: {e}"), NoticeLevel::Warn)],
                 }
@@ -375,9 +411,31 @@ impl Cads {
                     open.undo.push(open.text.clone());
                     open.redo.clear();
                 }
+                open.clashes = None;
                 open.text = text;
                 open.typing = true;
-                vec![self.part_event()]
+                self.doc_events()
+            }
+            Command::CadEdit { generation, ops } if self.open.as_ref().is_some_and(|o| o.kind == Doc::Assembly) => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
+                let mut a = match proton_cad::assembly::read(&open.text) {
+                    Ok(a) => a,
+                    Err(d) => return vec![notice(format!("line {} does not read — mend it first: {}", d.line, d.message), NoticeLevel::Warn)],
+                };
+                for op in ops {
+                    if let Err(why) = crate::cad_assembly::edit(&mut a, op) {
+                        let mut out = vec![notice(why, NoticeLevel::Warn)];
+                        out.extend(self.doc_events());
+                        return out;
+                    }
+                }
+                // Solved, and every placement the solver moved written back.
+                let m = self.parts.build(&a, &open.path, &open.root);
+                proton_cad::assembly::write_back(&mut a, &m);
+                let text = proton_cad::assembly::write(&a);
+                open.clashes = None;
+                record(open, text);
+                self.doc_events()
             }
             Command::CadEdit { generation, ops } => {
                 let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
@@ -387,16 +445,18 @@ impl Cads {
                 };
                 for op in ops {
                     if let Err(why) = edit(&mut p, op) {
-                        return vec![notice(why, NoticeLevel::Warn), self.part_event()];
+                        let mut out = vec![notice(why, NoticeLevel::Warn)];
+                        out.extend(self.doc_events());
+                        return out;
                     }
                 }
                 solve_all(&mut p);
                 let text = part::write(&p);
                 record(open, text);
-                vec![self.part_event()]
+                self.doc_events()
             }
             Command::CadDrag { generation, sketch, point, x, y, done } => {
-                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation && o.kind == Doc::Part) else { return Vec::new() };
                 let Ok(mut p) = part::read(&open.text) else { return Vec::new() };
                 let (env, _) = pexpr::params(&p);
                 let Some(sk) = p.items.iter_mut().find_map(|n| match &mut n.item {
@@ -423,7 +483,7 @@ impl Cads {
                     }
                 }
                 if moved || done {
-                    vec![self.part_event()]
+                    self.doc_events()
                 } else {
                     Vec::new()
                 }
@@ -431,20 +491,23 @@ impl Cads {
             Command::CadUndo { generation } => {
                 let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
                 let Some(back) = open.undo.pop() else { return Vec::new() };
+                open.clashes = None;
                 open.redo.push(std::mem::replace(&mut open.text, back));
                 open.typing = false;
-                vec![self.part_event()]
+                self.doc_events()
             }
             Command::CadRedo { generation } => {
                 let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
                 let Some(fwd) = open.redo.pop() else { return Vec::new() };
+                open.clashes = None;
                 open.undo.push(std::mem::replace(&mut open.text, fwd));
                 open.typing = false;
-                vec![self.part_event()]
+                self.doc_events()
             }
             Command::CadExport { generation, format } => {
                 let Some(open) = self.open.as_ref().filter(|o| o.generation == generation) else { return Vec::new() };
-                match export(open, &format) {
+                let done = if open.kind == Doc::Assembly { export_assembly(open, &mut self.parts, &format) } else { export(open, &format) };
+                match done {
                     Ok(written) => vec![notice(format!("wrote {written}"), NoticeLevel::Info), Event::CadHome { parts: find(root) }],
                     Err(why) => vec![notice(why, NoticeLevel::Warn)],
                 }
@@ -453,15 +516,16 @@ impl Cads {
         }
     }
 
-    fn new_part(&mut self, root: &Path, name: &str) -> Vec<Event> {
+    fn new_doc(&mut self, root: &Path, name: &str, kind: Doc) -> Vec<Event> {
         let name = name.trim();
+        let what = if kind == Doc::Part { "part" } else { "assembly" };
         if name.is_empty() {
-            return vec![notice("a new part needs a name".into(), NoticeLevel::Warn)];
+            return vec![notice(format!("a new {what} needs a name"), NoticeLevel::Warn)];
         }
         if self.dirty() {
             return vec![notice("save or discard the open part's changes before making another".into(), NoticeLevel::Warn)];
         }
-        let rel = format!("{}.{EXTENSION}", slug(name));
+        let rel = format!("{}.{}", slug(name), if kind == Doc::Part { EXTENSION } else { crate::cad_assembly::EXTENSION });
         let file = match inside(root, &rel) {
             Ok(f) => f,
             Err(why) => return vec![notice(why, NoticeLevel::Warn)],
@@ -469,22 +533,25 @@ impl Cads {
         if file.exists() {
             return vec![notice(format!("{rel} is already there"), NoticeLevel::Warn)];
         }
-        let start = format!("part {}\n{START}", quoted(name));
+        let start = format!("{what} {}\n{START}", quoted(name));
         if let Err(e) = std::fs::write(&file, &start) {
             return vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)];
         }
-        self.show(root, file, start);
+        self.show(root, file, start, kind);
         let mut events = self.events(root);
         events.push(notice(format!("made {rel}"), NoticeLevel::Info));
         events
     }
 
-    fn show(&mut self, root: &Path, path: PathBuf, text: String) {
+    fn show(&mut self, root: &Path, path: PathBuf, text: String, kind: Doc) {
         self.generations += 1;
         let real = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let rel = path.strip_prefix(root).or_else(|_| path.strip_prefix(&real));
         let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         self.open = Some(Open {
+            kind,
+            root: root.to_path_buf(),
+            clashes: None,
             shown: rel.map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| path.display().to_string()),
             path,
             name,
@@ -526,9 +593,32 @@ impl Cads {
         }
     }
 
+    /// What is open, as the window draws it: the part, or the assembly —
+    /// the other said to be none.
+    pub fn doc_events(&mut self) -> Vec<Event> {
+        vec![self.part_event(), self.assembly_event()]
+    }
+
+    /// The assembly on screen, solved and drawn.
+    pub fn assembly_event(&mut self) -> Event {
+        let Some(open) = self.open.as_mut().filter(|o| o.kind == Doc::Assembly) else { return Event::CadAssembly { assembly: None } };
+        let (a, error) = match proton_cad::assembly::read(&open.text) {
+            Ok(a) => (a, None),
+            Err(d) => (proton_cad::assembly::read(&open.saved).unwrap_or(proton_cad::assembly::Assembly { items: Vec::new() }), Some(CadDiag::from(&d))),
+        };
+        let m = self.parts.build(&a, &open.path, &open.root);
+        let mut v = crate::cad_assembly::view(&a, &m, &open.shown, &open.name, open.generation, open.clashes.clone());
+        v.text = open.text.clone();
+        v.dirty = open.text != open.saved;
+        v.can_undo = !open.undo.is_empty();
+        v.can_redo = !open.redo.is_empty();
+        v.error = error;
+        Event::CadAssembly { assembly: Some(Box::new(v)) }
+    }
+
     /// The part on screen, built and drawn.
     pub fn part_event(&mut self) -> Event {
-        let Some(open) = self.open.as_mut() else { return Event::CadPart { part: None } };
+        let Some(open) = self.open.as_mut().filter(|o| o.kind == Doc::Part) else { return Event::CadPart { part: None } };
         let view = match part::read(&open.text) {
             Ok(p) => {
                 let v = view_of(open, &p);
@@ -1196,6 +1286,44 @@ fn export(open: &Open, format: &str) -> Result<String, String> {
     Ok(shown.to_string_lossy().replace('\\', "/"))
 }
 
+/// An assembly's parts, where they are, to a file beside it: `step` exact,
+/// or `stl` and `3mf` to 10 µm.
+fn export_assembly(open: &Open, parts: &mut crate::cad_assembly::PartCache, format: &str) -> Result<String, String> {
+    let a = proton_cad::assembly::read(&open.text).map_err(|d| format!("line {} does not read: {}", d.line, d.message))?;
+    let m = parts.build(&a, &open.path, &open.root);
+    let solids = crate::cad_assembly::placed_solids(&m);
+    if solids.is_empty() {
+        return Err("there is nothing in the assembly to write: add a part first".into());
+    }
+    let name = m.name.clone().unwrap_or_else(|| open.name.clone());
+    let bytes = match format {
+        "step" => {
+            let refs: Vec<(&str, &proton_cad::brep::Solid)> = solids.iter().map(|(n, s)| (n.as_str(), s)).collect();
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            proton_cad::step::write(&name, &refs, &proton_cad::step::stamp(now)).into_bytes()
+        }
+        "stl" | "3mf" => {
+            let meshes: Vec<(String, Mesh)> = solids.iter().map(|(n, s)| tessellate(s, &Quality::print()).map(|t| (n.clone(), t))).collect::<Result<_, _>>()?;
+            if format == "stl" {
+                let mut all = Mesh::default();
+                for (_, t) in &meshes {
+                    let base = all.positions.len() as u32;
+                    all.positions.extend(&t.positions);
+                    all.triangles.extend(t.triangles.iter().map(|tri| tri.map(|i| i + base)));
+                }
+                stl::binary(&all, &open.name)
+            } else {
+                let refs: Vec<(&str, &Mesh)> = meshes.iter().map(|(n, t)| (n.as_str(), t)).collect();
+                threemf::write(&name, &refs)
+            }
+        }
+        other => return Err(format!("“{other}” is not a format to write: step, stl or 3mf")),
+    };
+    let file = open.path.with_extension(format);
+    std::fs::write(&file, bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+    Ok(Path::new(&open.shown).with_extension(format).to_string_lossy().replace('\\', "/"))
+}
+
 fn quoted(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -1224,12 +1352,14 @@ fn find(root: &Path) -> Vec<CadFound> {
                 }
                 continue;
             }
-            if path.extension().and_then(|e| e.to_str()) != Some(EXTENSION) {
-                continue;
-            }
+            let kind = match path.extension().and_then(|e| e.to_str()) {
+                Some(EXTENSION) => "part",
+                Some(crate::cad_assembly::EXTENSION) => "assembly",
+                _ => continue,
+            };
             let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
             let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            out.push(CadFound { path: rel, name: stem });
+            out.push(CadFound { path: rel, name: stem, kind: kind.into() });
         }
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -1242,8 +1372,8 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
     if rel.is_empty() || !named.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
         return Err(format!("{rel} is not in the project"));
     }
-    if named.extension().and_then(|e| e.to_str()) != Some(EXTENSION) {
-        return Err(format!("{rel} is not a .part file"));
+    if !matches!(named.extension().and_then(|e| e.to_str()), Some(EXTENSION | crate::cad_assembly::EXTENSION)) {
+        return Err(format!("{rel} is not a .part or .assembly file"));
     }
     let base = std::fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let path = base.join(named);

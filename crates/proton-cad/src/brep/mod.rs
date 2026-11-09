@@ -212,6 +212,16 @@ impl Solid {
         self.shells = shells;
     }
 
+    /// The solid moved: every point, curve and surface.
+    pub fn transformed(&self, t: &crate::frame::Transform) -> Solid {
+        Solid {
+            vertices: self.vertices.iter().map(|v| Vertex { point: t.apply_point(v.point) }).collect(),
+            edges: self.edges.iter().map(|e| Edge { curve: e.curve.transformed(t), ..e.clone() }).collect(),
+            faces: self.faces.iter().map(|f| Face { surface: f.surface.transformed(t), ..f.clone() }).collect(),
+            shells: self.shells.clone(),
+        }
+    }
+
     /// Two solids as one, each keeping its own shells.
     pub fn merge(&mut self, other: Solid) {
         let (nv, ne, nf) = (self.vertices.len(), self.edges.len(), self.faces.len());

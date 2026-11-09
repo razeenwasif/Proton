@@ -113,6 +113,24 @@ impl Transform {
         Transform { rows, offset: origin - turn.apply_vec(origin) }
     }
 
+    /// A placement: turned about x by `turn[0]` degrees, then about y, then
+    /// about z, all through the origin, then moved to `at`.
+    pub fn placed(at: Vec3, turn: [f64; 3]) -> Transform {
+        let r = |axis: Vec3, a: f64| Transform::rotation(Vec3::ZERO, axis, a.to_radians());
+        r(Vec3::X, turn[0]).then(&r(Vec3::Y, turn[1])).then(&r(Vec3::Z, turn[2])).then(&Transform::translation(at))
+    }
+
+    /// The other way: where it puts the origin, and the turns about x, y
+    /// and z, in degrees, that [`Transform::placed`] makes it with.
+    pub fn placement(&self) -> (Vec3, [f64; 3]) {
+        let m = &self.rows;
+        // R = Rz(c)·Ry(b)·Rx(a): m[2][0] = −sin b.
+        let sb = (-m[2].x).clamp(-1.0, 1.0);
+        let b = sb.asin();
+        let (a, c) = if b.cos().abs() > 1e-9 { (m[2].y.atan2(m[2].z), m[1].x.atan2(m[0].x)) } else { (0.0, (-m[0].y).atan2(m[1].y)) };
+        (self.offset, [a.to_degrees(), b.to_degrees(), c.to_degrees()])
+    }
+
     /// What takes a frame's own coordinates to the world's.
     pub fn from_frame(f: &Frame) -> Transform {
         Transform { rows: [Vec3::new(f.x.x, f.y.x, f.z.x), Vec3::new(f.x.y, f.y.y, f.z.y), Vec3::new(f.x.z, f.y.z, f.z.z)], offset: f.origin }

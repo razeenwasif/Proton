@@ -3391,6 +3391,9 @@ function renderEvent(event) {
     case "cadPart":
       cad?.part(event);
       break;
+    case "cadAssembly":
+      cad?.assembly(event);
+      break;
     case "logicHome":
       logic?.home(event);
       break;

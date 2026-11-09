@@ -1001,15 +1001,18 @@
              style="--col-l:240px; --col-r:300px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side xl-side cd-side">
         <div class="cc-side-head" data-cad-adds hidden>
-          <button class="cc-new" data-cad-add="sketch" title="A new sketch: on XY, or on the face chosen in the view"><svg class="i"><use href="#i-sketch"/></svg>Sketch</button>
-          <button class="cc-new" data-cad-add="extrude" title="Extrude the chosen sketch"><svg class="i"><use href="#i-extrude"/></svg>Extrude</button>
-          <button class="cc-new" data-cad-add="revolve" title="Revolve the chosen sketch"><svg class="i"><use href="#i-revolve"/></svg>Revolve</button>
-          <button class="cc-new" data-cad-add="hole" title="A hole: click a flat face in the view where it goes, then Hole here"><svg class="i"><use href="#i-hole"/></svg>Hole</button>
-          <button class="cc-new" data-cad-add="fillet" title="Round the edges picked in the view"><svg class="i"><use href="#i-fillet"/></svg>Round</button>
-          <button class="cc-new" data-cad-add="chamfer" title="Chamfer the edges picked in the view"><svg class="i"><use href="#i-chamfer"/></svg>Chamfer</button>
-          <button class="cc-new" data-cad-add="shell" title="Hollow the last body, the face chosen in the view taken away"><svg class="i"><use href="#i-shell"/></svg>Shell</button>
-          <button class="cc-new" data-cad-add="sweep" title="Sweep the chosen sketch along the one before it"><svg class="i"><use href="#i-sweep"/></svg>Sweep</button>
-          <button class="cc-new" data-cad-add="loft" title="Loft from the sketch before the chosen one to it"><svg class="i"><use href="#i-loft"/></svg>Loft</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="sketch" title="A new sketch: on XY, or on the face chosen in the view"><svg class="i"><use href="#i-sketch"/></svg>Sketch</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="extrude" title="Extrude the chosen sketch"><svg class="i"><use href="#i-extrude"/></svg>Extrude</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="revolve" title="Revolve the chosen sketch"><svg class="i"><use href="#i-revolve"/></svg>Revolve</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="hole" title="A hole: click a flat face in the view where it goes, then Hole here"><svg class="i"><use href="#i-hole"/></svg>Hole</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="fillet" title="Round the edges picked in the view"><svg class="i"><use href="#i-fillet"/></svg>Round</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="chamfer" title="Chamfer the edges picked in the view"><svg class="i"><use href="#i-chamfer"/></svg>Chamfer</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="shell" title="Hollow the last body, the face chosen in the view taken away"><svg class="i"><use href="#i-shell"/></svg>Shell</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="sweep" title="Sweep the chosen sketch along the one before it"><svg class="i"><use href="#i-sweep"/></svg>Sweep</button>
+          <button class="cc-new" data-cad-part-only data-cad-add="loft" title="Loft from the sketch before the chosen one to it"><svg class="i"><use href="#i-loft"/></svg>Loft</button>
+          <button class="cc-new" data-cad-asm-only data-cad-asm-add="part" title="Add a part or an assembly of the folder" hidden><svg class="i"><use href="#i-extrude"/></svg>Part</button>
+          <button class="cc-new" data-cad-asm-only data-cad-asm-add="fit" title="Check where parts overlap, or are nearer than the clearance" hidden><svg class="i"><use href="#i-check"/></svg>Check fit</button>
+          <button class="cc-new" data-cad-asm-only data-cad-asm-add="explode" title="An exploded view, for drawings" hidden><svg class="i"><use href="#i-mirror"/></svg>Explode</button>
         </div>
         <!-- The part's parameters and steps, from Event::CadPart; with no
              part open, the project's parts, from Event::CadHome. -->
@@ -1022,9 +1025,10 @@
       <main class="pane xl-main cd-main">
         <div class="xl-home" data-cad-home>
           <h2>CAD</h2>
-          <p>Parts drawn exactly. A part is a sketch or two — lines, arcs and circles held by constraints and dimensions — extruded or revolved into solids, each step in order on the left and each kept in a <code>.part</code> file that reads as text and diffs in Git. Draw on a plane with the mouse, type a dimension in place, and the solver says what is still free; the solids are checked closed and written as STL or 3MF for a printer.</p>
+          <p>Parts drawn exactly, and assemblies of them. A part is a sketch or two — lines, arcs and circles held by constraints and dimensions — extruded or revolved into solids, each step in order on the left and each kept in a <code>.part</code> file that reads as text and diffs in Git. Draw on a plane with the mouse, type a dimension in place, and the solver says what is still free; the solids are checked closed and written as STL or 3MF for a printer.</p>
           <form class="xl-form" data-cad-form>
             <input type="text" placeholder="Name" aria-label="Part name" required>
+            <select data-cad-kind aria-label="What to make"><option value="part">Part</option><option value="assembly">Assembly</option></select>
             <button type="submit">Make</button>
           </form>
           <div class="xl-found" data-cad-found></div>
