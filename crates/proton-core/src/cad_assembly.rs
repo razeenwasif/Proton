@@ -759,6 +759,24 @@ mod tests {
         println!("wrote {} ({} bytes)", path.display(), std::fs::metadata(&path).unwrap().len());
     }
 
+    /// `cargo test -p proton-core --lib dump_schematic_for_the_preview -- --ignored`
+    /// writes `ui/preview-cad-schematic.js`: a SATA-powered fan hub.
+    #[test]
+    #[ignore]
+    fn dump_schematic_for_the_preview() {
+        let root = scratch("preview-schematic");
+        let text = "schematic \"Fan hub\"\nsheet A4\npart P1 sata-power at (40, 120)\npart J1 fan-4pin at (160, 160)\npart J2 fan-4pin at (160, 110)\npart J3 fan-4pin at (90, 50)\npart C1 capacitor value 10u footprint 0805 at (90, 150) turn 90\nnet +12V power P1.13, P1.14, P1.15, J1.2, J2.2, C1.1 current 2\nnet GND power P1.4, P1.5, P1.6, J1.1, J2.1, J3.1, C1.2\nnet PWM J3.PWM, J1.PWM, J2.PWM\nnet TACH J1.SENSE, J3.SENSE\nnc P1.1, P1.2, P1.3\n";
+        std::fs::write(root.join("hub.schematic"), text).unwrap();
+        let mut c = Cads::default();
+        let mut s = c.apply(&root, Command::CadOpen { path: "hub.schematic".into() }).into_iter().rev().find_map(|e| if let Event::CadSchematic { schematic: Some(s) } = e { Some(*s) } else { None }).expect("the schematic");
+        s.generation = 0;
+        let json = serde_json::to_string(&s).unwrap();
+        let out = format!("/* A fan hub's schematic the browser preview shows, as the core draws it —\n * written by `cargo test -p proton-core --lib dump_schematic_for_the_preview -- --ignored`;\n * not edited by hand. */\n\n/** @type {{any}} */\nexport const SCHEMATIC = {json};\n");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/preview-cad-schematic.js");
+        std::fs::write(&path, out).unwrap();
+        println!("wrote {} ({} bytes)", path.display(), std::fs::metadata(&path).unwrap().len());
+    }
+
     #[test]
     fn a_library_part_is_written_into_the_project_and_opened_or_added() {
         let root = scratch("library");

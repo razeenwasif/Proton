@@ -11,6 +11,7 @@ pub mod bus;
 pub mod cad;
 pub mod cad_assembly;
 pub mod cad_drawing;
+pub mod cad_schematic;
 pub mod chats;
 pub mod circuit;
 pub mod contract;

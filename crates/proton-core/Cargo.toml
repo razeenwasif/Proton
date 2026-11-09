@@ -15,6 +15,7 @@ proton-sheet = { workspace = true }
 proton-circuit = { workspace = true }
 proton-logic = { workspace = true }
 proton-cad = { workspace = true }
+proton-board = { workspace = true }
 proton-literature = { workspace = true }
 proton-lab = { workspace = true }
 proton-council = { workspace = true }

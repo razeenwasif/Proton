@@ -39,6 +39,7 @@ fn kind_of(path: &Path) -> Option<Doc> {
         Some(super::EXTENSION) => Some(Doc::Part),
         Some(crate::cad_assembly::EXTENSION) => Some(Doc::Assembly),
         Some(crate::cad_drawing::EXTENSION) => Some(Doc::Drawing),
+        Some(crate::cad_schematic::EXTENSION) => Some(Doc::Schematic),
         _ => None,
     }
 }
@@ -48,6 +49,7 @@ fn kind_said(k: Doc) -> &'static str {
         Doc::Part => "a part",
         Doc::Assembly => "an assembly",
         Doc::Drawing => "a drawing",
+        Doc::Schematic => "a schematic",
     }
 }
 
@@ -229,7 +231,7 @@ impl Cads {
             None => out.push_str("Nothing is open in CAD.\n"),
         }
         if files.is_empty() {
-            out.push_str("The project has no .part, .assembly or .drawing files: cad_write makes one.\n");
+            out.push_str("The project has no .part, .assembly, .drawing or .schematic files: cad_write makes one.\n");
         } else {
             out.push_str("The project's CAD files:\n");
             for f in files.iter().take(200) {
@@ -255,7 +257,7 @@ impl Cads {
             }
             Some(p) => {
                 let file = inside(root, p)?;
-                let kind = kind_of(&file).ok_or_else(|| format!("{p}: a CAD file ends .part, .assembly or .drawing"))?;
+                let kind = kind_of(&file).ok_or_else(|| format!("{p}: a CAD file ends .part, .assembly, .drawing or .schematic"))?;
                 if let Some(o) = self.open.as_ref().filter(|o| o.path == file) {
                     return Ok(Source { file, shown: o.shown.clone(), text: o.text.clone(), kind, open: true });
                 }
@@ -277,6 +279,10 @@ impl Cads {
                 let m = self.parts.build(&a, &src.file, root);
                 assembly_said(&m, root)
             }
+            Doc::Schematic => match proton_board::read(&src.text) {
+                Ok(s) => crate::cad_schematic::said(&proton_board::build(&s)),
+                Err(e) => format!("It does not read: line {}: {}", e.line, e.message),
+            },
             Doc::Drawing => {
                 let d = match proton_cad::drawing::lang::read(&src.text) {
                     Ok(d) => d,
@@ -299,7 +305,7 @@ impl Cads {
         let text = |k: &str| input.get(k).and_then(|v| v.as_str()).map(str::to_string);
         let path = text("path").ok_or("cad_write: `path` is required")?;
         let file = inside(root, &path)?;
-        let kind = kind_of(&file).ok_or_else(|| format!("{path}: a CAD file ends .part, .assembly or .drawing"))?;
+        let kind = kind_of(&file).ok_or_else(|| format!("{path}: a CAD file ends .part, .assembly, .drawing or .schematic"))?;
         let whole = text("text");
         let (old, new) = (text("old_text"), text("new_text"));
         if whole.is_none() && (old.is_none() || new.is_none()) {
@@ -365,6 +371,7 @@ impl Cads {
                 (crate::cad_assembly::placed_solids(&m), true)
             }
             Doc::Drawing => return Err("a drawing has nothing to measure: measure the part or assembly it is of".into()),
+            Doc::Schematic => return Err("a schematic has no solids to measure: cad_check reads its nets and rules".into()),
         };
         if solids.is_empty() {
             return Err(format!("{} builds nothing yet to measure", src.shown));
@@ -511,7 +518,7 @@ impl Cads {
                     self.pending.extend(shown);
                 }
             }
-            Doc::Drawing => out.push_str(&self.said(root, &src)),
+            Doc::Drawing | Doc::Schematic => out.push_str(&self.said(root, &src)),
         }
         if let Some(t) = input.get("t1") {
             out.push_str(&t1_said(t)?);

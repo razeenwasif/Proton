@@ -49,7 +49,7 @@ export function itemOfBox(d, name) {
 
 /** The box on the sheet under a point, millimetres from the bottom left;
  *  the smallest, so a detail inside a view is found first.
- *  @param {DrawingView} d @param {number} x @param {number} y */
+ *  @param {{boxes: SheetBox[]}} d @param {number} x @param {number} y */
 export function boxAt(d, x, y) {
   const hits = d.boxes.filter((b) => b.name !== "title" && x >= b.x0 - 2 && x <= b.x1 + 2 && y >= b.y0 - 2 && y <= b.y1 + 2);
   hits.sort((a, b) => (a.x1 - a.x0) * (a.y1 - a.y0) - (b.x1 - b.x0) * (b.y1 - b.y0));

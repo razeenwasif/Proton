@@ -1459,6 +1459,7 @@ impl Workspace {
 
             command @ (Command::CadNew { .. }
             | Command::CadNewAssembly { .. }
+            | Command::CadNewSchematic { .. }
             | Command::CadLibrary { .. }
             | Command::CadFit { .. }
             | Command::CadDraw { .. }

@@ -7,6 +7,7 @@
 import { PART } from "./preview-cad-part.js";
 import { ASSEMBLY } from "./preview-cad-assembly.js";
 import { DRAWING } from "./preview-cad-drawing.js";
+import { SCHEMATIC } from "./preview-cad-schematic.js";
 
 /** A few of the library's families, as the core lists them. */
 const FAMILIES = [
@@ -17,15 +18,16 @@ const FAMILIES = [
 
 /** @param {(events: any[]) => void} _deliver */
 export function createCadPreview(_deliver) {
-  const parts = [{ path: "case/foot.part", name: "foot", kind: "part" }, { path: "pump-bracket.part", name: "pump-bracket", kind: "part" }, { path: "rig.assembly", name: "rig", kind: "assembly" }, { path: "rig.drawing", name: "rig", kind: "drawing" }];
+  const parts = [{ path: "case/foot.part", name: "foot", kind: "part" }, { path: "pump-bracket.part", name: "pump-bracket", kind: "part" }, { path: "rig.assembly", name: "rig", kind: "assembly" }, { path: "rig.drawing", name: "rig", kind: "drawing" }, { path: "hub.schematic", name: "hub", kind: "schematic" }];
   /** @type {any} */
   let open = null;
   let generations = 0;
   const home = () => ({ type: "cadHome", parts });
-  const partEvent = () => ({ type: "cadPart", part: open && !open.asm && !open.drw ? { ...open, dirty: open.text !== open.saved } : null });
+  const partEvent = () => ({ type: "cadPart", part: open && !open.asm && !open.drw && !open.sch ? { ...open, dirty: open.text !== open.saved } : null });
   const asmEvent = () => ({ type: "cadAssembly", assembly: open?.asm ? { ...open, dirty: open.text !== open.saved } : null });
   const drwEvent = () => ({ type: "cadDrawing", drawing: open?.drw ? { ...open, dirty: open.text !== open.saved } : null });
-  const docEvents = () => [partEvent(), asmEvent(), drwEvent()];
+  const schEvent = () => ({ type: "cadSchematic", schematic: open?.sch ? { ...open, dirty: open.text !== open.saved } : null });
+  const docEvents = () => [partEvent(), asmEvent(), drwEvent(), schEvent()];
   const notice = (/** @type {string} */ message) => ({ type: "notice", message, level: "info" });
   /** @param {string} path @param {any} part */
   const show = (path, part) => {
@@ -43,6 +45,9 @@ export function createCadPreview(_deliver) {
           if (command.path === "rig.assembly") {
             show(command.path, ASSEMBLY);
             open.asm = true;
+          } else if (command.path === "hub.schematic") {
+            show(command.path, SCHEMATIC);
+            open.sch = true;
           } else if (command.path === "rig.drawing") {
             show(command.path, DRAWING);
             open.drw = true;
@@ -73,6 +78,7 @@ export function createCadPreview(_deliver) {
           return docEvents();
         case "cadLibrary":
         case "cadNewAssembly":
+        case "cadNewSchematic":
         case "cadFit":
         case "cadEdit":
         case "cadDrag":

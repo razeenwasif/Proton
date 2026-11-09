@@ -260,7 +260,11 @@ the tightest gaps measured — on paper or white on blue. Views are dragged
 where they go, and the sheet is written as PDF, SVG or DXF. The agent, on
 CAD's Agent tab or anywhere with `@cad`, reads, writes, measures and checks
 parts, assemblies and drawings — a build against the FormD T1's published
-limits too — and what it writes is held like your own. Edits are held until
+limits too — and what it writes is held like your own. A `.schematic` is
+the start of a custom board: parts from a library that has the PC's own
+connectors (ATX, EPS, PCIe, SATA, fan, ARGB and the front-panel USB
+headers), nets that say the current they carry, the electrical rules
+checked, the sheet drawn with each pin's net, and a netlist for KiCad. Edits are held until
 ⌘S.
 
 ## The three things that hold it together

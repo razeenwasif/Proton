@@ -48,6 +48,7 @@
     "cad-view.js",
     "cad-assembly.js",
     "cad-drawing.js",
+    "cad-schematic.js",
     "cad-sketch.js",
     "preview-cad.js",
     "kmap.js",

@@ -53,7 +53,7 @@ pub struct CadFound {
     /// As the project names it.
     pub path: String,
     pub name: String,
-    /// `part`, `assembly` or `drawing`.
+    /// `part`, `assembly`, `drawing` or `schematic`.
     pub kind: String,
 }
 
@@ -306,6 +306,7 @@ enum Doc {
     Part,
     Assembly,
     Drawing,
+    Schematic,
 }
 
 #[derive(Debug)]
@@ -360,6 +361,7 @@ impl Cads {
         match command {
             Command::CadNew { name } => self.new_doc(root, &name, Doc::Part),
             Command::CadNewAssembly { name } => self.new_doc(root, &name, Doc::Assembly),
+            Command::CadNewSchematic { name } => self.new_doc(root, &name, Doc::Schematic),
             Command::CadLibrary { family, params, add } => {
                 let path = match crate::cad_assembly::write_library_part(root, &family, &params) {
                     Ok(p) => p,
@@ -420,6 +422,7 @@ impl Cads {
                         let kind = match file.extension().and_then(|e| e.to_str()) {
                             Some(crate::cad_assembly::EXTENSION) => Doc::Assembly,
                             Some(crate::cad_drawing::EXTENSION) => Doc::Drawing,
+                            Some(crate::cad_schematic::EXTENSION) => Doc::Schematic,
                             _ => Doc::Part,
                         };
                         self.show(root, file, text, kind);
@@ -456,6 +459,23 @@ impl Cads {
                 self.doc_events()
             }
             Command::CadDraw { generation, blueprint } => self.draw(root, generation, blueprint),
+            Command::CadEdit { generation, ops } if self.open.as_ref().is_some_and(|o| o.kind == Doc::Schematic) => {
+                let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
+                let mut s = match proton_board::read(&open.text) {
+                    Ok(s) => s,
+                    Err(e) => return vec![notice(format!("line {} does not read — mend it first: {}", e.line, e.message), NoticeLevel::Warn)],
+                };
+                for op in ops {
+                    if let Err(why) = crate::cad_schematic::edit(&mut s, op) {
+                        let mut out = vec![notice(why, NoticeLevel::Warn)];
+                        out.extend(self.doc_events());
+                        return out;
+                    }
+                }
+                let text = proton_board::write(&s);
+                record(open, text);
+                self.doc_events()
+            }
             Command::CadEdit { generation, ops } if self.open.as_ref().is_some_and(|o| o.kind == Doc::Drawing) => {
                 let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
                 let mut d = match proton_cad::drawing::lang::read(&open.text) {
@@ -572,6 +592,10 @@ impl Cads {
                         }
                         Err(e) => Err(format!("line {} does not read — mend it first: {}", e.line, e.message)),
                     },
+                    Doc::Schematic => match proton_board::read(&open.text) {
+                        Ok(s) => crate::cad_schematic::export(&proton_board::build(&s), &open.path, &open.shown, &format),
+                        Err(e) => Err(format!("line {} does not read — mend it first: {}", e.line, e.message)),
+                    },
                     Doc::Part => export(open, &format),
                 };
                 match done {
@@ -585,14 +609,25 @@ impl Cads {
 
     fn new_doc(&mut self, root: &Path, name: &str, kind: Doc) -> Vec<Event> {
         let name = name.trim();
-        let what = if kind == Doc::Part { "part" } else { "assembly" };
+        let what = match kind {
+            Doc::Part => "part",
+            Doc::Assembly => "assembly",
+            Doc::Schematic => "schematic",
+            Doc::Drawing => "drawing",
+        };
         if name.is_empty() {
             return vec![notice(format!("a new {what} needs a name"), NoticeLevel::Warn)];
         }
         if self.dirty() {
             return vec![notice("save or discard the open part's changes before making another".into(), NoticeLevel::Warn)];
         }
-        let rel = format!("{}.{}", slug(name), if kind == Doc::Part { EXTENSION } else { crate::cad_assembly::EXTENSION });
+        let ext = match kind {
+            Doc::Part => EXTENSION,
+            Doc::Assembly => crate::cad_assembly::EXTENSION,
+            Doc::Schematic => crate::cad_schematic::EXTENSION,
+            Doc::Drawing => crate::cad_drawing::EXTENSION,
+        };
+        let rel = format!("{}.{}", slug(name), ext);
         let file = match inside(root, &rel) {
             Ok(f) => f,
             Err(why) => return vec![notice(why, NoticeLevel::Warn)],
@@ -600,7 +635,7 @@ impl Cads {
         if file.exists() {
             return vec![notice(format!("{rel} is already there"), NoticeLevel::Warn)];
         }
-        let start = format!("{what} {}\n{START}", quoted(name));
+        let start = if kind == Doc::Schematic { format!("schematic {}\nsheet A4\n", quoted(name)) } else { format!("{what} {}\n{START}", quoted(name)) };
         if let Err(e) = std::fs::write(&file, &start) {
             return vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)];
         }
@@ -664,7 +699,24 @@ impl Cads {
     /// What is open, as the window draws it: the part, or the assembly —
     /// the other said to be none.
     pub fn doc_events(&mut self) -> Vec<Event> {
-        vec![self.part_event(), self.assembly_event(), self.drawing_event()]
+        vec![self.part_event(), self.assembly_event(), self.drawing_event(), self.schematic_event()]
+    }
+
+    /// The schematic on screen, built, checked and drawn.
+    pub fn schematic_event(&mut self) -> Event {
+        let Some(open) = self.open.as_ref().filter(|o| o.kind == Doc::Schematic) else { return Event::CadSchematic { schematic: None } };
+        let (s, error) = match proton_board::read(&open.text) {
+            Ok(s) => (s, None),
+            Err(e) => (proton_board::read(&open.saved).unwrap_or_default(), Some(CadDiag::from(&e))),
+        };
+        let b = proton_board::build(&s);
+        let mut v = crate::cad_schematic::view(&s, &b, &open.shown, &open.name, open.generation);
+        v.text = open.text.clone();
+        v.dirty = open.text != open.saved;
+        v.can_undo = !open.undo.is_empty();
+        v.can_redo = !open.redo.is_empty();
+        v.error = error;
+        Event::CadSchematic { schematic: Some(Box::new(v)) }
     }
 
     /// The drawing on screen, laid out on its sheet.
@@ -694,7 +746,7 @@ impl Cads {
     /// assembly its blueprint — written beside it and opened; one there
     /// already is opened as it is.
     fn draw(&mut self, root: &Path, generation: u32, blue: bool) -> Vec<Event> {
-        let Some(open) = self.open.as_ref().filter(|o| o.generation == generation && o.kind != Doc::Drawing) else { return Vec::new() };
+        let Some(open) = self.open.as_ref().filter(|o| o.generation == generation && matches!(o.kind, Doc::Part | Doc::Assembly)) else { return Vec::new() };
         if open.text != open.saved {
             return vec![notice("save it first: its drawing reads it from its file".into(), NoticeLevel::Warn)];
         }
@@ -1509,6 +1561,7 @@ fn find(root: &Path) -> Vec<CadFound> {
                 Some(EXTENSION) => "part",
                 Some(crate::cad_assembly::EXTENSION) => "assembly",
                 Some(crate::cad_drawing::EXTENSION) => "drawing",
+                Some(crate::cad_schematic::EXTENSION) => "schematic",
                 _ => continue,
             };
             let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
@@ -1526,8 +1579,8 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
     if rel.is_empty() || !named.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
         return Err(format!("{rel} is not in the project"));
     }
-    if !matches!(named.extension().and_then(|e| e.to_str()), Some(EXTENSION | crate::cad_assembly::EXTENSION | crate::cad_drawing::EXTENSION)) {
-        return Err(format!("{rel} is not a .part, .assembly or .drawing file"));
+    if !matches!(named.extension().and_then(|e| e.to_str()), Some(EXTENSION | crate::cad_assembly::EXTENSION | crate::cad_drawing::EXTENSION | crate::cad_schematic::EXTENSION)) {
+        return Err(format!("{rel} is not a .part, .assembly, .drawing or .schematic file"));
     }
     let base = std::fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let path = base.join(named);
@@ -1809,6 +1862,49 @@ mod tests {
         let again = c.apply(&root, Command::CadDraw { generation: g, blueprint: true });
         assert!(again.iter().any(|e| matches!(e, Event::Notice { text: message, .. } if message.contains("which was there"))));
         assert!(drawing(&again).items.iter().any(|i| i.name == "w"));
+    }
+
+    fn schematic(events: &[Event]) -> crate::cad_schematic::CadSchematicView {
+        events.iter().rev().find_map(|e| if let Event::CadSchematic { schematic: Some(s) } = e { Some((**s).clone()) } else { None }).expect("a schematic event")
+    }
+
+    #[test]
+    fn a_schematic_is_made_edited_checked_and_written_out() {
+        let root = scratch("schematic");
+        let mut c = Cads::default();
+        let out = c.apply(&root, Command::CadNewSchematic { name: "Fan hub".into() });
+        let s = schematic(&out);
+        assert_eq!((s.path.as_str(), s.sheet.as_str(), s.title.as_deref(), s.parts.len(), s.text.as_str()), ("fan-hub.schematic", "A4", Some("Fan hub"), 0, "schematic \"Fan hub\"\nsheet A4\n"));
+        assert!(out.iter().any(|e| matches!(e, Event::CadHome { parts } if parts.iter().any(|p| p.kind == "schematic"))));
+        assert!(s.kinds.iter().any(|k| k.kind == "atx-24") && s.kinds.iter().any(|k| k.kind == "ic" && k.takes.contains("pins")));
+        let g = s.generation;
+        let s = schematic(&c.apply(&root, Command::CadEdit { generation: g, ops: vec![CadOp::Insert { at: None, text: "part P1 sata-power at (40, 120)\npart J1 fan-4pin at (150, 120)\nnet +12V power P1.13, J1.2 current 2".into() }] }));
+        assert!(s.dirty && s.can_undo);
+        assert_eq!(s.parts.iter().map(|p| p.reference.as_str()).collect::<Vec<_>>(), ["P1", "J1"]);
+        assert_eq!(s.parts[1].pins[1].net.as_deref(), Some("+12V"));
+        assert_eq!((s.nets[0].pins.clone(), s.nets[0].current, s.nets[0].power), (vec!["P1.13".to_string(), "J1.2".to_string()], Some(2.0), true));
+        assert!(s.findings.iter().any(|f| !f.error && f.message.starts_with("J1: pins 1, 3, 4")), "{:?}", s.findings);
+        assert_eq!(s.items.iter().map(|i| i.kind.as_str()).collect::<Vec<_>>(), ["part", "part", "net"]);
+        assert!(s.svg.contains(">+12V</text>") && s.boxes.iter().any(|b| b.name == "J1"));
+        // A part moved by its line; a mistake typed keeps the last that read.
+        let j1 = s.items.iter().find(|i| i.name == "J1").unwrap().index;
+        let s = schematic(&c.apply(&root, Command::CadEdit { generation: g, ops: vec![CadOp::Replace { index: j1, text: "part J1 fan-4pin at (160, 100)".into() }] }));
+        assert_eq!(s.parts[1].at, vec![160.0, 100.0]);
+        let bad = schematic(&c.apply(&root, Command::CadText { generation: g, text: format!("{}part 9X resistor\n", s.text) }));
+        assert!(bad.error.as_ref().is_some_and(|e| e.message.contains("not a reference")) && bad.parts.is_empty(), "the saved text is what is shown: {:?}", bad.error);
+        c.apply(&root, Command::CadUndo { generation: g });
+        c.apply(&root, Command::CadSave);
+        for f in ["svg", "pdf", "net", "csv"] {
+            let said = c.apply(&root, Command::CadExport { generation: g, format: f.into() });
+            assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == &format!("wrote fan-hub.{f}"))), "{said:?}");
+        }
+        assert!(std::fs::read_to_string(root.join("fan-hub.net")).unwrap().contains("(name \"+12V\")"));
+        assert!(std::fs::read_to_string(root.join("fan-hub.csv")).unwrap().contains("4-pin PWM fan"));
+        // Not drawn as a part is: it is its own sheet.
+        assert!(c.apply(&root, Command::CadDraw { generation: g, blueprint: false }).is_empty());
+        c.apply(&root, Command::CadClose { discard: false });
+        let again = schematic(&c.apply(&root, Command::CadOpen { path: "fan-hub.schematic".into() }));
+        assert_eq!((again.parts.len(), again.dirty), (2, false));
     }
 
     #[test]

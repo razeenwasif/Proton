@@ -1,0 +1,11 @@
+[package]
+name = "proton-board"
+description = "CAD mode's electronics: schematics, their nets and rules, and later the boards made from them — Proton's own."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+proton-cad = { workspace = true }

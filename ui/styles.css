@@ -4083,6 +4083,14 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cd-sheet-pick { position: absolute; border: 1.5px dashed var(--accent); border-radius: 3px; background: color-mix(in srgb, var(--accent) 8%, transparent); pointer-events: none; z-index: 1; }
 .cd-sheet-pick[hidden] { display: none; }
 .cd-bad-text { color: var(--cd-bad); font: var(--z-xs)/1.45 var(--zed); margin: 4px 0 8px; }
+/* A schematic's rules check: each finding at its line, errors marked. */
+.cd-findings { list-style: none; margin: 0; padding: 0 2px; display: flex; flex-direction: column; gap: 4px; font: var(--z-xs)/1.4 var(--zed); color: var(--muted); }
+.cd-findings li { display: grid; grid-template-columns: 48px 1fr; gap: 6px; }
+.cd-findings li span { color: var(--faint); }
+.cd-findings li.bad { color: var(--text); }
+.cd-findings li.bad span { color: var(--cd-bad); }
+.cd-pins td:first-child { width: 34px; }
+.cd-check { display: flex; align-items: center; gap: 6px; margin: 2px 0 8px; color: var(--muted); font: var(--z-xs)/1.3 var(--zed); }
 .cd-banner { position: absolute; top: 10px; left: 12px; right: 12px; padding: 7px 10px; border-radius: 6px;
   background: color-mix(in srgb, var(--cd-bad) 16%, var(--bg)); color: var(--text); font: var(--z-xs)/1.45 var(--zed); pointer-events: none; }
 .cd-banner[hidden] { display: none; }

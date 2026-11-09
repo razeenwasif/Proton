@@ -793,6 +793,54 @@ tool list's count and that `cad_write` says it holds; `@cad` found and
 the composer left alone. The status page is brought up to date once CAD is
 finished (E0–E5, K12, K13), not at each milestone.
 
+E0 — schematics. `crates/proton-board`, which uses `proton-cad` for its
+sheet and nothing else. A `.schematic` is `schematic "T"`, `sheet A4`, `part
+REF KIND [value V] [footprint F] [at (x, y)] [turn 0|90|180|270] [mirror]`,
+`net NAME [power] REF.PIN, … [current A]` and `nc REF.PIN, …`; a pin by its
+number or its only name, `J1.PWM`; `#` after a space a comment, so `PS_ON#`
+is a name. The library: resistor, capacitor (and polarised), inductor,
+diode, LED, zener, fuse, switch, crystal; NPN, PNP and N- and P-channel
+MOSFETs in SOT-23's order; headers of one or two rows; any chip from its
+pin list, `ic "NE555" pins (1 GND power-in, …)`, each pin input, output,
+bidir, tristate, passive, power-in, power-out, open-collector, open-emitter
+or nc; and the PC's connectors — ATX 24-pin, EPS 8-pin, PCIe 6- and 8-pin,
+12V-2×6, SATA power, the 4-pin fan, 5 V ARGB, and the USB 2.0, USB 3 and
+USB-C front-panel headers — each with where its pinout is from. The 8-pin
+PCIe's (+12 V at 1–3, SENSE1 at 4, SENSE0 at 6) is NVIDIA's power
+guidelines' table 2 and the USB 3 header's Intel's internal connector
+specification (ID at 10), found 2026-11-09. Two could not be checked: the
+12V-2×6's pin numbers and its sideband's S1–S4 (PCI-SIG's ECN is for
+members; Wikipedia gives only the sense pins' power table) and the USB-C
+Key-A header's (only a summary of Intel's NUC signal table was read) — the
+rules check warns on every schematic that uses them until they are. The
+rules: a reference twice; a pin not there (answered with the part's pins),
+on two nets, or marked unconnected and connected; two outputs on a net; a
+power input nothing on the board supplies and not said `power`; an input
+nothing drives; a net of one pin; pins left unconnected without `nc`. The
+sheet draws each symbol where it is placed (set out in rows where not),
+turned and mirrored, its pins numbered and named, its reference and value
+beside it, and each pin's net written at its end — a label, so no wire is
+routed by hand — and unconnected pins crossed; with CAD's sheet, so it is
+written as SVG and PDF as a drawing is. The netlist is KiCad's `.net`
+(version E) and the bill of materials CSV, alike parts on a row. In CAD a
+schematic is made from the home page, listed with its parts, nets and
+unconnected pins (errors marked, warnings dotted), its rules check on the
+right, a part chosen shows its pins and their nets; parts and nets are
+added from the library by form, the sheet's size set, a part dragged on
+the sheet moved, and it is written as PDF, SVG, netlist or bill of
+materials. The agent's tools read, write and check schematics, their
+language in `cad_write`'s description. Tested (6 + 1 + 1 + 2 + 1): the
+language read and written back, and ten mistakes; every connector pin for
+pin; a SATA-powered hub of five fans through a buffer built clean, a pin
+found by name; every rule at its line; the sheet's labels one to each pin
+on a net, a resistor stood on end, the sheet written three ways; the
+netlist's parts and nodes and its brackets balanced, the bill grouping
+five fans; in the core, a schematic made, edited, a mistake keeping the
+last that read, written four ways, opened from the home page; through the
+agent's tools; in the browser, its lists and rules, a part dragged and
+moved, its pins, a part and a net added, a bad name refused, the sheet's
+size, written out, made from the home page.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

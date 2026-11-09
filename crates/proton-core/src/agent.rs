@@ -740,10 +740,11 @@ impl Agent {
             // CAD's files. Writes are held until the person saves.
             Tool {
                 name: "cad_read".into(),
-                description: "The part, assembly or drawing open in CAD mode — its lines numbered, what it builds (each \
+                description: "The part, assembly, drawing or schematic open in CAD mode — its lines numbered, what it builds (each \
                               body's volume, area and size; an assembly's instances, where they are and what holds \
-                              them, its bill of materials and tubes; a drawing's views and dimensions) and its mistakes, \
-                              each at its line — and the project's .part, .assembly and .drawing files; or, with `path`, \
+                              them, its bill of materials and tubes; a drawing's views and dimensions; a schematic's parts, nets and \
+                              rules check) and its mistakes, each at its line — and the project's .part, .assembly, \
+                              .drawing and .schematic files; or, with `path`, \
                               that file the same way, the open one as typed."
                     .into(),
                 input_schema: json!({
@@ -782,13 +783,21 @@ impl Agent {
                               NAME along x|y|z = V at (x, y)`, `detail NAME of VIEW at (x, y) radius R scale S place (x, \
                               y)`, `dim NAME VIEW distance A to B|diameter A|radius A|angle A to B|clearance P to Q`, `note \
                               NAME VIEW \"text\" at FACE`, `balloons VIEW`, `bom at (x, y)` — sheet millimetres from its \
-                              bottom left. The library's parts (boards, cards, fans, radiators, fittings, the FormD T1) \
-                              are in the project's library/ folder when made from CAD's home page."
+                              bottom left. A .schematic: `schematic \"T\"`, `sheet A4`, `part REF KIND [value V] [footprint F] \
+                              [at (x, y)] [turn 90]` — KIND resistor, capacitor, capacitor-polarised, inductor, diode, \
+                              led, zener, fuse, switch, crystal, npn, pnp, nmos, pmos, `header 4` or `header 2x5`, `ic \
+                              \"NAME\" pins (1 NAME KIND, …)` with pin KINDs input, output, bidir, tristate, passive, \
+                              power-in, power-out, open-collector, open-emitter, nc, and the PC's connectors atx-24, \
+                              eps-8, pcie-6, pcie-8, 12v-2x6, sata-power, fan-4pin, argb-5v, usb2-header, usb3-header, \
+                              usb-c-header; `net NAME [power] REF.PIN, REF.PIN … [current A]` (a pin by number or by \
+                              its only name; `power` when a cable brings it), `nc REF.PIN, …`; its rules check comes \
+                              back with it. The library's parts (boards, cards, fans, radiators, fittings, the FormD \
+                              T1) are in the project's library/ folder when made from CAD's home page."
                     .into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "In the project, ending .part, .assembly or .drawing." },
+                        "path": { "type": "string", "description": "In the project, ending .part, .assembly, .drawing or .schematic." },
                         "text": { "type": "string" },
                         "old_text": { "type": "string" },
                         "new_text": { "type": "string" }

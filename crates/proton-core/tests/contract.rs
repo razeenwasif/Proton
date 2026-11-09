@@ -423,7 +423,7 @@ fn the_agents_cad_tools_write_read_measure_and_check_held_until_saved() {
     let mut space = Workspace::rooted(root.clone());
     space.apply(Command::SetMode { mode: ModeId::Cad });
     let none = space.run_tool("cad_read", &json!({})).unwrap();
-    assert!(none.contains("Nothing is open in CAD") && none.contains("no .part, .assembly or .drawing files"), "{none}");
+    assert!(none.contains("Nothing is open in CAD") && none.contains("no .part, .assembly, .drawing or .schematic files"), "{none}");
     // A part written: built, measured, held until saved.
     let plate = "part \"Plate\"\nunits mm\nmaterial aluminium-6061\nsketch s on XY\n  rect r corner origin size = (100, 60)\n  circle h1 center (10, 10) radius = 2.2\nend\nextrude plate from s distance 4\n";
     let wrote = space.run_tool("cad_write", &json!({"path": "parts/plate.part", "text": plate})).unwrap();
@@ -476,6 +476,11 @@ fn the_agents_cad_tools_write_read_measure_and_check_held_until_saved() {
     assert!(read.contains("bench.assembly (an assembly)\n   1  assembly \"Bench\"") && read.contains("at (30, 20, 11)"), "{read}");
     assert!(space.run_tool("cad_read", &json!({"path": "../x.part"})).is_err());
     assert!(space.run_tool("cad_measure", &json!({})).unwrap_err().contains("a drawing has nothing to measure"));
+    // A schematic: its parts, nets and rules check.
+    assert!(space.save_unsaved().is_empty());
+    let hub = space.run_tool("cad_write", &json!({"path": "hub.schematic", "text": "schematic \"Hub\"\npart P1 sata-power\npart J1 fan-4pin\nnet +12V power P1.13, J1.2 current 2\nnet GND P1.4, J1.1\n"})).unwrap();
+    assert!(hub.contains("hub.schematic (a schematic) made") && hub.contains("- net +12V, powered from off the board, 2 A: P1.13 (+12V), J1.2 (+12V)") && hub.contains("line 2, warning: P1: pins 1, 2, 3"), "{hub}");
+    assert!(space.run_tool("cad_check", &json!({})).unwrap().contains("The rules check:"));
     let _ = std::fs::remove_dir_all(root);
 }
 

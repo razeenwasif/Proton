@@ -766,6 +766,10 @@ pub enum Command {
     CadNewAssembly {
         name: String,
     },
+    /// A schematic made: `name.schematic`, its title and an A4 sheet.
+    CadNewSchematic {
+        name: String,
+    },
     /// The open assembly's parts checked for overlaps and for gaps nearer
     /// than its clearance.
     CadFit {
@@ -1403,6 +1407,10 @@ pub enum Event {
     /// The drawing open, laid out on its sheet — or none.
     CadDrawing {
         drawing: Option<Box<crate::cad_drawing::CadDrawingView>>,
+    },
+    /// The schematic open, checked and drawn — or none.
+    CadSchematic {
+        schematic: Option<Box<crate::cad_schematic::CadSchematicView>>,
     },
     /// The project's `.logic`, `.proof` and `.l4f` files, for Logic's home page.
     LogicHome {

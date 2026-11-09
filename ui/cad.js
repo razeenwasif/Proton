@@ -12,6 +12,7 @@ import { escapeHtml as esc, icon } from "./html.js";
 import { createSketcher, fresh } from "./cad-sketch.js";
 import { asmText, historyHtml, libraryHtml, libraryParams, lineIndex, offsets, points, portOf, relPath, settingsHtml } from "./cad-assembly.js";
 import { boxAt, drawText, drawingHistoryHtml, drawingSettingsHtml, freshName, itemOfBox, moved, scaleOf } from "./cad-drawing.js";
+import { netLine, partLine, referenceFor, schematicHistoryHtml, schematicItemOfBox, schematicMoved, schematicSettingsHtml } from "./cad-schematic.js";
 
 /** @typedef {import("./bindings/CadFound").CadFound} Found */
 /** @typedef {import("./bindings/CadPartView").CadPartView} PartView */
@@ -20,6 +21,7 @@ import { boxAt, drawText, drawingHistoryHtml, drawingSettingsHtml, freshName, it
 /** @typedef {import("./bindings/CadOp").CadOp} Op */
 /** @typedef {import("./bindings/CadAssemblyView").CadAssemblyView} AssemblyView */
 /** @typedef {import("./bindings/CadDrawingView").CadDrawingView} DrawingView */
+/** @typedef {import("./bindings/CadSchematicView").CadSchematicView} SchematicView */
 
 /** How long typing must stop before the text is sent. */
 const TEXT_WAIT = 300;
@@ -154,6 +156,8 @@ export function createCad(host) {
     /** The family chosen in the library, and its values as typed. @type {string | null} */ family: null,
     /** @type {Record<string, string>} */ libValues: {},
     /** The drawing open, if one is. @type {DrawingView | null} */ drw: null,
+    /** The schematic open, if one is. @type {SchematicView | null} */ sch: null,
+    /** The kind of part chosen to add to a schematic. */ schKind: "resistor",
     /** The sheet's zoom, and where its corner is in the stage, in pixels. */
     sheet: { zoom: 1, x: 0, y: 0, fitted: 0, shown: "" },
     /** A view being dragged on the sheet, or the sheet panned.
@@ -165,9 +169,13 @@ export function createCad(host) {
   let viewing = null;
   let textTimer = 0;
 
-  const generation = () => state.part?.generation ?? state.asm?.generation ?? state.drw?.generation ?? 0;
-  /** What is open: a part, an assembly or a drawing. */
-  const doc = () => state.part ?? state.asm ?? state.drw;
+  const generation = () => state.part?.generation ?? state.asm?.generation ?? state.drw?.generation ?? state.sch?.generation ?? 0;
+  /** What is open: a part, an assembly, a drawing or a schematic. */
+  const doc = () => state.part ?? state.asm ?? state.drw ?? state.sch;
+  /** What is shown as a sheet: a drawing or a schematic. */
+  const sheetDoc = () => state.drw ?? state.sch;
+  /** The statement a box on the sheet is. @param {string} name */
+  const boxItem = (name) => (state.drw ? itemOfBox(state.drw, name) : state.sch ? schematicItemOfBox(state.sch, name) : null);
   /** @param {Op[]} ops */
   const edit = (ops) => {
     if (doc()) host.dispatch({ type: "cadEdit", generation: generation(), ops });
@@ -191,7 +199,7 @@ export function createCad(host) {
 
   function renderList() {
     const rows = state.parts
-      .map((f) => `<button class="xl-row${f.path === doc()?.path ? " on" : ""}" data-cad-open="${esc(f.path)}" title="${esc(f.path)}">${icon(f.kind === "assembly" ? "pattern" : f.kind === "drawing" ? "frame" : "cad")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">${esc(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")}</span></button>`)
+      .map((f) => `<button class="xl-row${f.path === doc()?.path ? " on" : ""}" data-cad-open="${esc(f.path)}" title="${esc(f.path)}">${icon(f.kind === "assembly" ? "pattern" : f.kind === "drawing" ? "frame" : f.kind === "schematic" ? "node" : "cad")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">${esc(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")}</span></button>`)
       .join("");
     els.list.innerHTML = rows || `<p class="xl-empty">No .part files in this folder yet.</p>`;
     els.found.innerHTML = rows;
@@ -208,9 +216,14 @@ export function createCad(host) {
     ...(state.asm?.explodes ?? []).map((e) => e.name),
     ...(state.asm?.routes ?? []).map((r) => r.name),
     ...(state.drw?.items ?? []).map((i) => i.name),
+    ...(state.sch?.items ?? []).map((i) => i.name),
   ];
 
   function renderHistory() {
+    if (state.sch) {
+      els.history.innerHTML = schematicHistoryHtml(state.sch, state.step);
+      return;
+    }
     if (state.drw) {
       els.history.innerHTML = drawingHistoryHtml(state.drw, state.step);
       return;
@@ -244,6 +257,10 @@ export function createCad(host) {
   const options = (/** @type {string[]} */ xs, /** @type {string | null | undefined} */ on) => xs.map((x) => `<option${x === on ? " selected" : ""}>${esc(x)}</option>`).join("");
 
   function renderStep() {
+    if (state.sch) {
+      els.step.innerHTML = schematicSettingsHtml(state.sch, { step: state.step, kind: state.schKind });
+      return;
+    }
     if (state.drw) {
       els.step.innerHTML = drawingSettingsHtml(state.drw, { step: state.step, scale: scaleOf(state.drw.text) });
       return;
@@ -429,6 +446,23 @@ export function createCad(host) {
   }
 
   function renderHead() {
+    if (state.sch) {
+      const d = state.sch;
+      els.title.textContent = d.title ?? d.name;
+      els.title.title = d.path;
+      els.dirty.hidden = !d.dirty;
+      els.undo.disabled = !d.canUndo;
+      els.redo.disabled = !d.canRedo;
+      els.tools.hidden = true;
+      const errors = d.findings.filter((f) => f.error);
+      const warnings = d.findings.length - errors.length;
+      els.crumb.textContent = `${d.parts.length} part${d.parts.length === 1 ? "" : "s"} · ${d.nets.length} net${d.nets.length === 1 ? "" : "s"} · ${errors.length ? `${errors.length} error${errors.length === 1 ? "" : "s"}` : "no errors"}${warnings ? `, ${warnings} warning${warnings === 1 ? "" : "s"}` : ""}`;
+      els.crumb.classList.toggle("bad", !!errors.length);
+      const problems = d.error ? [`Line ${d.error.line} does not read: ${d.error.message} — what is shown is what it was saved as.`] : errors.map((x) => `Line ${x.line}: ${x.message}`);
+      els.banner.hidden = !problems.length;
+      els.banner.innerHTML = problems.slice(0, 3).map((x) => `<div>${esc(x)}</div>`).join("") + (problems.length > 3 ? `<div>…and ${problems.length - 3} more</div>` : "");
+      return;
+    }
     if (state.drw) {
       const d = state.drw;
       els.title.textContent = d.title ?? d.name;
@@ -485,7 +519,10 @@ export function createCad(host) {
     if (!p) return;
     const focused = document.activeElement === els.text;
     if (els.text.value !== p.text && !(focused && Date.now() - state.typedAt < 1500)) els.text.value = p.text;
-    els.diag.innerHTML = [p.error, ...p.errors, ...("notes" in p ? p.notes : [])].filter(Boolean).map((d) => `<div class="${d === p.error || p.errors.includes(/** @type {any} */ (d)) ? "bad" : "note"}">${d?.line}: ${esc(d?.message ?? "")}</div>`).join("");
+    // A schematic's are its rules check's: errors bad, warnings noted.
+    const bad = "errors" in p ? p.errors : p.findings.filter((f) => f.error);
+    const noted = "notes" in p ? p.notes : "findings" in p ? p.findings.filter((f) => !f.error) : [];
+    els.diag.innerHTML = [p.error, ...bad, ...noted].filter(Boolean).map((d) => `<div class="${d === p.error || bad.includes(/** @type {any} */ (d)) ? "bad" : "note"}">${d?.line}: ${esc(d?.message ?? "")}</div>`).join("");
   }
 
   function renderTabs() {
@@ -546,7 +583,7 @@ export function createCad(host) {
 
   /** The sheet's pixels to a millimetre, as fitted and zoomed. */
   function sheetScale() {
-    const d = state.drw, r = els.sheet.getBoundingClientRect();
+    const d = sheetDoc(), r = els.sheet.getBoundingClientRect();
     const fit = d ? Math.min(r.width / d.width, r.height / d.height) * 0.94 : 1;
     return { r, ppm: (fit > 0 ? fit : 1) * state.sheet.zoom };
   }
@@ -555,13 +592,13 @@ export function createCad(host) {
    *  @param {number} cx @param {number} cy */
   function toSheet(cx, cy) {
     const { r, ppm } = sheetScale();
-    return [(cx - r.left - state.sheet.x) / ppm, (state.drw?.height ?? 0) - (cy - r.top - state.sheet.y) / ppm];
+    return [(cx - r.left - state.sheet.x) / ppm, (sheetDoc()?.height ?? 0) - (cy - r.top - state.sheet.y) / ppm];
   }
 
   /** The sheet sized and placed; the chosen view, or the one dragged,
    *  outlined. */
   function placeSheet() {
-    const d = state.drw;
+    const d = sheetDoc();
     const svg = els.sheet.querySelector("svg");
     if (!d || !svg) return;
     const { r, ppm } = sheetScale();
@@ -592,15 +629,16 @@ export function createCad(host) {
   }
 
   function renderStage() {
-    els.sheet.hidden = !state.drw;
-    if (state.drw) {
+    const sd = sheetDoc();
+    els.sheet.hidden = !sd;
+    if (sd) {
       els.sketch.toggleAttribute("hidden", true);
       els.canvas.hidden = true;
-      if (state.sheet.shown !== state.drw.svg) {
-        state.sheet.shown = state.drw.svg;
+      if (state.sheet.shown !== sd.svg) {
+        state.sheet.shown = sd.svg;
         const svg = els.sheet.querySelector("svg");
         const at = document.createElement("div");
-        at.innerHTML = state.drw.svg;
+        at.innerHTML = sd.svg;
         const fresh = at.querySelector("svg");
         if (fresh) {
           fresh.classList.add("cd-sheet-svg");
@@ -668,6 +706,7 @@ export function createCad(host) {
     ws.querySelectorAll("[data-cad-part-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.part));
     ws.querySelectorAll("[data-cad-asm-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.asm));
     ws.querySelectorAll("[data-cad-drw-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.drw));
+    ws.querySelectorAll("[data-cad-sch-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.sch));
     els.home.hidden = !!p;
     els.part.hidden = !p;
     els.list.hidden = !!p;
@@ -934,6 +973,13 @@ export function createCad(host) {
       state.want = { name, open: false };
       return edit([{ op: "insert", at: null, text: drawText.section(name, "y", "0", state.drw.width - 120, state.drw.height / 2) }]);
     }
+    if (t.closest("[data-cad-sch-add]") && state.sch) {
+      const what = /** @type {HTMLElement} */ (t.closest("[data-cad-sch-add]")).dataset.cadSchAdd;
+      state.step = null;
+      state.tab = "step";
+      render();
+      return void /** @type {HTMLElement | null} */ (els.step.querySelector(what === "net" ? "[data-cad-sch-net-form] [name=name]" : "[data-cad-sch-part-form] [name=kind]"))?.focus();
+    }
     if (t.closest("[data-cad-drw-add]") && state.drw) {
       const what = /** @type {HTMLElement} */ (t.closest("[data-cad-drw-add]")).dataset.cadDrwAdd;
       if (what === "view") {
@@ -967,7 +1013,7 @@ export function createCad(host) {
       return void host.dispatch({ type: "cadClose", discard: false });
     }
     if (t.closest("[data-cad-fit]")) {
-      if (state.drw) return fitSheet();
+      if (sheetDoc()) return fitSheet();
       const d = state.part ?? state.asm;
       return state.sketching != null ? sketcher.fit() : d && view?.fit(d.bounds);
     }
@@ -995,6 +1041,16 @@ export function createCad(host) {
       const text = /** @type {HTMLInputElement} */ (t).value.trim();
       if (text) edit([{ op: "replace", index: Number(/** @type {HTMLElement} */ (t).dataset.cadDrwLine), text }]);
     }
+    if (t.matches("[data-cad-sch-kind]")) {
+      state.schKind = /** @type {HTMLSelectElement} */ (t).value;
+      renderStep();
+    }
+    if (state.sch && t.matches("[data-cad-sch-sheet]")) {
+      const line = `sheet ${/** @type {HTMLSelectElement} */ (t).value}`;
+      const at = lineIndex(state.sch.text, "sheet ");
+      const after = lineIndex(state.sch.text, "schematic ");
+      edit([at >= 0 ? { op: "replace", index: at, text: line } : { op: "insert", at: after + 1, text: line }]);
+    }
     if (state.drw && t.matches("[data-cad-drw-sheet], [data-cad-drw-scale], [data-cad-drw-style]")) {
       const word = t.matches("[data-cad-drw-sheet]") ? "sheet" : t.matches("[data-cad-drw-scale]") ? "scale" : "style";
       const line = `${word} ${/** @type {HTMLSelectElement} */ (t).value}`;
@@ -1016,7 +1072,7 @@ export function createCad(host) {
     if (form === els.form) {
       const name = /** @type {HTMLInputElement} */ (form.querySelector("input")).value.trim();
       const kind = /** @type {HTMLSelectElement | null} */ (form.querySelector("[data-cad-kind]"))?.value;
-      if (name) host.dispatch({ type: kind === "assembly" ? "cadNewAssembly" : "cadNew", name });
+      if (name) host.dispatch({ type: kind === "assembly" ? "cadNewAssembly" : kind === "schematic" ? "cadNewSchematic" : "cadNew", name });
     } else if (form.matches("[data-cad-add-instance]") && state.asm) {
       const sel = /** @type {HTMLSelectElement} */ (form.elements.namedItem("path"));
       const found = state.parts.find((f) => f.path === sel.value);
@@ -1026,6 +1082,18 @@ export function createCad(host) {
       const name = names().includes(base) ? fresh(base, names()) : base;
       state.want = { name, open: false };
       edit([{ op: "insert", at: null, text: asmText.instance(name, relPath(state.asm.path, found.path), found.kind === "assembly" ? "assembly" : "part") }]);
+    } else if (form.matches("[data-cad-sch-part-form]") && state.sch) {
+      const val = (/** @type {string} */ n) => /** @type {HTMLInputElement | null} */ (form.elements.namedItem(n))?.value ?? "";
+      const kind = val("kind");
+      const reference = referenceFor(kind, state.sch.parts.map((p) => p.reference));
+      state.want = { name: reference, open: false };
+      edit([{ op: "insert", at: lineIndex(state.sch.text, "net ") >= 0 ? lineIndex(state.sch.text, "net ") : null, text: partLine({ reference, kind, takes: val("takes"), value: val("value"), footprint: val("footprint") }) }]);
+    } else if (form.matches("[data-cad-sch-net-form]") && state.sch) {
+      const val = (/** @type {string} */ n) => /** @type {HTMLInputElement} */ (form.elements.namedItem(n)).value.trim();
+      const power = /** @type {HTMLInputElement} */ (form.elements.namedItem("power")).checked;
+      if (!/^[A-Za-z0-9_+\-./#~]+$/.test(val("name")) || !val("pins")) return status("A net has a name — +12V, GND, PWM — and the pins it joins, PART.PIN.");
+      state.want = { name: val("name"), open: false };
+      edit([{ op: "insert", at: null, text: netLine(val("name"), power, val("pins"), val("current")) }]);
     } else if (form.matches("[data-cad-drw-view-form]") && state.drw) {
       const dir = /** @type {HTMLSelectElement} */ (form.elements.namedItem("dir")).value;
       const name = freshName(dir.slice(0, 1), names());
@@ -1085,7 +1153,7 @@ export function createCad(host) {
     }
     if (state.sketching == null && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "f") {
       e.preventDefault();
-      if (state.drw) fitSheet();
+      if (sheetDoc()) fitSheet();
       else if ("bounds" in open) view?.fit(open.bounds);
     }
   });
@@ -1104,18 +1172,19 @@ export function createCad(host) {
   }
 
   els.sheet.addEventListener("wheel", (e) => {
-    if (!state.drw) return;
+    const sd = sheetDoc();
+    if (!sd) return;
     e.preventDefault();
     const at = toSheet(e.clientX, e.clientY);
     state.sheet.zoom = Math.min(40, Math.max(0.25, state.sheet.zoom * Math.exp(-e.deltaY * 0.002)));
     const { r, ppm } = sheetScale();
     state.sheet.x = e.clientX - r.left - at[0] * ppm;
-    state.sheet.y = e.clientY - r.top - (state.drw.height - at[1]) * ppm;
+    state.sheet.y = e.clientY - r.top - (sd.height - at[1]) * ppm;
     placeSheet();
   }, { passive: false });
 
   els.sheet.addEventListener("pointerdown", (e) => {
-    const d = state.drw;
+    const d = sheetDoc();
     if (!d || e.button !== 0) return;
     const at = toSheet(e.clientX, e.clientY);
     const box = boxAt(d, at[0], at[1]);
@@ -1124,15 +1193,16 @@ export function createCad(host) {
     } catch {
       // A pointer the page made, not a real one: nothing to capture.
     }
-    state.dragging = box && itemOfBox(d, box.name) ? { box, from: at, by: [0, 0] } : { pan: [e.clientX, e.clientY], at: [state.sheet.x, state.sheet.y] };
+    state.dragging = box && boxItem(box.name) ? { box, from: at, by: [0, 0] } : { pan: [e.clientX, e.clientY], at: [state.sheet.x, state.sheet.y] };
   });
 
   els.sheet.addEventListener("pointermove", (e) => {
     const g = state.dragging;
-    if (!g || !state.drw) {
-      const at = state.drw && toSheet(e.clientX, e.clientY);
-      const box = at && state.drw && boxAt(state.drw, at[0], at[1]);
-      els.sheet.style.cursor = box && state.drw && itemOfBox(state.drw, box.name) ? "move" : "grab";
+    const sd = sheetDoc();
+    if (!g || !sd) {
+      const at = sd && toSheet(e.clientX, e.clientY);
+      const box = at && sd && boxAt(sd, at[0], at[1]);
+      els.sheet.style.cursor = box && boxItem(box.name) ? "move" : "grab";
       return;
     }
     if ("box" in g) {
@@ -1146,13 +1216,13 @@ export function createCad(host) {
   });
 
   els.sheet.addEventListener("pointerup", () => {
-    const g = state.dragging, d = state.drw;
+    const g = state.dragging, d = sheetDoc();
     state.dragging = null;
     if (!g || !d) return;
     if ("box" in g) {
-      const it = itemOfBox(d, g.box.name);
+      const it = boxItem(g.box.name);
       if (it && Math.hypot(g.by[0], g.by[1]) > 0.5) {
-        const line = moved(it, g.by[0], g.by[1]);
+        const line = state.sch ? schematicMoved(state.sch, it, g.by[0], g.by[1]) : moved(it, g.by[0], g.by[1]);
         state.step = it.index;
         if (line) return edit([{ op: "replace", index: it.index, text: line }]);
       } else if (it) {
@@ -1184,6 +1254,32 @@ export function createCad(host) {
       renderList();
       if (state.asm) renderStep();
     },
+    /** @param {{schematic: SchematicView | null}} e */
+    schematic(e) {
+      const was = state.sch?.generation;
+      state.sch = e.schematic;
+      if (!e.schematic) {
+        if (was != null) state.step = null;
+      } else {
+        state.part = null;
+        state.asm = null;
+        state.drw = null;
+        if (was !== e.schematic.generation) {
+          state.step = null;
+          state.sketching = null;
+          state.picks = [];
+          sketcher.leave();
+        }
+        const want = state.want;
+        const got = want && e.schematic.items.find((x) => x.name === want.name);
+        if (want && got) {
+          state.want = null;
+          state.step = got.index;
+        }
+        if (state.step != null && !e.schematic.items.some((x) => x.index === state.step)) state.step = null;
+      }
+      render();
+    },
     /** @param {{drawing: DrawingView | null}} e */
     drawing(e) {
       const was = state.drw?.generation;
@@ -1193,6 +1289,7 @@ export function createCad(host) {
       } else {
         state.part = null;
         state.asm = null;
+        state.sch = null;
         if (was !== e.drawing.generation) {
           state.step = null;
           state.sketching = null;
@@ -1222,6 +1319,7 @@ export function createCad(host) {
       } else {
         state.part = null;
         state.drw = null;
+        state.sch = null;
         if (was !== e.assembly.generation) {
           state.step = null;
           state.picks = [];
@@ -1257,6 +1355,7 @@ export function createCad(host) {
       } else {
         state.asm = null;
         state.drw = null;
+        state.sch = null;
         if (was !== e.part.generation) {
           state.step = null;
           state.sketching = null;
@@ -1285,7 +1384,7 @@ export function createCad(host) {
       });
     },
     debug() {
-      return { drw: state.drw, sheet: state.sheet, toSheet, family: state.family, libValues: state.libValues, asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
+      return { drw: state.drw, sch: state.sch, sheet: state.sheet, toSheet, family: state.family, libValues: state.libValues, asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
     },
   };
 }

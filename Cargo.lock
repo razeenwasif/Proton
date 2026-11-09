@@ -4331,6 +4331,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-board"
+version = "0.0.1"
+dependencies = [
+ "proton-cad",
+]
+
+[[package]]
 name = "proton-cad"
 version = "0.0.1"
 
@@ -4363,6 +4370,7 @@ version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
  "proton-agent",
+ "proton-board",
  "proton-cad",
  "proton-circuit",
  "proton-claude",

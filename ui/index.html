@@ -1017,6 +1017,8 @@
           <button class="cc-new" data-cad-drw-only data-cad-drw-section title="A section through the part, hatched where it is cut" hidden><svg class="i"><use href="#i-layers"/></svg>Section</button>
           <button class="cc-new" data-cad-drw-only data-cad-drw-add="dim" title="A dimension: what it measures, in which view" hidden><svg class="i"><use href="#i-columns"/></svg>Dimension</button>
           <button class="cc-new" data-cad-drw-only data-cad-drw-add="note" title="A note pointing at a face or hole" hidden><svg class="i"><use href="#i-text"/></svg>Note</button>
+          <button class="cc-new" data-cad-sch-only data-cad-sch-add="part" title="A part from the library: passives, chips, headers, the PC's connectors" hidden><svg class="i"><use href="#i-node"/></svg>Part</button>
+          <button class="cc-new" data-cad-sch-only data-cad-sch-add="net" title="A net: the pins it joins, and the current it carries" hidden><svg class="i"><use href="#i-link"/></svg>Net</button>
         </div>
         <!-- The part's parameters and steps, from Event::CadPart; with no
              part open, the project's parts, from Event::CadHome. -->
@@ -1032,7 +1034,7 @@
           <p>Parts drawn exactly, and assemblies of them. A part is a sketch or two — lines, arcs and circles held by constraints and dimensions — extruded or revolved into solids, each step in order on the left and each kept in a <code>.part</code> file that reads as text and diffs in Git. Draw on a plane with the mouse, type a dimension in place, and the solver says what is still free; the solids are checked closed and written as STL or 3MF for a printer.</p>
           <form class="xl-form" data-cad-form>
             <input type="text" placeholder="Name" aria-label="Part name" required>
-            <select data-cad-kind aria-label="What to make"><option value="part">Part</option><option value="assembly">Assembly</option></select>
+            <select data-cad-kind aria-label="What to make"><option value="part">Part</option><option value="assembly">Assembly</option><option value="schematic">Schematic</option></select>
             <button type="submit">Make</button>
           </form>
           <div class="xl-found" data-cad-found></div>

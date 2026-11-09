@@ -1,0 +1,23 @@
+//! CAD mode's electronics (docs/CAD.md, E0–E5): the small boards a compact
+//! build is made tidy with — power adapters and extensions, fan and RGB
+//! hubs, front I/O — drawn as schematics first. No crates but Proton's own.
+//!
+//! - [`symbol`]: parts' pins and how they are drawn; the library, the
+//!   PC's connectors among it.
+//! - [`lang`]: the `.schematic` language.
+//! - [`build`]: a schematic's parts placed, its nets found, its rules
+//!   checked.
+//! - [`sheet`]: the schematic drawn on a sheet.
+//! - [`netlist`]: its netlist for KiCad, and its bill of materials.
+
+pub mod build;
+pub mod lang;
+pub mod netlist;
+pub mod sheet;
+pub mod symbol;
+
+pub use build::{build, Built, Finding, Level};
+pub use lang::{read, write, Schematic};
+
+/// A schematic's file ends so.
+pub const EXTENSION: &str = "schematic";

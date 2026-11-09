@@ -180,3 +180,21 @@ test('a drawing\'s scale is read as written, names are fresh, and lines are the 
   assert.equal(drawText.dim('d1', 'f', 'diameter', 'plate.side(h1)', ''), 'dim d1 f diameter plate.side(h1)');
   assert.equal(drawText.note('n1', 'f', 'say "hi"', 'm3'), 'note n1 f "say \'hi\'" at m3');
 });
+
+import {referenceFor, partLine, netLine, schematicMoved, schematicItemOfBox} from '../../ui/cad-schematic.js';
+import {SCHEMATIC} from '../../ui/preview-cad-schematic.js';
+
+test('a schematic\'s lines: a part named for its kind, a net\'s pins, a part moved or given a place', () => {
+  assert.equal(referenceFor('resistor', ['R1', 'R2']), 'R3');
+  assert.equal(referenceFor('atx-24', ['J1']), 'J2');
+  assert.equal(referenceFor('ic', []), 'U1');
+  assert.equal(partLine({reference: 'U1', kind: 'ic', takes: '"NE555" pins (1 GND power-in)', value: '', footprint: 'SOIC-8'}), 'part U1 ic "NE555" pins (1 GND power-in) footprint SOIC-8');
+  assert.equal(partLine({reference: 'R1', kind: 'resistor', value: '4k7', at: [10.04, 20]}), 'part R1 resistor value 4k7 at (10, 20)');
+  assert.equal(netLine('+12V', true, 'P1.13 J1.2,J2.2', ' 3 '), 'net +12V power P1.13, J1.2, J2.2 current 3');
+  const j1 = schematicItemOfBox(SCHEMATIC, 'J1');
+  assert.equal(schematicMoved(SCHEMATIC, j1, 5, -10), 'part J1 fan-4pin at (165, 150)');
+  const placed = {...SCHEMATIC, parts: SCHEMATIC.parts.map((p) => (p.reference === 'C1' ? {...p, at: [90, 150]} : p))};
+  const c1 = {...schematicItemOfBox(SCHEMATIC, 'C1'), text: 'part C1 capacitor value 10u turn 90'};
+  assert.equal(schematicMoved(placed, c1, 10, 0), 'part C1 capacitor value 10u at (100, 150) turn 90');
+  assert.equal(schematicItemOfBox(SCHEMATIC, 'title'), null);
+});

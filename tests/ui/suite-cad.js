@@ -8,6 +8,7 @@
 import {PART} from '../../ui/preview-cad-part.js';
 import {ASSEMBLY} from '../../ui/preview-cad-assembly.js';
 import {DRAWING} from '../../ui/preview-cad-drawing.js';
+import {SCHEMATIC} from '../../ui/preview-cad-schematic.js';
 
 /** @param {{test: Function, assert: Function, win: any, doc: Document, $: (s: string) => any, settle: () => Promise<void>, key: Function, shown: (el: any) => boolean}} t */
 export async function cadChecks({test, assert, win, doc, $, settle, key, shown}) {
@@ -597,6 +598,82 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     assert(shown(ws().querySelector('[data-cad-banner]')) && ws().querySelector('[data-cad-banner]').textContent.includes('Line 14'), 'what could not be drawn is not said');
     assert(ws().querySelector('.cd-history [data-cad-step="13"]').classList.contains('bad'), 'the statement that could not be drawn is not marked');
     await win.pushEvents([{type: 'cadDrawing', drawing: null}, part()]); await settle();
+  });
+
+  /** The sample fan hub's schematic, as the core sends it. @param {Partial<any>} more */
+  const sch = (more = {}) => ({type: 'cadSchematic', schematic: {...structuredClone(SCHEMATIC), generation: 31, dirty: false, ...more}});
+
+  await test('A schematic lists its parts and nets with the rules check, and a part dragged on its sheet moves', async () => {
+    await win.pushEvents([{type: 'cadPart', part: null}, {type: 'cadAssembly', assembly: null}, {type: 'cadDrawing', drawing: null}, sch()]); await settle();
+    const sheet = ws().querySelector('[data-cad-sheet]');
+    assert(shown(sheet) && sheet.querySelector('svg.cd-sheet-svg'), 'the schematic\'s sheet is not shown');
+    const rows = [...ws().querySelectorAll('.cd-history [data-cad-step]')].map((b) => b.querySelector('.cd-row-name').textContent);
+    assert(rows.join() === 'Fan hub,P1,J1,J2,J3,C1,+12V,GND,PWM,TACH,unconnected', `the statements: ${rows}`);
+    assert(ws().querySelector('[data-cad-crumb]').textContent === '5 parts · 4 nets · no errors, 3 warnings', ws().querySelector('[data-cad-crumb]').textContent);
+    const p1 = ws().querySelector('.cd-history [data-cad-step="2"]');
+    assert(p1.classList.contains('later') && !p1.classList.contains('bad'), 'a warning is marked as an error');
+    assert(ws().querySelectorAll('[data-cad-settings] .cd-findings li').length === 3, 'the rules check is not listed');
+    assert(shown(ws().querySelector('[data-cad-sch-add="part"]')) && !shown(ws().querySelector('[data-cad-drw-add="view"]')), 'the schematic\'s buttons are not the ones shown');
+    // J1 dragged 30 px right.
+    const j1 = SCHEMATIC.parts.find((p) => p.reference === 'J1');
+    const r = sheet.getBoundingClientRect(), ppm = sheet.querySelector('svg').getBoundingClientRect().width / SCHEMATIC.width, sv = debug().sheet;
+    const from = {clientX: r.left + sv.x + j1.at[0] * ppm, clientY: r.top + sv.y + (SCHEMATIC.height - j1.at[1]) * ppm};
+    const before = win.commands.length;
+    sheet.dispatchEvent(new win.PointerEvent('pointerdown', {...from, bubbles: true, pointerId: 5, button: 0}));
+    sheet.dispatchEvent(new win.PointerEvent('pointermove', {clientX: from.clientX + 30, clientY: from.clientY, bubbles: true, pointerId: 5}));
+    sheet.dispatchEvent(new win.PointerEvent('pointerup', {clientX: from.clientX + 30, clientY: from.clientY, bubbles: true, pointerId: 5})); await settle();
+    const want = `part J1 fan-4pin at (${+(160 + 30 / ppm).toFixed(1)}, 160)`;
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'replace', index: 3, text: want}]), `the part was not moved: ${JSON.stringify(ops(before))} — ${want}`);
+    // Chosen: its pins and their nets.
+    await win.pushEvents([sch()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="2"]').click(); await settle();
+    const pins = [...ws().querySelectorAll('[data-cad-settings] .cd-pins tr')].slice(1).map((tr) => tr.lastElementChild.textContent);
+    assert(pins.length === 15 && pins[12] === '+12V' && pins[3] === 'GND' && pins[0] === '—' && pins[6] === 'none', `P1's pins: ${pins}`);
+    assert(ws().querySelector('[data-cad-settings]').textContent.includes('Serial ATA'), 'the pinout\'s source is not said');
+  });
+
+  await test('A schematic\'s settings add a part and a net, set its sheet, and write it out', async () => {
+    await win.pushEvents([sch()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    const kind = ws().querySelector('[data-cad-sch-kind]');
+    kind.value = 'header';
+    kind.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    const form = ws().querySelector('[data-cad-sch-part-form]');
+    form.querySelector('[name=takes]').value = '2x5';
+    form.querySelector('[name=value]').value = 'front panel';
+    let before = win.commands.length;
+    form.requestSubmit(); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'insert', at: 7, text: 'part J4 header 2x5 value "front panel"'}]), `the part: ${JSON.stringify(ops(before))}`);
+    const net = ws().querySelector('[data-cad-sch-net-form]');
+    net.querySelector('[name=name]').value = 'bad name';
+    net.querySelector('[name=pins]').value = 'J1.3';
+    before = win.commands.length;
+    net.requestSubmit(); await settle();
+    assert(!ops(before).length && ws().querySelector('[data-cad-status]').textContent.includes('the pins it joins'), 'a net with a bad name was sent');
+    net.querySelector('[name=name]').value = 'TACH2';
+    net.querySelector('[name=pins]').value = 'J2.3 J3.3';
+    net.querySelector('[name=current]').value = '0.1';
+    net.requestSubmit(); await settle();
+    assert(ops(before)[0]?.text === 'net TACH2 J2.3, J3.3 current 0.1', `the net: ${JSON.stringify(ops(before))}`);
+    before = win.commands.length;
+    const size = ws().querySelector('[data-cad-sch-sheet]');
+    size.value = 'A3';
+    size.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'replace', index: 1, text: 'sheet A3'}]), `the sheet: ${JSON.stringify(ops(before))}`);
+    for (const f of ['net', 'csv', 'pdf']) {
+      before = win.commands.length;
+      ws().querySelector(`[data-cad-settings] [data-cad-export="${f}"]`).click(); await settle();
+      assert(sent(before, 'cadExport')[0]?.format === f && sent(before, 'cadExport')[0]?.generation === 31, `Write ${f} did not ask`);
+    }
+    // The home page makes one.
+    await win.pushEvents([{type: 'cadSchematic', schematic: null}]); await settle();
+    const home = ws().querySelector('[data-cad-form]');
+    home.querySelector('input').value = 'GPU adapter';
+    home.querySelector('[data-cad-kind]').value = 'schematic';
+    before = win.commands.length;
+    home.requestSubmit(); await settle();
+    assert(sent(before, 'cadNewSchematic')[0]?.name === 'GPU adapter', 'the form did not make a schematic');
+    await win.pushEvents([part()]); await settle();
   });
 
   await test('CAD\'s Agent tab holds the composer: @cad is a chip, and its keys are its own', async () => {
