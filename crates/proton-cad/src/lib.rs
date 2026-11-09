@@ -51,6 +51,7 @@ pub mod poly;
 pub mod profile;
 pub mod shell;
 pub mod sketch;
+pub mod step;
 pub mod surface;
 pub mod sweep;
 pub mod tol;

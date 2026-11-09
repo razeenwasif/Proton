@@ -538,6 +538,36 @@ a box rounded all over 1.2 ms, and shelled open 26 ms; 64 holes patterned
 113 ms (1.66 s a hole at a time), their 64 rims rounded 42 ms more; a tube
 with two bends 7.7 ms.
 
+K6 — STEP. A part's bodies are written as one product of ISO 10303-214
+(automotive design), in millimetres: each body a `MANIFOLD_SOLID_BREP`, or a
+`BREP_WITH_VOIDS` whose voids are closed shells turned over, each lump of a
+body in pieces a solid of its own; every face an `ADVANCED_FACE` on its
+exact surface (`PLANE`, `CYLINDRICAL_SURFACE`, `CONICAL_SURFACE`,
+`SPHERICAL_SURFACE`, `TOROIDAL_SURFACE`) named for what made it, every edge
+an `EDGE_CURVE` on its exact curve (`LINE`, `CIRCLE`, `ELLIPSE`, or the
+`B_SPLINE_CURVE_WITH_KNOTS` two surfaces were fitted to meet in), numbers
+with every digit they need to read back the same, the same bytes for the
+same part. Proton's own reader takes the text of Part 21 — complex
+instances, comments, doubled quotes and `\X2\` text, `1.E-06` — and makes
+every solid in a file the kernel's again: lengths from the unit the
+geometry's context names (SI prefixes, inches, feet), angles from radians
+or degrees, edges run against their curves turned the kernel's way, curves
+wrapped as a surface's unwrapped, loops without an outer bound sorted, poles'
+vertex loops passed over; a free-form surface or a rational curve is refused
+saying so (K13 shows them), and a solid that does not check is refused.
+Write STEP is on the part's page beside STL and 3MF. Tested (5): fourteen
+kinds of solid — a box, rounded all over, chamfered, a plate with holes and
+a countersink, a turned part (planes, cylinders, cones, a torus), a ball, a
+closed shell's void, a rounded tray, a bent tube, a tee (a B-spline edge
+closed on itself), a slant cut (ellipses), a loft, two bodies — written, read
+back valid with every face and its name, their volumes and areas within
+10⁻⁹, and written again; the header and the product; Part 21 read as the
+standard writes it; a cube in inches written the way other programs write
+them, and in metres; a free-form face, no solids, a face turned wrong and
+not a STEP file each refused. Measured (release): 64 rounded holes, 134
+faces, 168 KB, written in 54 ms and read and checked in 92 ms. Not yet done:
+a file opened in another CAD program by hand — none is on this Mac.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

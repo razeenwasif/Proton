@@ -241,7 +241,7 @@ is typed over in place and a point dragged with the solver holding the rest,
 and the solver says how much is still free; in 3D an edge under the pointer
 is picked to round or chamfer. Every edit is a line of the file,
 which the Text tab shows and takes typing. Bodies are written as STL or 3MF
-for a printer. Edits are held until ⌘S.
+for a printer, or as STEP, exact, for a machinist or another CAD program. Edits are held until ⌘S.
 
 ## The three things that hold it together
 

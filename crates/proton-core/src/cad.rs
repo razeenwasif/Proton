@@ -1157,12 +1157,21 @@ fn sketch_view(index: usize, line: usize, s: &Sketch, o: &model::SketchOut, m: &
 /* ── files ────────────────────────────────────────────────────────── */
 
 /// The part's bodies to a file beside it: `stl` (all in one) or `3mf`
-/// (each its own object), to 10 µm. The file as the project names it.
+/// (each its own object), to 10 µm, or `step`, exact. The file as the
+/// project names it.
 fn export(open: &Open, format: &str) -> Result<String, String> {
     let p = part::read(&open.text).map_err(|d| format!("line {} does not read: {}", d.line, d.message))?;
     let m = model::build(&p);
     if m.bodies.is_empty() {
         return Err("there is nothing built to write: extrude or revolve a sketch first".into());
+    }
+    if format == "step" {
+        let bodies: Vec<(&str, &proton_cad::brep::Solid)> = m.bodies.iter().map(|b| (b.name.as_str(), &b.solid)).collect();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let text = proton_cad::step::write(m.name.as_deref().unwrap_or(&open.name), &bodies, &proton_cad::step::stamp(now));
+        let file = open.path.with_extension("step");
+        std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))?;
+        return Ok(Path::new(&open.shown).with_extension("step").to_string_lossy().replace('\\', "/"));
     }
     let meshes: Vec<(String, Mesh)> = m.bodies.iter().map(|b| tessellate(&b.solid, &Quality::print()).map(|t| (b.name.clone(), t))).collect::<Result<_, _>>()?;
     let bytes = match format {
@@ -1179,7 +1188,7 @@ fn export(open: &Open, format: &str) -> Result<String, String> {
             let refs: Vec<(&str, &Mesh)> = meshes.iter().map(|(n, t)| (n.as_str(), t)).collect();
             threemf::write(m.name.as_deref().unwrap_or(&open.name), &refs)
         }
-        other => return Err(format!("“{other}” is not a format to write: stl or 3mf")),
+        other => return Err(format!("“{other}” is not a format to write: stl, 3mf or step")),
     };
     let file = open.path.with_extension(format);
     std::fs::write(&file, bytes).map_err(|e| format!("{}: {e}", file.display()))?;
@@ -1439,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bodies_are_written_for_printers_beside_the_part() {
+    fn the_bodies_are_written_for_printers_and_machines_beside_the_part() {
         let root = scratch("export");
         let mut c = Cads::default();
         let g = view(&c.apply(&root, Command::CadNew { name: "Peg".into() })).generation;
@@ -1448,6 +1457,11 @@ mod tests {
         edit(&mut c, &root, g, vec![CadOp::Insert { at: None, text: "sketch s on XY\n  circle c center (6, 0) radius 3\nend\nrevolve r from s about yaxis angle 90\nextrude e from s distance 5".into() }]);
         c.apply(&root, Command::CadExport { generation: g, format: "stl".into() });
         c.apply(&root, Command::CadExport { generation: g, format: "3mf".into() });
+        c.apply(&root, Command::CadExport { generation: g, format: "step".into() });
+        let solids = proton_cad::step::read(&std::fs::read_to_string(root.join("peg.step")).unwrap()).unwrap();
+        // And exact, for machining: the same two bodies, whole.
+        assert_eq!(solids.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["r", "e"]);
+        assert!(solids.iter().all(|(_, s)| proton_cad::brep::check::check(s).is_empty()), "the STEP written does not read back whole");
         let tris = stl::read_binary(&std::fs::read(root.join("peg.stl")).unwrap()).unwrap();
         assert!(tris.len() > 100);
         let (title, objects) = threemf::read(&std::fs::read(root.join("peg.3mf")).unwrap()).unwrap();

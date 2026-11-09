@@ -5,7 +5,7 @@
 //!   its points shared between its triangles, the units said.
 //! - [`zip`]: the package a 3MF is, written and read back.
 //!
-//! STEP, which keeps the exact geometry for machining, is K6's.
+//! STEP, which keeps the exact geometry for machining, is [`crate::step`].
 
 pub mod stl;
 pub mod threemf;

@@ -115,6 +115,9 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     before = win.commands.length;
     ws().querySelector('[data-cad-export="3mf"]').click(); await settle();
     assert(sent(before, 'cadExport')[0]?.format === '3mf' && sent(before, 'cadExport')[0]?.generation === 5, 'Write 3MF did not ask for one');
+    before = win.commands.length;
+    ws().querySelector('[data-cad-export="step"]').click(); await settle();
+    assert(sent(before, 'cadExport')[0]?.format === 'step', 'Write STEP did not ask for one');
   });
 
   await test('An extrude is made into a body or cut from it, or goes right through; a hole\'s line is edited as it is', async () => {

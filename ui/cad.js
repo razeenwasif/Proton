@@ -236,7 +236,7 @@ export function createCad(host) {
         `<p class="cd-muted">The name, units and material are the file's first lines: change them in Text.</p></section>` +
         `<section class="cd-card"><div class="cd-head">A parameter</div><form class="cd-inline" data-cad-param-form><input name="name" placeholder="name" aria-label="Parameter name" required><input name="value" placeholder="value" aria-label="Parameter value" required><button class="cd-btn">Add</button></form></section>` +
         `<section class="cd-card"><div class="cd-head">Bodies</div>${bodies ? `<ul class="cd-bodies">${bodies}</ul>` : `<p class="cd-muted">None built yet.</p>`}` +
-        `<div class="cd-row-btns"><button class="cd-btn" data-cad-export="stl"${p.bodies.length ? "" : " disabled"}>Write STL</button><button class="cd-btn" data-cad-export="3mf"${p.bodies.length ? "" : " disabled"}>Write 3MF</button></div></section>`;
+        `<div class="cd-row-btns"><button class="cd-btn" data-cad-export="stl"${p.bodies.length ? "" : " disabled"}>Write STL</button><button class="cd-btn" data-cad-export="3mf"${p.bodies.length ? "" : " disabled"}>Write 3MF</button><button class="cd-btn" data-cad-export="step"${p.bodies.length ? "" : " disabled"} title="Exact, for machining and other CAD programs">Write STEP</button></div></section>`;
       els.step.innerHTML = html;
       return;
     }
