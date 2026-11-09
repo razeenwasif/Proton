@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-use proton_cad::{Cone, Cylinder, Frame, Plane, Sphere, Surface, Torus, Vec3};
+use proton_cad::{Cone, Cylinder, Frame, Free, Plane, Sphere, Surface, Torus, Vec3};
 
 /// SplitMix64: enough randomness to scatter points, the same every run.
 pub struct Rng(pub u64);
@@ -74,6 +74,8 @@ pub fn params(s: &Surface, rng: &mut Rng) -> (f64, f64) {
         Surface::Cone(c) => c.apex_v() + rng.range(0.5, 25.0),
         Surface::Sphere(_) => rng.range(-FRAC_PI_2 + 0.05, FRAC_PI_2 - 0.05),
         Surface::Torus(_) => rng.range(0.0, TAU),
+        // A patch's square, kept off its edges.
+        Surface::Free(_) => return (rng.range(0.05, 0.95), rng.range(0.05, 0.95)),
     };
     (u, v)
 }
@@ -85,5 +87,22 @@ pub fn kind(s: &Surface) -> &'static str {
         Surface::Cone(_) => "cone",
         Surface::Sphere(_) => "sphere",
         Surface::Torus(_) => "torus",
+        Surface::Free(_) => "free-form",
     }
+}
+
+/// A free-form patch, placed at random: bicubic over the unit square, its
+/// poles a gently waved sheet some 20 mm across, rational if `weighted`.
+pub fn free_surface(rng: &mut Rng, weighted: bool) -> Surface {
+    let mut poles = Vec::new();
+    let mut weights = Vec::new();
+    for i in 0..4 {
+        for j in 0..4 {
+            poles.push(Vec3::new(i as f64 * 7.0, j as f64 * 7.0, rng.range(-3.0, 3.0)));
+            weights.push(if weighted { rng.range(0.6, 1.6) } else { 1.0 });
+        }
+    }
+    let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    let patch = proton_cad::freeform::Patch::new(3, 3, knots.clone(), knots, 4, 4, poles, Some(weights)).unwrap();
+    Surface::Free(Free { id: proton_cad::freeform::keep(patch), frame: rng.frame(20.0) })
 }

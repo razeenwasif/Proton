@@ -184,6 +184,7 @@ fn kind_of(s: &Surface) -> &'static str {
         Surface::Cone(_) => "a cone",
         Surface::Sphere(_) => "a sphere",
         Surface::Torus(_) => "a torus",
+        Surface::Free(_) => "a free-form surface",
     }
 }
 
@@ -222,7 +223,7 @@ fn walk(surface: &Surface, p: Vec3, b: Vec3, d: f64, across: Vec3) -> Vec3 {
         Transform::rotation(c, w, a).apply_point(p)
     };
     match surface {
-        Surface::Plane(_) | Surface::Cone(_) => p + b * d,
+        Surface::Plane(_) | Surface::Cone(_) | Surface::Free(_) => p + b * d,
         Surface::Cylinder(c) => {
             if parallel(c.frame.z, across) {
                 // Round the cylinder, the edge running along it.
@@ -429,6 +430,7 @@ pub fn blend(s: &Solid, picks: &[Pick], kind: Kind, name: &str) -> Result<Solid,
         Kind::Chamfer(a, b) if a <= LINEAR || b <= LINEAR => return Err("a chamfer needs a distance along each face".into()),
         _ => {}
     }
+    s.refuse_free(if matches!(kind, Kind::Round(_)) { "a round" } else { "a chamfer" })?;
     let used = uses(s);
     let mut blends: Vec<Blend> = Vec::new();
     let mut of_edge: HashMap<usize, usize> = HashMap::new();

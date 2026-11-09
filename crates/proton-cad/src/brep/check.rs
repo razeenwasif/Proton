@@ -47,6 +47,40 @@ fn reach(c: &Curve) -> f64 {
 
 /// Every way the solid falls short; none, for a valid solid.
 pub fn check(s: &Solid) -> Vec<Problem> {
+    check_within(s, 0.0)
+}
+
+/// As [`check`], an edge allowed `floor` mm from its vertices and its faces
+/// when the kernel's own tolerance is tighter: for a solid read from a file
+/// made to a coarser one.
+pub fn check_within(s: &Solid, floor: f64) -> Vec<Problem> {
+    let out = check_topology(s, floor);
+    if !out.is_empty() {
+        return out;
+    }
+    check_parameters(s, false)
+}
+
+/// What a solid read from another program's file is held to: [`check_topology`]
+/// to `floor`, and each face's boundary running the way the face says —
+/// but for slivers, too thin for which way they run to mean anything in a
+/// file made to a coarser tolerance, and faces whose parameters only the
+/// mesher's fallback can lay out.
+pub fn check_read(s: &Solid, floor: f64) -> Vec<Problem> {
+    let out = check_topology(s, floor);
+    if !out.is_empty() {
+        return out;
+    }
+    check_parameters(s, true)
+}
+
+/// The first half of [`check`]: each edge ends at its vertices and lies on
+/// its faces (to `floor` where that is looser than the kernel's own), and
+/// the faces close up, manifold, every edge used once each way. What a
+/// solid read from another program's file is held to: its faces' sense is
+/// the file's, taken as given.
+pub fn check_topology(s: &Solid, floor: f64) -> Vec<Problem> {
+    let reach = |c: &Curve| reach(c).max(floor);
     let mut out = Vec::new();
     let name = |f: usize| s.faces[f].name.as_str();
 
@@ -56,8 +90,15 @@ pub fn check(s: &Solid) -> Vec<Problem> {
             continue;
         }
         let tol = reach(&e.curve);
-        if e.point(e.t0).distance(s.vertices[e.start].point) > tol || e.point(e.t1).distance(s.vertices[e.end].point) > tol {
-            out.push(problem(format!("edge {i} does not end at its vertices"), vec![], vec![i]));
+        let off = e.point(e.t0).distance(s.vertices[e.start].point).max(e.point(e.t1).distance(s.vertices[e.end].point));
+        if off > tol {
+            let kind = match &e.curve {
+                Curve::Line(_) => "a line",
+                Curve::Circle(_) => "a circle",
+                Curve::Ellipse(_) => "an ellipse",
+                Curve::BSpline(_) => "a B-spline",
+            };
+            out.push(problem(format!("edge {i}, on {kind}, does not end at its vertices: {off:.3e} mm off"), vec![], vec![i]));
         }
     }
 
@@ -104,36 +145,6 @@ pub fn check(s: &Solid) -> Vec<Problem> {
             }
         }
     }
-    if !out.is_empty() {
-        return out;
-    }
-
-    // In the parameters: which way loops run, and that none cross.
-    let q = Quality { chord: f64::INFINITY, angle: 20f64.to_radians() };
-    let mut pos: Vec<Vec3> = s.vertices.iter().map(|v| v.point).collect();
-    let eps = edge_points(s, &q, &mut pos);
-    for (f, face) in s.faces.iter().enumerate() {
-        let fu = match uv::face(s, f, &eps, &pos, 0.2) {
-            Ok(fu) => fu,
-            Err(e) => {
-                out.push(problem(e, vec![f], vec![]));
-                continue;
-            }
-        };
-        let sign = if face.reversed { -1.0 } else { 1.0 };
-        for (k, l) in fu.loops.iter().enumerate() {
-            let pts: Vec<Vec2> = l.iter().map(|p| p.uv).collect();
-            let a = sign * shoelace(&pts);
-            if (k == 0) != (a > 0.0) {
-                let which = if k == 0 { "its boundary runs clockwise" } else { "a hole in it runs anticlockwise" };
-                out.push(problem(format!("`{}` faces the wrong way: {which} in its surface's parameters", name(f)), vec![f], vec![]));
-            }
-        }
-        if let Some(why) = crossing(s, &fu) {
-            out.push(problem(format!("`{}`: {why}", name(f)), vec![f], vec![]));
-        }
-    }
-
     // Shells: each face in one, each connected, each counted.
     let mut seen = vec![0usize; s.faces.len()];
     for sh in &s.shells {
@@ -178,7 +189,63 @@ pub fn check(s: &Solid) -> Vec<Problem> {
             out.push(problem(format!("shell {k} is in pieces"), sh.faces.clone(), vec![]));
         }
     }
-    if !out.is_empty() {
+    out
+}
+
+/// The second half of [`check`]: in each face's parameters, its boundary
+/// anticlockwise, its holes clockwise, and no two loops crossing.
+fn check_parameters(s: &Solid, lenient: bool) -> Vec<Problem> {
+    let mut out = Vec::new();
+    let name = |f: usize| s.faces[f].name.as_str();
+    // In the parameters: which way loops run, and that none cross.
+    let q = Quality { chord: f64::INFINITY, angle: 20f64.to_radians() };
+    let mut pos: Vec<Vec3> = s.vertices.iter().map(|v| v.point).collect();
+    let eps = edge_points(s, &q, &mut pos);
+    for (f, face) in s.faces.iter().enumerate() {
+        let fu = match uv::face(s, f, &eps, &pos, 0.2) {
+            Ok(fu) => fu,
+            Err(_) if lenient => continue,
+            Err(e) => {
+                out.push(problem(e, vec![f], vec![]));
+                continue;
+            }
+        };
+        let sign = if face.reversed { -1.0 } else { 1.0 };
+        for (k, l) in fu.loops.iter().enumerate() {
+            let pts: Vec<Vec2> = l.iter().map(|p| p.uv).collect();
+            let a = sign * shoelace(&pts);
+            if lenient {
+                // Only the boundary, and only where it encloses a fair part
+                // of the box it spans.
+                let (lo, hi) = pts.iter().fold((Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), p| (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y))));
+                // Which of several loops bounds the face a file need not
+                // say: only a face's one loop is judged.
+                if k > 0 || fu.loops.len() > 1 || a.abs() < 0.01 * (hi.x - lo.x) * (hi.y - lo.y) {
+                    continue;
+                }
+            }
+            if (k == 0) != (a > 0.0) {
+                let which = if k == 0 { "its boundary runs clockwise" } else { "a hole in it runs anticlockwise" };
+                let on = match face.surface {
+                    crate::surface::Surface::Plane(_) => "a plane",
+                    crate::surface::Surface::Cylinder(_) => "a cylinder",
+                    crate::surface::Surface::Cone(_) => "a cone",
+                    crate::surface::Surface::Sphere(_) => "a sphere",
+                    crate::surface::Surface::Torus(_) => "a torus",
+                    crate::surface::Surface::Free(_) => "a free-form surface",
+                };
+                out.push(problem(format!("`{}` (face {f}, on {on}) faces the wrong way: {which} in its surface's parameters", name(f)), vec![f], vec![]));
+            }
+        }
+        if lenient {
+            continue;
+        }
+        if let Some(why) = crossing(s, &fu) {
+            out.push(problem(format!("`{}`: {why}", name(f)), vec![f], vec![]));
+        }
+    }
+
+    if !out.is_empty() || lenient {
         return out;
     }
     match crate::mass::mass(s) {

@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use proton_cad::brep::check::check;
+use proton_cad::brep::check::{check, check_topology};
 use proton_cad::brep::Solid;
 use proton_cad::mass::mass;
 use proton_cad::mesh::{tessellate, Quality};
@@ -278,8 +278,8 @@ fn a_file_in_another_programs_style_is_read() {
 
 #[test]
 fn what_cannot_be_read_says_why() {
-    let free = CUBE_IN_INCHES.replace("#121=PLANE('',#111);", "#121=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#1,#2),(#4,#3)),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.);");
-    assert!(step::read(&free).unwrap_err().contains("free-form surface"));
+    let swept = CUBE_IN_INCHES.replace("#121=PLANE('',#111);", "#121=SURFACE_OF_LINEAR_EXTRUSION('',#40,#32);");
+    assert!(step::read(&swept).unwrap_err().contains("does not read"));
     let none = CUBE_IN_INCHES.replace("#151=MANIFOLD_SOLID_BREP('cube',#150);", "");
     assert!(step::read(&none).unwrap_err().contains("no solids"));
     let broken = CUBE_IN_INCHES.replace("#145=ADVANCED_FACE('',(#135),#125,.T.);", "#145=ADVANCED_FACE('',(#135),#125,.F.);");
@@ -302,4 +302,170 @@ fn timed_step() {
     let t = Instant::now();
     let back = step::read(&file).unwrap();
     println!("64 rounded holes: {} faces, {} KB; written in {:.1} ms, read and checked in {:.1} ms", back[0].1.faces.len(), file.len() / 1024, w.as_secs_f64() * 1e3, t.elapsed().as_secs_f64() * 1e3);
+}
+
+/// The cube with its top a free-form patch — the plane it was, as a
+/// bilinear B-spline — as another program might write it.
+fn cube_with_a_patch() -> String {
+    CUBE_IN_INCHES.replace(
+        "#121=PLANE('',#111);",
+        "#121=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#5,#8),(#6,#7)),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.);",
+    )
+}
+
+#[test]
+fn a_free_form_face_is_read_for_show() {
+    let solids = step::read(&cube_with_a_patch()).unwrap_or_else(|e| panic!("{e}"));
+    let s = &solids[0].1;
+    assert!(s.free_face().is_some());
+    assert!(check_topology(s, 0.0).is_empty(), "{:?}", check_topology(s, 0.0));
+    let m = tessellate(s, &Quality::view(25.4)).unwrap();
+    assert_eq!(m.open_edges(), 0);
+    assert!((m.volume() - 25.4f64.powi(3)).abs() < 1e-6, "the cube is {} mm³", m.volume());
+    // The kernel builds nothing on it, and says so.
+    let e = proton_cad::boolean::boolean(s, s, proton_cad::boolean::Op::Union).unwrap_err();
+    assert!(e.contains("free-form"), "{e}");
+    // Written back as a B-spline, and read the same.
+    let file = step::write("cube", &[("cube", s)], "2026-11-10T00:00:00");
+    assert!(file.contains("B_SPLINE_SURFACE_WITH_KNOTS"));
+    let again = step::read(&file).unwrap_or_else(|e| panic!("{e}"));
+    let m2 = tessellate(&again[0].1, &Quality::view(25.4)).unwrap();
+    assert!((m2.volume() - m.volume()).abs() < 1e-6);
+}
+
+#[test]
+fn an_assembly_places_its_parts_each_where_it_says() {
+    // The cube's solid in a part, the part twice in an assembly: once where
+    // it is, once two inches along x.
+    let file = CUBE_IN_INCHES.replace(
+        "ENDSEC;\nEND-ISO-10303-21;",
+        "#200=AXIS2_PLACEMENT_3D('',#1,#22,#20);
+#201=CARTESIAN_POINT('',(2.,0.,0.));
+#202=AXIS2_PLACEMENT_3D('',#201,#22,#20);
+#203=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#151,#200),#210);
+#204=SHAPE_REPRESENTATION('cube-part',(#200),#210);
+#205=SHAPE_REPRESENTATION_RELATIONSHIP('','',#204,#203);
+#206=SHAPE_REPRESENTATION('pair',(#200,#202),#210);
+#207=(REPRESENTATION_RELATIONSHIP('','',#204,#206)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#208)SHAPE_REPRESENTATION_RELATIONSHIP());
+#208=ITEM_DEFINED_TRANSFORMATION('','',#200,#200);
+#209=(REPRESENTATION_RELATIONSHIP('','',#204,#206)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#211)SHAPE_REPRESENTATION_RELATIONSHIP());
+#210=REPRESENTATION_CONTEXT('','');
+#211=ITEM_DEFINED_TRANSFORMATION('','',#200,#202);
+ENDSEC;
+END-ISO-10303-21;",
+    );
+    assert!(file.contains("#211="), "the assembly was added");
+    let solids = step::read(&file).unwrap_or_else(|e| panic!("{e}"));
+    let names: Vec<&str> = solids.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["cube-part 1", "cube-part 2"]);
+    let xs: Vec<f64> = solids.iter().map(|(_, s)| s.bounds().min.x).collect();
+    assert!(xs[0].abs() < 1e-9 && (xs[1] - 50.8).abs() < 1e-9, "the cubes start at {xs:?}");
+}
+
+#[test]
+fn a_file_that_does_not_say_which_bound_is_outer_is_read() {
+    let m = model("sketch base on XY\n  rect r corner origin size = (40, 20)\n  circle h center (20, 10) diameter = 8\nend\nextrude plate from base distance 5\n");
+    let s = &m.bodies[0].solid;
+    let file = step::write("plate", &[("plate", s)], "2026-11-10T00:00:00");
+    // Every bound a plain FACE_BOUND, the hole's listed first.
+    let plain = file.replace("FACE_OUTER_BOUND", "FACE_BOUND");
+    let swapped: String = plain
+        .lines()
+        .map(|l| match (l.find("ADVANCED_FACE("), l.find(",(#")) {
+            (Some(_), Some(i)) => {
+                let end = l[i..].find(')').unwrap() + i;
+                let bounds: Vec<&str> = l[i + 2..end].split(',').collect();
+                if bounds.len() == 2 { format!("{},({},{}){}", &l[..i], bounds[1], bounds[0], &l[end + 1..]) } else { l.to_string() }
+            }
+            _ => l.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_ne!(swapped, plain, "a face's bounds were swapped");
+    let read = step::read(&swapped).unwrap_or_else(|e| panic!("{e}"));
+    let r = &read[0].1;
+    assert!(check(r).is_empty(), "{:?}", check(r));
+    assert!((mass(r).unwrap().volume - mass(s).unwrap().volume).abs() < 1e-6);
+}
+
+/// A tube as some programs write one: its walls whole cylinders between
+/// circles, with no seam down them, and no bound said to be outer.
+const SEAMLESS_TUBE: &str = r#"ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('tube'),'2;1');
+FILE_NAME('tube.stp','2026-01-01T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));
+ENDSEC;
+DATA;
+#1=CARTESIAN_POINT('',(10.,0.,0.));
+#2=CARTESIAN_POINT('',(10.,0.,5.));
+#3=CARTESIAN_POINT('',(6.,0.,0.));
+#4=CARTESIAN_POINT('',(6.,0.,5.));
+#5=CARTESIAN_POINT('',(0.,0.,0.));
+#6=CARTESIAN_POINT('',(0.,0.,5.));
+#10=DIRECTION('',(0.,0.,1.));
+#11=DIRECTION('',(1.,0.,0.));
+#12=DIRECTION('',(0.,0.,-1.));
+#21=VERTEX_POINT('',#1);
+#22=VERTEX_POINT('',#2);
+#23=VERTEX_POINT('',#3);
+#24=VERTEX_POINT('',#4);
+#30=AXIS2_PLACEMENT_3D('',#5,#10,#11);
+#31=AXIS2_PLACEMENT_3D('',#6,#10,#11);
+#32=AXIS2_PLACEMENT_3D('',#5,#12,#11);
+#40=CIRCLE('',#30,10.);
+#41=CIRCLE('',#31,10.);
+#42=CIRCLE('',#30,6.);
+#43=CIRCLE('',#31,6.);
+#50=EDGE_CURVE('',#21,#21,#40,.T.);
+#51=EDGE_CURVE('',#22,#22,#41,.T.);
+#52=EDGE_CURVE('',#23,#23,#42,.T.);
+#53=EDGE_CURVE('',#24,#24,#43,.T.);
+#60=ORIENTED_EDGE('',*,*,#51,.T.);
+#61=ORIENTED_EDGE('',*,*,#53,.F.);
+#62=ORIENTED_EDGE('',*,*,#50,.F.);
+#63=ORIENTED_EDGE('',*,*,#52,.T.);
+#64=ORIENTED_EDGE('',*,*,#50,.T.);
+#65=ORIENTED_EDGE('',*,*,#51,.F.);
+#66=ORIENTED_EDGE('',*,*,#52,.F.);
+#67=ORIENTED_EDGE('',*,*,#53,.T.);
+#70=EDGE_LOOP('',(#60));
+#71=EDGE_LOOP('',(#61));
+#72=EDGE_LOOP('',(#62));
+#73=EDGE_LOOP('',(#63));
+#74=EDGE_LOOP('',(#64));
+#75=EDGE_LOOP('',(#65));
+#76=EDGE_LOOP('',(#66));
+#77=EDGE_LOOP('',(#67));
+#80=FACE_BOUND('',#70,.T.);
+#81=FACE_BOUND('',#71,.T.);
+#82=FACE_BOUND('',#72,.T.);
+#83=FACE_BOUND('',#73,.T.);
+#84=FACE_BOUND('',#74,.T.);
+#85=FACE_BOUND('',#75,.T.);
+#86=FACE_BOUND('',#76,.T.);
+#87=FACE_BOUND('',#77,.T.);
+#90=PLANE('',#31);
+#91=PLANE('',#32);
+#92=CYLINDRICAL_SURFACE('',#30,10.);
+#93=CYLINDRICAL_SURFACE('',#30,6.);
+#100=ADVANCED_FACE('top',(#81,#80),#90,.T.);
+#101=ADVANCED_FACE('bottom',(#83,#82),#91,.T.);
+#102=ADVANCED_FACE('outside',(#84,#85),#92,.T.);
+#103=ADVANCED_FACE('inside',(#86,#87),#93,.F.);
+#110=CLOSED_SHELL('',(#100,#101,#102,#103));
+#111=MANIFOLD_SOLID_BREP('tube',#110);
+ENDSEC;
+END-ISO-10303-21;
+"#;
+
+#[test]
+fn a_tube_with_seamless_walls_is_read_and_meshed_closed() {
+    let solids = step::read(SEAMLESS_TUBE).unwrap_or_else(|e| panic!("{e}"));
+    let s = &solids[0].1;
+    let m = tessellate(s, &Quality::view(20.0)).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(m.open_edges(), 0, "the mesh has holes");
+    let exact = std::f64::consts::PI * (100.0 - 36.0) * 5.0;
+    // The walls are chords of their circles: a little less, never more.
+    assert!(m.volume() < exact && m.volume() > 0.99 * exact, "the tube is {} mm³ of {exact}", m.volume());
 }

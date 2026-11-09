@@ -205,7 +205,7 @@ part checked against them in tests:
   shield), SFX and SFX-L power supplies, M.2 drives, memory.
 - **Graphics cards** by their published length, height and thickness, the
   slot bracket and the power connectors' place, since every card differs.
-- **Cooling:** fans (80, 92, 120, 140 mm; 15, 25, 38 mm thick, their holes),
+- **Cooling:** fans (80, 92, 120, 140 mm; 14, 15, 25, 38 mm thick, their holes),
   radiators (120–360 mm, by thickness), CPU blocks, GPU blocks, pumps and
   reservoirs, G1/4 fittings (straight, 45°, 90°, rotary, extenders,
   compression for 12/16, 14/16 and 10/13 mm tube), drain ports.
@@ -1026,6 +1026,47 @@ part and extruded; in the browser, an import's steps hidden, a DXF drawn
 in, and an assembly offered imports but not DXFs. No maker's file is kept
 in the repository: they are tested as Proton writes them and as other
 programs' style has them.
+
+The final test (2026-11-10) — the person's FormD T1 build with a custom
+loop, in `~/Proton/CAD/t1-build`, and what it found. Noctua's STEP of the
+NF-A12x15 (2.8 MB, 1,066 faces, the first maker's file read) was refused
+whole: its blades are B-spline patches, its edges on them rational
+B-splines, its solids placed by an assembly, no bound said to be outer,
+cylinders with no seam, edges 0.025 mm off their vertices. Now:
+`freeform` keeps a B-spline or NURBS patch once, and `Surface::Free` names
+it with a frame, so a surface stays a small value copied freely; it is
+evaluated, projected (seeds, then Gauss–Newton), meshed (four pieces a
+knot span, split to the chord), drawn, fit-checked and written back as
+`B_SPLINE_SURFACE_WITH_KNOTS`, and booleans, rounds and shells refuse a
+solid with one, saying why. A rational curve is a cubic through its points
+to half the file's tolerance. An assembly's solids are placed by their
+`ITEM_DEFINED_TRANSFORMATION`s up to the top, one read for each place,
+named by their product. A face whose bounds are all `FACE_BOUND` takes the
+one enclosing most as its boundary. A solid read is checked to the coarser
+of 0.05 mm and the file's tolerance (`check_read`): closed, manifold, each
+edge on its faces, and a face of one loop running its own way — not
+slivers, or loops a file need not order. A face the exact triangulation
+cannot take — a band round a cylinder with no seam, a boundary touching
+itself — is cut by ears from its own boundary points (`mesh::fallback`),
+opened at a cut through none of its holes, no triangle reaching more than
+a few of its boundary's steps round, wound once for the face. The fan reads
+in 0.2 s and meshes closed in 1.5 s (frame 51,414 mm³, impeller 23,201,
+eight pads, the label). Also from the build: the loop is followed through
+a part and those fastened to it as one stop, and parts fastened together
+are too near only if they overlap (`Model::clashes`); the bill of
+materials' columns are as wide as their names (the part's up to 120 mm,
+then set smaller); balloons stay inside the border; a hole's centre mark
+or axis is drawn only where some of it is seen, unless the view shows
+hidden lines; a hole off its body is refused, saying a face's (x, y) are
+its own; fans 14 mm thick. Tested (4 STEP + 1 surfaces + 5 freeform + 2
+fallback + 2 route + 2 drawing): a cube with a patch for its top read,
+meshed to its volume, refused a boolean and written back; a cube placed
+twice by an assembly; a plate whose bounds do not say which is outer; a
+tube with seamless walls meshed closed; patches' identities, rational and
+not; a strip and an L cut whole by ears; a loop through two blocks and
+their fittings; fittings fastened near their block not too near, sunk
+into it overlapping; a blind hole marked only from where it is seen; a
+long name widening the table, and balloons kept on an A4.
 
 | | What | Tested by |
 |---|---|---|

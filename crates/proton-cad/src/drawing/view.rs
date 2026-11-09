@@ -463,11 +463,15 @@ impl Scene {
                 emit(&mut lines, &pts);
             }
             // Centre marks and axes: of holes and bosses, not of rounds —
-            // a face round its axis more than 135°.
+            // a face round its axis more than 135° — and only those seen,
+            // unless the view shows what is hidden too.
             for face in &s.faces {
                 let Surface::Cylinder(c) = face.surface else { continue };
                 let pts: Vec<Vec3> = face.loops.iter().flatten().flat_map(|co| s.edges[co.edge].sample(8)).collect();
                 if pts.is_empty() || round_about(&c.frame, &pts) < 135f64.to_radians() {
+                    continue;
+                }
+                if !hidden && !pts.iter().any(|&p| seen(p, Vec3::ZERO)) {
                     continue;
                 }
                 let axis = c.frame.z;

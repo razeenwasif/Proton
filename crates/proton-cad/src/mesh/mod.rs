@@ -14,6 +14,7 @@
 //! at its corners for shading.
 
 pub mod cdt;
+mod fallback;
 pub mod uv;
 
 use std::collections::HashMap;
@@ -187,6 +188,12 @@ fn steps(s: &Surface, rho: (f64, f64), q: &Quality) -> Steps {
             Steps { du: d, dv: d, scale: (sp.radius, sp.radius), grid: true }
         }
         Surface::Torus(t) => Steps { du: full(turn(t.major + t.minor, q)), dv: full(turn(t.minor, q)), scale: (t.major, t.minor), grid: true },
+        Surface::Free(f) => {
+            // Four pieces a knot span to start; the chord splits the rest.
+            let p = f.patch();
+            let ((u0, u1), (v0, v1)) = p.domain();
+            Steps { du: (u1 - u0) / (p.spans_u() * 4) as f64, dv: (v1 - v0) / (p.spans_v() * 4) as f64, scale: p.scale(), grid: true }
+        }
     }
 }
 
@@ -294,7 +301,37 @@ fn face(solid: &Solid, f: usize, eps: &[EdgePts], q: &Quality, m: &mut Mesh) -> 
     let s = &fc.surface;
     let rho = reach(s, fc.loops.iter().flatten().flat_map(|c| eps[c.edge].ids.iter().map(|&i| m.positions[i as usize])));
     let st = steps(s, rho, q);
-    let fu = uv::face(solid, f, eps, &m.positions, if st.du.is_finite() { st.du } else { 0.2 })?;
+    let fu = match uv::face(solid, f, eps, &m.positions, if st.du.is_finite() { st.du } else { 0.2 }) {
+        Ok(fu) => fu,
+        // What other programs' files bring and the exact triangulation
+        // cannot take — a band round a cylinder with no seam: the face's own
+        // points, cut by ears.
+        Err(e) => return fallback::face(solid, f, eps, st.scale, m).map_err(|why| format!("{e} ({why})")),
+    };
+    // Two points of a loop at one place in the parameters — an edge
+    // shorter than rounding, in a file made to a coarser tolerance — are
+    // one: the later is dropped.
+    let fu = {
+        let (lo, hi) = bounds(&fu.loops);
+        let tiny = (hi - lo).length().max(1e-300) * 1e-9;
+        let loops = fu
+            .loops
+            .iter()
+            .map(|l| {
+                let mut kept: Vec<uv::UvPt> = Vec::new();
+                for &p in l {
+                    if kept.last().is_none_or(|k| (k.uv - p.uv).length() > tiny) {
+                        kept.push(p);
+                    }
+                }
+                while kept.len() > 1 && (kept[0].uv - kept[kept.len() - 1].uv).length() <= tiny {
+                    kept.pop();
+                }
+                kept
+            })
+            .collect();
+        uv::FaceUv { loops, pieces: fu.pieces }
+    };
     let (lo, hi) = bounds(&fu.loops);
     // A cylinder or a cone is straight along v: only how far a triangle
     // reaches round in u takes it off the surface. Stretched round until a
@@ -321,7 +358,12 @@ fn face(solid: &Solid, f: usize, eps: &[EdgePts], q: &Quality, m: &mut Mesh) -> 
         loops.push(idx);
     }
     let plane: Vec<Vec2> = uvs.iter().map(|&p| to_plane(p)).collect();
-    let mut cdt = cdt::polygon(&plane, &loops).map_err(|e| format!("`{}` would not triangulate: {e}", fc.name))?;
+    let mut cdt = match cdt::polygon(&plane, &loops) {
+        Ok(c) => c,
+        // A boundary touching itself, points nearer than rounding: the
+        // face's own points, cut by ears.
+        Err(e) => return fallback::face(solid, f, eps, st.scale, m).map_err(|why| format!("`{}` would not triangulate: {e} ({why})", fc.name)),
+    };
     let add = |cdt: &mut cdt::Cdt, uv: Vec2, clear: f64, uvs: &mut Vec<Vec2>, ids: &mut Vec<Option<u32>>, p3: &mut Vec<Vec3>| -> bool {
         match cdt.insert_inside(to_plane(uv), clear) {
             Some(i) => {

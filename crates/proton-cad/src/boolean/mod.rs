@@ -191,6 +191,8 @@ fn seam_crossings(curve: &Curve, t0: f64, t1: f64, surface: &Surface, along_v: b
 
 /// `a` and `b` joined, `b` cut from `a`, or what they share.
 pub fn boolean(a: &Solid, b: &Solid, op: Op) -> Result<Solid, String> {
+    a.refuse_free("a boolean")?;
+    b.refuse_free("a boolean")?;
     let sa = shapes(a)?;
     let sb = shapes(b)?;
     if !a.bounds().expanded(TOL).overlaps(&b.bounds().expanded(TOL)) {

@@ -153,6 +153,7 @@ fn face_said(s: &Solid, f: usize) -> String {
         Surface::Cone(c) => format!("a cone of half-angle {}° about the axis through {} along {}", n(c.half_angle.to_degrees()), v3(c.frame.origin), v3(c.frame.z)),
         Surface::Sphere(sp) => format!("a sphere of radius {} about {}", n(sp.radius), v3(sp.frame.origin)),
         Surface::Torus(t) => format!("a torus, radii {} and {}, about {} along {}", n(t.major), n(t.minor), v3(t.frame.origin), v3(t.frame.z)),
+        Surface::Free(_) => "a free-form surface, read from another program's file".to_string(),
     };
     format!("{what}; {} mm² ({} cm²), its middle near {}", n(area), n(area / 100.0), v3(middle))
 }

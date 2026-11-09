@@ -1483,6 +1483,7 @@ fn surface_kind(s: &Surface) -> &'static str {
         Surface::Cone(_) => "cone",
         Surface::Sphere(_) => "sphere",
         Surface::Torus(_) => "torus",
+        Surface::Free(_) => "free-form",
     }
 }
 

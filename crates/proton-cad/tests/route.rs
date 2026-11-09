@@ -15,7 +15,9 @@ use proton_cad::vec::Vec3;
 fn files() -> HashMap<PathBuf, String> {
     let fit = proton_cad::library::make("fitting", &[]).unwrap().text;
     let block = "part \"Block\"\nsketch s on XY\n  rect r corner (-10, -10) size = (20, 20)\nend\nextrude b from s distance 20\n".to_string();
-    [("fit.part", fit), ("block.part", block)].into_iter().map(|(p, t)| (PathBuf::from("/a").join(p), t)).collect()
+    // A fitting with no thread below it: it sits on its port's face.
+    let plug = "part \"Plug\"\nsketch s on XY\n  circle c center (0, 0) diameter = 24\nend\nextrude p from s distance 10\nhole socket on p.top at (0, 0) diameter 16.5 depth 6\n".to_string();
+    [("fit.part", fit), ("block.part", block), ("plug.part", plug)].into_iter().map(|(p, t)| (PathBuf::from("/a").join(p), t)).collect()
 }
 
 fn built(text: &str) -> Model {
@@ -138,4 +140,37 @@ fn routes_read_and_print_back_the_same() {
         let e = lang::read(bad).unwrap_err();
         assert!(e.message.contains(says), "{bad:?}: {e}");
     }
+}
+
+/// Two blocks, each with two fittings fastened on its top, `sink` mm into
+/// it; a tube from the first block's to the second's, and one back.
+fn two_blocks(sink: f64) -> String {
+    let z = 20.0 - sink;
+    format!(
+        "assembly \"Blocks\"\nclearance 1\npart b1 from \"block.part\"\npart a1 from \"plug.part\"\npart a2 from \"plug.part\"\npart b2 from \"block.part\"\npart c1 from \"plug.part\"\npart c2 from \"plug.part\"\n\
+         place b2 at (100, 0, 0) turn (0, 0, 0)\nplace a1 at (-13, 0, {z}) turn (0, 0, 0)\nplace a2 at (13, 0, {z}) turn (0, 0, 0)\nplace c1 at (87, 0, {z}) turn (0, 0, 0)\nplace c2 at (113, 0, {z}) turn (0, 0, 0)\n\
+         ground b1\nground b2\nground a1\nground a2\nground c1\nground c2\n\
+         mate a1_on fastened b1 to a1\nmate a2_on fastened b1 to a2\nmate c1_on fastened b2 to c1\nmate c2_on fastened b2 to c2\n\
+         route there hard 14/16 from a2.socket to c1.socket via (13, 0, 60), (87, 0, 60) bend 20\n\
+         route back hard 14/16 from c2.socket to a1.socket via (113, 0, 80), (-13, 0, 80) bend 20\n"
+    )
+}
+
+#[test]
+fn the_loop_goes_through_a_block_and_the_fittings_fastened_to_it_as_one() {
+    let m = ok(&two_blocks(0.0));
+    assert!(m.order.closed, "{:?}", m.order);
+    assert_eq!(m.order.parts.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["b1", "b2"]);
+}
+
+#[test]
+fn a_fitting_fastened_near_its_block_is_not_too_near_but_one_sunk_into_it_overlaps() {
+    // Half a millimetre off its block: inside the clearance of 1.
+    let seated = ok(&two_blocks(-0.5));
+    let near: Vec<_> = seated.clashes().into_iter().filter(|c| !c.a.starts_with("there") && !c.a.starts_with("back") && !c.b.starts_with("there") && !c.b.starts_with("back")).collect();
+    assert!(near.is_empty(), "{near:?}");
+    // The fit check alone, not knowing they are fastened, finds them too near.
+    assert!(fit(&seated.leaves(), seated.clearance).iter().any(|c| (c.a == "b1" && c.b == "a1") || (c.a == "a1" && c.b == "b1")));
+    let sunk = ok(&two_blocks(1.0));
+    assert!(sunk.clashes().iter().any(|c| c.overlap && ((c.a == "b1" && c.b == "a1") || (c.a == "a1" && c.b == "b1"))));
 }

@@ -374,3 +374,46 @@ fn timed_drawing() {
         t.elapsed().as_secs_f64() * 1e3
     );
 }
+
+#[test]
+fn a_hole_not_seen_gets_no_centre_mark_unless_hidden_lines_are_drawn() {
+    // A blind hole up from the bottom: seen from below, behind the block
+    // from above.
+    let cup = "part \"Cup\"\nsketch s on XY\n  rect r corner origin size = (40, 40)\nend\nextrude b from s distance 10\nhole h on b.bottom at (20, -20) diameter 6 depth 4\n";
+    let m = model::build(&part::read(cup).unwrap_or_else(|d| panic!("{d}")));
+    assert!(m.errors.is_empty(), "{:?}", m.errors);
+    let s = &m.bodies[0].solid;
+    assert!(project(&[s], Dir::Top, false, None, 3.0).unwrap().center.is_empty(), "a mark for a hole the top hides");
+    assert_eq!(project(&[s], Dir::Top, true, None, 3.0).unwrap().center.len(), 2, "hidden lines drawn, its mark is too");
+    assert_eq!(project(&[s], Dir::Bottom, false, None, 3.0).unwrap().center.len(), 2, "seen from below, marked");
+    // On the bottom, y runs the other way: (20, 20) is off the block, and
+    // said to be rather than left out.
+    let off = model::build(&part::read(&cup.replace("(20, -20)", "(20, 20)")).unwrap());
+    assert!(off.errors.iter().any(|e| e.message.contains("is off")), "{:?}", off.errors);
+}
+
+#[test]
+fn the_bill_of_materials_is_as_wide_as_its_names_and_balloons_stay_on_the_sheet() {
+    // A part with a maker's long name, and the view pushed into a corner.
+    let long = "EK-Quantum Torque Extender 7 mm, EK-Quantum Torque Micro Rotary 90 with HDC 16 (12/16 hard tube)";
+    let named = format!("part \"{long}\"\nmaterial brass\nsketch s on XY\n  circle c center (0, 0) radius = 8\nend\nextrude f from s distance 20\n");
+    let asm = ASSEMBLY.replace("part pin from \"pin.part\"", "part pin from \"fit.part\"");
+    let fs = files(&[("bench.assembly", &asm), ("fit.part", &named)]);
+    let load = move |p: &Path| fs.get(p).cloned().ok_or_else(|| format!("no file {}", p.display()));
+    let sheet = "drawing \"Corner\"\nof \"bench.assembly\"\nsheet A4\nscale 1/2\nview iso iso at (40, 170)\nballoons iso\nbom at (287, 60)\n";
+    let d = lang::read(sheet).unwrap_or_else(|e| panic!("{e}"));
+    let b = build(&d, Path::new("/a/corner.drawing"), &load);
+    assert!(b.errors.is_empty(), "{:?}", b.errors);
+    // The part's column widened to its 120 mm, the name set smaller to fit.
+    let bom = b.sheet.boxes.iter().find(|x| x.0 == "bom").unwrap().1;
+    let width = bom[2] - bom[0];
+    assert!(width > 12.0 + 12.0 + 74.0 + 30.0 + 22.0 && width <= 12.0 + 12.0 + 120.0 + 30.0 + 22.0 + 1e-9, "the table is {width} wide");
+    let size = b.sheet.prims.iter().find_map(|p| if let Prim::Text { text, size, .. } = p { (text == long).then_some(*size) } else { None }).expect("the long name is in the table");
+    assert!((1.5..2.5).contains(&size), "set at {size}");
+    // Every balloon inside the border.
+    let balls: Vec<P2> = b.sheet.prims.iter().filter_map(|p| if let Prim::Circle { c, r, pen: Pen::Dim } = p { (*r == 5.0).then_some(*c) } else { None }).collect();
+    assert!(!balls.is_empty());
+    for p in &balls {
+        assert!(p.x >= 15.0 && p.x <= b.sheet.width - 15.0 && p.y >= 15.0 && p.y <= b.sheet.height - 15.0, "a balloon at {p:?} is off the {} × {} sheet", b.sheet.width, b.sheet.height);
+    }
+}

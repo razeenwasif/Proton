@@ -265,6 +265,7 @@ fn beside(s: &Solid, f: usize, g: usize) -> bool {
 /// stands square. Faces taken away side by side, or curved, are moved out
 /// with the inside instead, the edge between them gone with them.
 pub fn shell(s: &Solid, t: f64, open: &[usize], name: &str) -> Result<Solid, String> {
+    s.refuse_free("a shell")?;
     if t <= LINEAR {
         return Err("a shell's walls need a thickness".into());
     }

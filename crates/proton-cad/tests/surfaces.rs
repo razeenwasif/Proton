@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{kind, params, surfaces, Rng};
+use common::{free_surface, kind, params, surfaces, Rng};
 use proton_cad::tol::LINEAR;
 use proton_cad::{Aabb, Cone, Frame, Side, Surface, Transform, Vec3};
 
@@ -133,5 +133,39 @@ fn a_param_box_covers_every_point_of_the_surface_in_the_box() {
                 assert!(in_u && pv >= v0 - 1e-9 && pv <= v1 + 1e-9, "{}: ({pu}, {pv}) outside ({u0}..{u1}, {v0}..{v1})", kind(&s));
             }
         }
+    }
+}
+
+#[test]
+fn a_free_form_patch_keeps_the_same_identities() {
+    let mut rng = Rng(16);
+    for k in 0..12 {
+        let s = free_surface(&mut rng, k % 2 == 1);
+        let cloud: Vec<Vec3> = (0..20000).map(|_| params(&s, &mut rng)).map(|(u, v)| s.point(u, v)).collect();
+        for _ in 0..100 {
+            let (u, v) = params(&s, &mut rng);
+            let p = s.point(u, v);
+            assert!(s.distance(p).abs() <= 1e-8, "{}", s.distance(p));
+            let n = s.normal(u, v);
+            assert!((n.length() - 1.0).abs() < 1e-12);
+            assert!(n.distance(s.gradient(p)) <= 1e-6, "normal {n:?} gradient {:?}", s.gradient(p));
+            let (du, dv) = s.derivatives(u, v);
+            let h = 1e-6;
+            let fu = (s.point(u + h, v) - s.point(u - h, v)) / (2.0 * h);
+            let fv = (s.point(u, v + h) - s.point(u, v - h)) / (2.0 * h);
+            assert!(du.distance(fu) <= 1e-5 * (1.0 + du.length()) && dv.distance(fv) <= 1e-5 * (1.0 + dv.length()));
+            // Back to its own parameters, and a point off it to its nearest.
+            let (pu, pv) = s.project(p);
+            assert!((pu - u).abs() < 1e-7 && (pv - v).abs() < 1e-7, "({u}, {v}) projected to ({pu}, {pv})");
+            let off = p + n * rng.range(-0.5, 0.5);
+            let q = s.closest(off);
+            let best = cloud.iter().map(|c| c.distance(off)).fold(f64::INFINITY, f64::min);
+            assert!(off.distance(q) <= best + 1e-9, "nearest {} but a point of it is {best} away", off.distance(q));
+        }
+        // Moved, it is the patch moved.
+        let m = Transform::rotation(rng.point(10.0), rng.direction(), 1.1).then(&Transform::translation(rng.point(10.0)));
+        let moved = s.transformed(&m);
+        let (u, v) = params(&s, &mut rng);
+        assert!(moved.point(u, v).distance(m.apply_point(s.point(u, v))) <= 1e-9);
     }
 }

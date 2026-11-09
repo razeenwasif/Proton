@@ -509,7 +509,7 @@ pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<Path
                     errors.push(Diag::new(n.line, 1, "only an assembly's parts are ballooned"));
                     continue;
                 }
-                balloons(&mut sheet.prims, &pieces, &bom, &pl);
+                balloons(&mut sheet.prims, &pieces, &bom, &pl, (sheet.width, sheet.height));
             }
             _ => {}
         }
@@ -733,7 +733,24 @@ fn frame(sheet: &mut Sheet, title: &str, of: &str, target: &Option<Target>, scal
 
 /// The bill of materials as a table, its top right at `at`.
 fn table(sheet: &mut Sheet, bom: &[assembly::model::BomRow], at: P2) {
-    let cols = [("ITEM", 12.0), ("QTY", 12.0), ("PART", 74.0), ("MATERIAL", 30.0), ("LENGTH", 22.0)];
+    let cells: Vec<[String; 5]> = bom
+        .iter()
+        .enumerate()
+        .map(|(i, r)| [(i + 1).to_string(), r.count.to_string(), r.part.clone(), r.material.clone().unwrap_or_default(), r.length.map(|l| format!("{} mm", l.ceil())).unwrap_or_default()])
+        .collect();
+    // Each column as wide as its widest text, at least as it was; the
+    // part's no wider than 120 mm, a longer name set smaller to fit it.
+    let mins = [("ITEM", 12.0), ("QTY", 12.0), ("PART", 74.0), ("MATERIAL", 30.0), ("LENGTH", 22.0)];
+    let size = 2.5;
+    let cols: Vec<(&str, f64)> = mins
+        .iter()
+        .enumerate()
+        .map(|(k, &(label, min))| {
+            let widest = cells.iter().map(|c| text_width(&c[k], size)).fold(text_width(label, size), f64::max);
+            let w = (widest + 3.0).max(min);
+            (label, if k == 2 { w.min(120.0) } else { w })
+        })
+        .collect();
     let width: f64 = cols.iter().map(|c| c.1).sum();
     let row = 6.0;
     let x0 = at.x - width;
@@ -753,20 +770,30 @@ fn table(sheet: &mut Sheet, bom: &[assembly::model::BomRow], at: P2) {
         text(p, P2::new(x + 1.5, top - row + 1.8), 2.5, *label, Anchor::Start, 0.0, Pen::Frame);
         x += cw;
     }
-    for (i, r) in bom.iter().enumerate() {
+    for (i, row_cells) in cells.iter().enumerate() {
         let y = top - row * (i + 2) as f64 + 1.8;
-        let cells = [(i + 1).to_string(), r.count.to_string(), r.part.clone(), r.material.clone().unwrap_or_default(), r.length.map(|l| format!("{} mm", l.ceil())).unwrap_or_default()];
         let mut x = x0;
-        for (k, c) in cells.iter().enumerate() {
-            text(p, P2::new(x + 1.5, y), 2.5, c.clone(), Anchor::Start, 0.0, Pen::Frame);
+        for (k, c) in row_cells.iter().enumerate() {
+            let room = cols[k].1 - 3.0;
+            let fits = (size * room / text_width(c, size).max(1e-9)).min(size).max(1.5);
+            text(p, P2::new(x + 1.5, y), fits, c.clone(), Anchor::Start, 0.0, Pen::Frame);
             x += cols[k].1;
         }
     }
     sheet.boxes.push(("bom".into(), [x0, top - row * rows as f64, at.x, top]));
 }
 
-/// Each row's first part pointed at by a balloon numbered for its row.
-fn balloons(prims: &mut Vec<Prim>, pieces: &[Piece], bom: &[assembly::model::BomRow], pl: &Place) {
+/// How wide `s` is set `size` high, mm: Helvetica's average letter, a
+/// little over half its height.
+fn text_width(s: &str, size: f64) -> f64 {
+    s.chars().map(|c| if c.is_ascii_uppercase() || c.is_ascii_digit() { 0.62 } else if c == ' ' || c == '.' || c == ',' || c == '(' || c == ')' { 0.3 } else { 0.55 }).sum::<f64>() * size
+}
+
+/// Each row's first part pointed at by a balloon numbered for its row,
+/// every balloon kept on the sheet, inside its border.
+fn balloons(prims: &mut Vec<Prim>, pieces: &[Piece], bom: &[assembly::model::BomRow], pl: &Place, sheet: (f64, f64)) {
+    let (w, h) = sheet;
+    let inside = |b: P2| P2::new(b.x.clamp(20.0, w - 20.0), b.y.clamp(20.0, h - 20.0));
     let c = (pl.lo + pl.hi) * 0.5;
     let reach = (pl.hi - pl.lo).x.hypot((pl.hi - pl.lo).y) * 0.5 + 12.0;
     let mut placed: Vec<P2> = Vec::new();
@@ -780,9 +807,14 @@ fn balloons(prims: &mut Vec<Prim>, pieces: &[Piece], bom: &[assembly::model::Bom
         // middle, up and to the left.
         let d = if at.distance(c) < 1e-6 { P2::new(-0.6, 0.8) } else { at - c };
         let l = d.x.hypot(d.y);
-        let mut ball = c + P2::new(d.x / l, d.y / l) * reach;
-        while placed.iter().any(|q| q.distance(ball) < 11.0) {
-            ball = ball + P2::new(d.x / l, d.y / l) * 11.0;
+        let mut ball = inside(c + P2::new(d.x / l, d.y / l) * reach);
+        // Clear of the others: further out, or where the border stops
+        // that, along it.
+        let mut tries = 0;
+        while placed.iter().any(|q| q.distance(ball) < 11.0) && tries < 64 {
+            let out = inside(ball + P2::new(d.x / l, d.y / l) * 11.0);
+            ball = if out.distance(ball) > 1.0 { out } else { inside(ball + P2::new(-d.y / l, d.x / l) * 11.0) };
+            tries += 1;
         }
         placed.push(ball);
         let to_ball = ball - at;
@@ -859,7 +891,7 @@ pub fn blueprint(of: &str, title: &str, m: &assembly::Model, blue: bool) -> Stri
     t.push_str("balloons iso\n");
     t.push_str(&format!("bom at (584, {})\n", 50.0 + 6.0 * (m.bom().len() + 1) as f64));
     // The tightest gaps, up to six.
-    let mut gaps = assembly::fit::fit(&m.leaves(), m.clearance.max(5.0)).into_iter().filter(|c| !c.overlap).collect::<Vec<_>>();
+    let mut gaps = m.clashes_at(m.clearance.max(5.0)).into_iter().filter(|c| !c.overlap).collect::<Vec<_>>();
     gaps.sort_by(|x, y| x.gap.total_cmp(&y.gap));
     for (k, g) in gaps.iter().take(6).enumerate() {
         t.push_str(&format!("dim gap{} front clearance {} to {}\n", k + 1, g.a, g.b));

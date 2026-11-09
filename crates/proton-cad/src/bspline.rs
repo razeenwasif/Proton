@@ -50,96 +50,13 @@ impl BSplineCurve {
 
     /// The knot span `t` falls in: `k` with `knots[k] <= t < knots[k+1]`.
     fn span(&self, t: f64) -> usize {
-        let n = self.poles.len() - 1;
-        let p = self.degree;
-        if t >= self.knots[n + 1] {
-            // The end belongs to the last span that has any length.
-            let mut k = n;
-            while k > p && self.knots[k] >= self.knots[n + 1] {
-                k -= 1;
-            }
-            return k;
-        }
-        if t <= self.knots[p] {
-            let mut k = p;
-            while k < n && self.knots[k + 1] <= self.knots[p] {
-                k += 1;
-            }
-            return k;
-        }
-        let (mut lo, mut hi) = (p, n + 1);
-        while hi - lo > 1 {
-            let mid = (lo + hi) / 2;
-            if t < self.knots[mid] {
-                hi = mid;
-            } else {
-                lo = mid;
-            }
-        }
-        lo
+        span_of(&self.knots, self.degree, self.poles.len(), t)
     }
 
     /// The nonzero basis functions at `t` and their first `nd` derivatives:
     /// `ders[k][j]` is the k-th derivative of N(span − p + j).
     fn basis(&self, span: usize, t: f64, nd: usize) -> Vec<Vec<f64>> {
-        let p = self.degree;
-        let u = &self.knots;
-        let mut ndu = vec![vec![0.0; p + 1]; p + 1];
-        let mut left = vec![0.0; p + 1];
-        let mut right = vec![0.0; p + 1];
-        ndu[0][0] = 1.0;
-        for j in 1..=p {
-            left[j] = t - u[span + 1 - j];
-            right[j] = u[span + j] - t;
-            let mut saved = 0.0;
-            for r in 0..j {
-                ndu[j][r] = right[r + 1] + left[j - r];
-                let temp = ndu[r][j - 1] / ndu[j][r];
-                ndu[r][j] = saved + right[r + 1] * temp;
-                saved = left[j - r] * temp;
-            }
-            ndu[j][j] = saved;
-        }
-        let mut ders = vec![vec![0.0; p + 1]; nd + 1];
-        for j in 0..=p {
-            ders[0][j] = ndu[j][p];
-        }
-        let top = nd.min(p);
-        let mut a = vec![vec![0.0; p + 1]; 2];
-        for r in 0..=p {
-            let (mut s1, mut s2) = (0usize, 1usize);
-            a[0][0] = 1.0;
-            for k in 1..=top {
-                let mut d = 0.0;
-                let rk = r as isize - k as isize;
-                let pk = p - k;
-                if rk >= 0 {
-                    a[s2][0] = a[s1][0] / ndu[pk + 1][rk as usize];
-                    d = a[s2][0] * ndu[rk as usize][pk];
-                }
-                let j1 = if rk >= -1 { 1 } else { (-rk) as usize };
-                let j2 = if r as isize - 1 <= pk as isize { k - 1 } else { p - r };
-                for j in j1..=j2 {
-                    let col = (rk + j as isize) as usize;
-                    a[s2][j] = (a[s1][j] - a[s1][j - 1]) / ndu[pk + 1][col];
-                    d += a[s2][j] * ndu[col][pk];
-                }
-                if r <= pk {
-                    a[s2][k] = -a[s1][k - 1] / ndu[pk + 1][r];
-                    d += a[s2][k] * ndu[r][pk];
-                }
-                ders[k][r] = d;
-                std::mem::swap(&mut s1, &mut s2);
-            }
-        }
-        let mut f = p as f64;
-        for (k, row) in ders.iter_mut().enumerate().take(top + 1).skip(1) {
-            for v in row.iter_mut() {
-                *v *= f;
-            }
-            f *= (p - k) as f64;
-        }
-        ders
+        basis_of(&self.knots, self.degree, span, t, nd)
     }
 
     /// The point at `t` and its first `nd` derivatives.
@@ -242,4 +159,99 @@ impl BSplineCurve {
         let poles = self.poles.iter().rev().copied().collect();
         BSplineCurve { degree: self.degree, knots, poles }
     }
+}
+
+/// The knot span `t` falls in, of a B-spline of `count` poles: `k` with
+/// `knots[k] <= t < knots[k+1]`.
+pub(crate) fn span_of(knots: &[f64], degree: usize, count: usize, t: f64) -> usize {
+    let n = count - 1;
+    let p = degree;
+    if t >= knots[n + 1] {
+        // The end belongs to the last span that has any length.
+        let mut k = n;
+        while k > p && knots[k] >= knots[n + 1] {
+            k -= 1;
+        }
+        return k;
+    }
+    if t <= knots[p] {
+        let mut k = p;
+        while k < n && knots[k + 1] <= knots[p] {
+            k += 1;
+        }
+        return k;
+    }
+    let (mut lo, mut hi) = (p, n + 1);
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if t < knots[mid] {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    lo
+}
+
+/// The nonzero basis functions at `t` and their first `nd` derivatives:
+/// `ders[k][j]` is the k-th derivative of N(span − p + j).
+pub(crate) fn basis_of(knots: &[f64], degree: usize, span: usize, t: f64, nd: usize) -> Vec<Vec<f64>> {
+    let p = degree;
+    let u = knots;
+    let mut ndu = vec![vec![0.0; p + 1]; p + 1];
+    let mut left = vec![0.0; p + 1];
+    let mut right = vec![0.0; p + 1];
+    ndu[0][0] = 1.0;
+    for j in 1..=p {
+        left[j] = t - u[span + 1 - j];
+        right[j] = u[span + j] - t;
+        let mut saved = 0.0;
+        for r in 0..j {
+            ndu[j][r] = right[r + 1] + left[j - r];
+            let temp = ndu[r][j - 1] / ndu[j][r];
+            ndu[r][j] = saved + right[r + 1] * temp;
+            saved = left[j - r] * temp;
+        }
+        ndu[j][j] = saved;
+    }
+    let mut ders = vec![vec![0.0; p + 1]; nd + 1];
+    for j in 0..=p {
+        ders[0][j] = ndu[j][p];
+    }
+    let top = nd.min(p);
+    let mut a = vec![vec![0.0; p + 1]; 2];
+    for r in 0..=p {
+        let (mut s1, mut s2) = (0usize, 1usize);
+        a[0][0] = 1.0;
+        for k in 1..=top {
+            let mut d = 0.0;
+            let rk = r as isize - k as isize;
+            let pk = p - k;
+            if rk >= 0 {
+                a[s2][0] = a[s1][0] / ndu[pk + 1][rk as usize];
+                d = a[s2][0] * ndu[rk as usize][pk];
+            }
+            let j1 = if rk >= -1 { 1 } else { (-rk) as usize };
+            let j2 = if r as isize - 1 <= pk as isize { k - 1 } else { p - r };
+            for j in j1..=j2 {
+                let col = (rk + j as isize) as usize;
+                a[s2][j] = (a[s1][j] - a[s1][j - 1]) / ndu[pk + 1][col];
+                d += a[s2][j] * ndu[col][pk];
+            }
+            if r <= pk {
+                a[s2][k] = -a[s1][k - 1] / ndu[pk + 1][r];
+                d += a[s2][k] * ndu[r][pk];
+            }
+            ders[k][r] = d;
+            std::mem::swap(&mut s1, &mut s2);
+        }
+    }
+    let mut f = p as f64;
+    for (k, row) in ders.iter_mut().enumerate().take(top + 1).skip(1) {
+        for v in row.iter_mut() {
+            *v *= f;
+        }
+        f *= (p - k) as f64;
+    }
+    ders
 }

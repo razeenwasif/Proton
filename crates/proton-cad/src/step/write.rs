@@ -76,6 +76,9 @@ impl Out {
     }
 
     fn surface(&mut self, s: &Surface) -> u64 {
+        if let Surface::Free(f) = s {
+            return self.patch(f);
+        }
         let a = self.placement(s.frame());
         match s {
             Surface::Plane(_) => self.add(format!("PLANE('',#{a})")),
@@ -83,6 +86,38 @@ impl Out {
             Surface::Cone(c) => self.add(format!("CONICAL_SURFACE('',#{a},{},{})", real(c.radius), real(c.half_angle))),
             Surface::Sphere(sp) => self.add(format!("SPHERICAL_SURFACE('',#{a},{})", real(sp.radius))),
             Surface::Torus(t) => self.add(format!("TOROIDAL_SURFACE('',#{a},{},{})", real(t.major), real(t.minor))),
+            Surface::Free(_) => unreachable!("written above"),
+        }
+    }
+
+    /// A free-form patch, its poles where its frame puts them: a
+    /// `B_SPLINE_SURFACE_WITH_KNOTS`, or the complex rational one.
+    fn patch(&mut self, f: &crate::surface::Free) -> u64 {
+        let p = f.patch();
+        let rows: Vec<String> = (0..p.nu).map(|i| {
+            let ids: Vec<String> = (0..p.nv).map(|j| format!("#{}", self.point(f.frame.to_world(p.poles[i * p.nv + j])))).collect();
+            format!("({})", ids.join(","))
+        }).collect();
+        let knots = |k: &[f64]| {
+            let mut out: Vec<(f64, usize)> = Vec::new();
+            for &x in k {
+                match out.last_mut() {
+                    Some((y, n)) if *y == x => *n += 1,
+                    _ => out.push((x, 1)),
+                }
+            }
+            (out.iter().map(|k| k.1.to_string()).collect::<Vec<_>>().join(","), out.iter().map(|k| real(k.0)).collect::<Vec<_>>().join(","))
+        };
+        let ((mu, ku), (mv, kv)) = (knots(&p.ku), knots(&p.kv));
+        match &p.weights {
+            None => self.add(format!("B_SPLINE_SURFACE_WITH_KNOTS('',{},{},({}),.UNSPECIFIED.,.F.,.F.,.F.,({mu}),({mv}),({ku}),({kv}),.UNSPECIFIED.)", p.du, p.dv, rows.join(","))),
+            Some(w) => {
+                let wrows: Vec<String> = (0..p.nu).map(|i| format!("({})", (0..p.nv).map(|j| real(w[i * p.nv + j])).collect::<Vec<_>>().join(","))).collect();
+                self.add(format!(
+                    "(BOUNDED_SURFACE() B_SPLINE_SURFACE({},{},({}),.UNSPECIFIED.,.F.,.F.,.F.) B_SPLINE_SURFACE_WITH_KNOTS(({mu}),({mv}),({ku}),({kv}),.UNSPECIFIED.) GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_SURFACE(({})) REPRESENTATION_ITEM('') SURFACE())",
+                    p.du, p.dv, rows.join(","), wrows.join(",")
+                ))
+            }
         }
     }
 }

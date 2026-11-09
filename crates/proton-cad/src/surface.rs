@@ -61,6 +61,26 @@ pub struct Torus {
     pub minor: f64,
 }
 
+/// A free-form patch ([`crate::freeform`]), kept in the store by number,
+/// placed by `frame`: a point of the patch `q` is at `frame.to_world(q)`.
+/// Read from other programs' files for show: the kernel does not build on it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Free {
+    pub id: u32,
+    pub frame: Frame,
+}
+
+impl Free {
+    pub fn patch(&self) -> std::sync::Arc<crate::freeform::Patch> {
+        crate::freeform::patch(self.id)
+    }
+
+    fn eval(&self, u: f64, v: f64) -> (Vec3, Vec3, Vec3) {
+        let (p, a, b) = self.patch().eval(u, v);
+        (self.frame.to_world(p), self.frame.vec_to_world(a), self.frame.vec_to_world(b))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Surface {
     Plane(Plane),
@@ -68,6 +88,7 @@ pub enum Surface {
     Cone(Cone),
     Sphere(Sphere),
     Torus(Torus),
+    Free(Free),
 }
 
 /// Which side of a surface a point is on, to the tolerance.
@@ -115,6 +136,7 @@ impl Surface {
             Surface::Cone(s) => &s.frame,
             Surface::Sphere(s) => &s.frame,
             Surface::Torus(s) => &s.frame,
+            Surface::Free(s) => &s.frame,
         }
     }
 
@@ -134,6 +156,7 @@ impl Surface {
                 let (sv, cv) = v.sin_cos();
                 s.frame.origin + around(&s.frame, u).0 * (s.major + s.minor * cv) + s.frame.z * (s.minor * sv)
             }
+            Surface::Free(s) => s.eval(u, v).0,
         }
     }
 
@@ -156,6 +179,10 @@ impl Surface {
                 let (sv, cv) = v.sin_cos();
                 let (e, de) = around(&s.frame, u);
                 (de * (s.major + s.minor * cv), (s.frame.z * cv - e * sv) * s.minor)
+            }
+            Surface::Free(s) => {
+                let (_, a, b) = s.eval(u, v);
+                (a, b)
             }
         }
     }
@@ -185,6 +212,13 @@ impl Surface {
                 let (rho, h, _) = polar(&s.frame, p);
                 (rho - s.major).hypot(h) - s.minor
             }
+            Surface::Free(_) => {
+                // From its nearest point, signed by the normal there.
+                let (u, v) = self.project(p);
+                let d = p - self.point(u, v);
+                let len = d.length();
+                if d.dot(self.normal(u, v)) < 0.0 { -len } else { len }
+            }
         }
     }
 
@@ -208,6 +242,10 @@ impl Surface {
                 let core = s.frame.origin + out * s.major;
                 (p - core).unit_or(out)
             }
+            Surface::Free(_) => {
+                let (u, v) = self.project(p);
+                self.normal(u, v)
+            }
         }
     }
 
@@ -228,6 +266,7 @@ impl Surface {
                 let (sv, cv) = v.sin_cos();
                 around(&s.frame, u).0 * cv + s.frame.z * sv
             }
+            Surface::Free(s) => s.frame.vec_to_world(s.patch().normal(u, v)),
         }
     }
 
@@ -257,6 +296,7 @@ impl Surface {
                 let (rho, h, out) = polar(&s.frame, p);
                 (turn(out, &s.frame), h.atan2(rho - s.major).rem_euclid(TAU))
             }
+            Surface::Free(s) => s.patch().project(s.frame.to_local(p)),
         }
     }
 
@@ -280,7 +320,7 @@ impl Surface {
     /// Whether `u`, and `v`, come round again after a whole turn.
     pub fn periodic(&self) -> (bool, bool) {
         match self {
-            Surface::Plane(_) => (false, false),
+            Surface::Plane(_) | Surface::Free(_) => (false, false),
             Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_) => (true, false),
             Surface::Torus(_) => (true, true),
         }
@@ -291,7 +331,7 @@ impl Surface {
     /// centre, and answers with its frame's.
     pub fn axis(&self) -> Option<(Vec3, Vec3)> {
         match self {
-            Surface::Plane(_) => None,
+            Surface::Plane(_) | Surface::Free(_) => None,
             Surface::Cylinder(s) => Some((s.frame.origin, s.frame.z)),
             Surface::Cone(s) => Some((s.frame.origin, s.frame.z)),
             Surface::Sphere(s) => Some((s.frame.origin, s.frame.z)),
@@ -308,6 +348,12 @@ impl Surface {
             Surface::Cone(s) => Some(s.radius.max(1.0)),
             Surface::Sphere(s) => Some(s.radius),
             Surface::Torus(s) => Some(s.minor),
+            Surface::Free(s) => {
+                // A knot span's length, roughly: where it can turn.
+                let p = s.patch();
+                let d = p.hull().max - p.hull().min;
+                Some((d.length() / (p.spans_u().max(p.spans_v()) as f64 * 4.0)).max(0.01))
+            }
         }
     }
 
@@ -330,6 +376,7 @@ impl Surface {
             }
             Surface::Sphere(_) => ((0.0, TAU), (-FRAC_PI_2, FRAC_PI_2)),
             Surface::Torus(_) => ((0.0, TAU), (0.0, TAU)),
+            Surface::Free(s) => s.patch().domain(),
         }
     }
 
@@ -368,6 +415,8 @@ impl Surface {
                 }
                 Surface::Sphere(Sphere { radius, ..s })
             }
+            // A free-form patch's offset is not one: the kernel does not keep it.
+            Surface::Free(_) => return None,
             Surface::Torus(s) => {
                 let minor = s.minor + d;
                 if minor <= tol::LINEAR || minor >= s.major - tol::LINEAR {
@@ -386,6 +435,7 @@ impl Surface {
             Surface::Cone(x) => &mut x.frame,
             Surface::Sphere(x) => &mut x.frame,
             Surface::Torus(x) => &mut x.frame,
+            Surface::Free(x) => &mut x.frame,
         };
         *f = f.transformed(t);
         s

@@ -15,7 +15,7 @@ use std::time::SystemTime;
 
 use proton_cad::assembly::lang::{self, Item, Source};
 use proton_cad::assembly::model::{Built, Model};
-use proton_cad::assembly::{self as asm, fit};
+use proton_cad::assembly::{self as asm};
 use proton_cad::brep::Solid;
 use proton_cad::frame::Transform;
 use proton_cad::mesh::{tessellate, Mesh, Quality};
@@ -455,6 +455,7 @@ fn body_at(name: &str, line: usize, s: &Solid, place: &Transform, mesh: &Mesh) -
                 Surface::Cone(_) => "cone",
                 Surface::Sphere(_) => "sphere",
                 Surface::Torus(_) => "torus",
+                Surface::Free(_) => "free-form",
             }
             .into(),
             plane: None,
@@ -611,7 +612,7 @@ pub fn view(a: &lang::Assembly, m: &Model, path: &str, name: &str, generation: u
 
 /// Where the parts do not fit.
 pub fn clashes(m: &Model) -> Vec<CadClash> {
-    fit::fit(&m.leaves(), m.clearance)
+    m.clashes()
         .into_iter()
         .map(|c| CadClash { a: c.a, b: c.b, overlap: c.overlap, volume: c.volume, gap: c.gap, at: vec![c.at.0.x, c.at.0.y, c.at.0.z, c.at.1.x, c.at.1.y, c.at.1.z] })
         .collect()

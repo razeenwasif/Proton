@@ -92,7 +92,7 @@ pub fn families() -> Vec<Family> {
             name: "fan",
             title: "Fan",
             group: "Cooling",
-            params: vec![choice("size", "120", &["80", "92", "120", "140"], "square, mm"), choice("thickness", "25", &["15", "25", "38"], "mm")],
+            params: vec![choice("size", "120", &["80", "92", "120", "140"], "square, mm"), choice("thickness", "25", &["14", "15", "25", "38"], "mm: 14 for Noctua's NF-A9x14 and its like, 15 for slim 120s")],
             make: fan,
         },
         Family {

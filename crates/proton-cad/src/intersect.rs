@@ -144,7 +144,55 @@ fn line_surface(l: &Line, surface: &Surface) -> Vec<Hit> {
         }
         Surface::Cone(c) => line_cone(l, c, surface),
         Surface::Torus(t) => line_torus(l, t, surface),
+        Surface::Free(f) => line_free(l, f),
     }
+}
+
+/// Where a line meets a free-form patch: Newton's steps on the patch's
+/// point less the line's, from each of the patch's points near the line,
+/// the roots kept once each.
+fn line_free(l: &Line, f: &crate::surface::Free) -> Vec<Hit> {
+    let p = f.patch();
+    let (o, d) = (f.frame.to_local(l.origin), f.frame.vec_to_local(l.dir));
+    let ((u0, u1), (v0, v1)) = p.domain();
+    let hull = p.hull();
+    let reach = (hull.max - hull.min).length() / (p.spans_u().max(p.spans_v()) as f64 * 2.0);
+    let mut hits: Vec<Hit> = Vec::new();
+    for &(su, sv) in &p.seed_params() {
+        let q = p.eval(su, sv).0;
+        let t0 = (q - o).dot(d);
+        if (o + d * t0).distance(q) > reach {
+            continue;
+        }
+        let (mut u, mut v, mut t) = (su, sv, t0);
+        let mut ok = false;
+        for _ in 0..30 {
+            let (s, a, b) = p.eval(u, v);
+            let r = s - (o + d * t);
+            if r.length() <= 1e-9 {
+                ok = true;
+                break;
+            }
+            // [a b −d]·(du, dv, dt) = −r, by Cramer.
+            let m = [a, b, -d];
+            let det = m[0].dot(m[1].cross(m[2]));
+            if det.abs() < 1e-18 {
+                break;
+            }
+            let rhs = -r;
+            let du = rhs.dot(m[1].cross(m[2])) / det;
+            let dv = m[0].dot(rhs.cross(m[2])) / det;
+            let dt = m[0].dot(m[1].cross(rhs)) / det;
+            u = (u + du).clamp(u0, u1);
+            v = (v + dv).clamp(v0, v1);
+            t += dt;
+        }
+        if ok && !hits.iter().any(|h| (h.t - t).abs() <= 1e-6) {
+            hits.push(at(l, t, false));
+        }
+    }
+    hits.sort_by(|a, b| a.t.total_cmp(&b.t));
+    hits
 }
 
 /// x² + y² = (r + z·tan a)², the nappe's side of the apex.
@@ -662,7 +710,7 @@ enum Profile {
 fn profile(s: &Surface, o: Vec3, z: Vec3) -> Option<Profile> {
     let h = |p: Vec3| (p - o).dot(z);
     match s {
-        Surface::Plane(_) => None,
+        Surface::Plane(_) | Surface::Free(_) => None,
         Surface::Cylinder(c) => Some(Profile::Line(Vec2::new(c.radius, 0.0), Vec2::new(0.0, 1.0))),
         Surface::Cone(c) => {
             let (sa, ca) = c.half_angle.sin_cos();

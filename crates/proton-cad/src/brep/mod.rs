@@ -86,6 +86,20 @@ pub struct Solid {
 }
 
 impl Solid {
+    /// The first face on a free-form surface, read from another program's
+    /// file: the kernel builds nothing on such a solid.
+    pub fn free_face(&self) -> Option<usize> {
+        self.faces.iter().position(|f| matches!(f.surface, crate::surface::Surface::Free(_)))
+    }
+
+    /// Why the kernel will not build on this solid, if it will not.
+    pub fn refuse_free(&self, what: &str) -> Result<(), String> {
+        match self.free_face() {
+            Some(f) => Err(format!("{what}: `{}` is a free-form surface, read from another program's file for show — the kernel does not cut, round or shell such a solid", self.faces[f].name)),
+            None => Ok(()),
+        }
+    }
+
     pub fn vertex(&mut self, point: Vec3) -> usize {
         self.vertices.push(Vertex { point });
         self.vertices.len() - 1

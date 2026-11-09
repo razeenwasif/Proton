@@ -59,6 +59,8 @@ pub struct Placed {
     pub free: bool,
     /// Its parts, in its own coordinates: a part's one, an assembly's all.
     pub leaves: Vec<Leaf>,
+    /// An assembly's parts fastened together, by their names in it.
+    pub joined: Vec<(String, String)>,
 }
 
 /// A mate as solved: how far it is from holding, and what went wrong.
@@ -116,6 +118,9 @@ pub struct Model {
     pub routes: Vec<RouteOut>,
     /// The loop the routes make.
     pub order: super::route::Order,
+    /// Parts fastened together — a fitting on its block — by the names
+    /// [`Model::leaves`] gives them: meant to touch, so not too near.
+    pub joined: Vec<(String, String)>,
     pub errors: Vec<Diag>,
 }
 
@@ -138,6 +143,28 @@ impl Model {
             }
         }
         out
+    }
+
+    /// Where the parts do not fit, at the assembly's clearance.
+    pub fn clashes(&self) -> Vec<super::fit::Clash> {
+        self.clashes_at(self.clearance)
+    }
+
+    /// Where the parts do not fit with `clearance` between them: those
+    /// overlapping, and those nearer than that — but parts fastened
+    /// together, which touch by being, are too near only if they overlap.
+    pub fn clashes_at(&self, clearance: f64) -> Vec<super::fit::Clash> {
+        let joined = |a: &str, b: &str| self.joined.iter().any(|(x, y)| (x == a && y == b) || (x == b && y == a));
+        super::fit::fit(&self.leaves(), clearance).into_iter().filter(|c| c.overlap || !joined(&c.a, &c.b)).collect()
+    }
+
+    /// The name [`Model::leaves`] gives an instance's leaf.
+    fn leaf_name(i: &Placed, leaf: &str) -> String {
+        if i.source == Source::Part {
+            i.name.clone()
+        } else {
+            format!("{}.{leaf}", i.name)
+        }
     }
 
     /// What it is made of: each part, how many, and which.
@@ -480,6 +507,7 @@ fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
         explodes: Vec::new(),
         routes: Vec::new(),
         order: super::route::Order { parts: Vec::new(), closed: false, notes: Vec::new() },
+        joined: Vec::new(),
         errors: Vec::new(),
     };
     let dir = here.parent().unwrap_or(Path::new("")).to_path_buf();
@@ -518,7 +546,7 @@ fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
                         if let Some(first) = p.mistakes.first() {
                             m.errors.push(Diag::new(line, 1, format!("`{}` ({}) has a mistake on its line {first}", i.name, i.path)));
                         }
-                        vec![Leaf { name: i.name.clone(), part: p, place: Transform::identity() }]
+                        (vec![Leaf { name: i.name.clone(), part: p, place: Transform::identity() }], Vec::new())
                     }),
                     Source::Assembly => (|| {
                         if ctx.stack.contains(&path) {
@@ -532,11 +560,11 @@ fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
                         if let Some(d) = built.errors.first() {
                             m.errors.push(Diag::new(line, 1, format!("`{}` ({}) has a mistake on its line {}: {}", i.name, i.path, d.line, d.message)));
                         }
-                        Ok(built.leaves())
+                        Ok((built.leaves(), built.joined))
                     })(),
                 };
                 match leaves {
-                    Ok(leaves) => m.instances.push(Placed { name: i.name.clone(), source: i.source, path: i.path.clone(), line, place: Transform::identity(), ground: false, free: true, leaves }),
+                    Ok((leaves, joined)) => m.instances.push(Placed { name: i.name.clone(), source: i.source, path: i.path.clone(), line, place: Transform::identity(), ground: false, free: true, leaves, joined }),
                     Err(e) => err(&mut m, format!("`{}` cannot be loaded: {e}", i.name)),
                 }
             }
@@ -590,6 +618,7 @@ fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
         })
         .collect();
     let mut groups: Vec<(usize, Vec<Equation>, usize)> = Vec::new();
+    let mut fastened: Vec<(usize, usize)> = Vec::new();
     for n_item in &a.items {
         let Item::Mate(mate) = &n_item.item else { continue };
         let line = n_item.line;
@@ -615,6 +644,11 @@ fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
         })();
         match built {
             Ok((eqs, expected)) => {
+                if mate.kind == Kind::Fastened {
+                    if let (Ok((ia, _)), Ok((ib, _))) = (resolve(&m.instances, &mate.a), resolve(&m.instances, &mate.b)) {
+                        fastened.push((ia, ib));
+                    }
+                }
                 groups.push((m.mates.len(), eqs, expected));
                 m.mates.push(MateOut { name: mate.name.clone(), line, kind: mate.kind, residual: 0.0, error: None, redundant: false });
             }
@@ -689,10 +723,44 @@ fn build_in(a: &Assembly, here: &Path, ctx: &mut Ctx) -> Model {
         };
         m.routes.push(RouteOut { name: r.name.clone(), line: n_item.line, tube: r.tube, size: r.size.clone(), from: r.from.clone(), to: r.to.clone(), built, error });
     }
+    // Parts fastened together, every leaf of one with every leaf of the
+    // other, and what each assembly in it holds fastened.
+    for &(ia, ib) in &fastened {
+        let (a, b) = (&m.instances[ia], &m.instances[ib]);
+        for la in &a.leaves {
+            for lb in &b.leaves {
+                m.joined.push((Model::leaf_name(a, &la.name), Model::leaf_name(b, &lb.name)));
+            }
+        }
+    }
+    for i in &m.instances {
+        for (x, y) in &i.joined {
+            m.joined.push((format!("{}.{x}", i.name), format!("{}.{y}", i.name)));
+        }
+    }
+    // The loop, a part and what is fastened to it one stop: a block and the
+    // fittings on it, which the coolant passes through together. Each group
+    // goes by its first instance.
+    let mut group: Vec<usize> = (0..m.instances.len()).collect();
+    fn top(g: &[usize], mut x: usize) -> usize {
+        while g[x] != x {
+            x = g[x];
+        }
+        x
+    }
+    for &(ia, ib) in &fastened {
+        let (ra, rb) = (top(&group, ia), top(&group, ib));
+        let (lo, hi) = (ra.min(rb), ra.max(rb));
+        group[hi] = lo;
+    }
+    let stop = |name: &str| match m.instances.iter().position(|i| i.name == name) {
+        Some(k) => m.instances[top(&group, k)].name.clone(),
+        None => name.to_string(),
+    };
     let ends: Vec<(String, String, String)> = m
         .routes
         .iter()
-        .map(|r| (r.name.clone(), r.from.split('.').next().unwrap_or("").to_string(), r.to.split('.').next().unwrap_or("").to_string()))
+        .map(|r| (r.name.clone(), stop(r.from.split('.').next().unwrap_or("")), stop(r.to.split('.').next().unwrap_or(""))))
         .collect();
     m.order = super::route::order(&ends);
 

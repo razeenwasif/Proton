@@ -12,7 +12,7 @@ import { BOARD } from "./preview-cad-board.js";
 
 /** A few of the library's families, as the core lists them. */
 const FAMILIES = [
-  { name: "fan", title: "Fan", group: "Cooling", params: [{ name: "size", default: "120", choices: ["80", "92", "120", "140"], note: "square, mm" }, { name: "thickness", default: "25", choices: ["15", "25", "38"], note: "mm" }] },
+  { name: "fan", title: "Fan", group: "Cooling", params: [{ name: "size", default: "120", choices: ["80", "92", "120", "140"], note: "square, mm" }, { name: "thickness", default: "25", choices: ["14", "15", "25", "38"], note: "mm: 14 for Noctua's NF-A9x14 and its like, 15 for slim 120s" }] },
   { name: "gpu", title: "Graphics card", group: "Graphics", params: [{ name: "length", default: "304", choices: [], note: "mm" }, { name: "slots", default: "3", choices: [], note: "slots" }] },
   { name: "formd-t1", title: "FormD T1 (V2.1)", group: "Cases", params: [{ name: "wall", default: "1.5", choices: [], note: "mm" }] },
 ];

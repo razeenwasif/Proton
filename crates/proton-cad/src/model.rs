@@ -550,6 +550,19 @@ pub fn build(part: &Part) -> Model {
                                 p - face.z * (p - face.origin).dot(face.z)
                             }
                         };
+                        // A hole off its body cuts nothing: say so, rather
+                        // than leave it out.
+                        if let Some(b) = m.bodies.iter().find(|b| b.name == body) {
+                            if !b.solid.bounds().contains(p, r) {
+                                let (x, y) = ((p - face.origin).dot(face.x) / k, (p - face.origin).dot(face.y) / k);
+                                return Err(format!(
+                                    "the hole at ({}, {}) on `{}` is off `{body}`: a face's (x, y) are its own, so on one facing the other way y runs the other way",
+                                    crate::drawing::build::measure(x),
+                                    crate::drawing::build::measure(y),
+                                    h.face
+                                ));
+                            }
+                        }
                         // Across the face, and down into it: the hole's axis
                         // is the frame's y.
                         let frame = Frame { origin: p, x: face.x, y: -face.z, z: face.x.cross(-face.z) };
