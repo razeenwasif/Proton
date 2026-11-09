@@ -269,7 +269,8 @@ Footprints are worked out by IPC-7351B's equations. A schematic lays out
 its `.board` — cut, if you like, from a sketch of the part it fits in —
 where parts are dragged into place and tracks drawn from pad to pad, the
 design rules checking clearances, shorts, the board's edge and each
-track's width for the current its net carries. Edits are held until
+track's width for the current its net carries — then written as Gerbers,
+drills, a bill of materials and placements for a fab to make. Edits are held until
 ⌘S.
 
 ## The three things that hold it together

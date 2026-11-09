@@ -12,12 +12,15 @@
 //! - [`sheet`]: the schematic drawn on a sheet.
 //! - [`board_lang`]: the `.board` language; [`board`]: a board built, its
 //!   copper joined, its rules checked, and drawn.
+//! - [`gerber`]: a board written for a fab — Gerber X2, Excellon, the
+//!   bill of materials and placements — and read back.
 //! - [`netlist`]: its netlist for KiCad, and its bill of materials.
 
 pub mod board;
 pub mod board_lang;
 pub mod build;
 pub mod footprint;
+pub mod gerber;
 pub mod lang;
 pub mod netlist;
 pub mod sheet;

@@ -914,6 +914,30 @@ written as SVG, made again and opened; through the agent's tools; in the
 browser, its lists and crumb, a part dragged, a board laid out from a
 schematic, a track drawn pad to pad on the pad's net, ⎋, a via.
 
+E3 — for a fab. `proton_board::gerber`: Gerber X2 (`%FSLAX46Y46*%`, mm,
+each file's function and polarity said) for every copper layer, both
+solder masks, both pastes, both silkscreens and the edge; Excellon for the
+plated and the unplated holes; the bill of materials and the placements
+(reference, value, package, x, y, turn, side) as CSV. A zone is a region,
+then every piece of copper near it cleared from it by its clearance (clear
+polarity) — another net's, and a ring round each of its own net's pads —
+then four spokes across each ring, then all the copper drawn over; pads are
+flashed, rounded ones as their rectangles (as the rules check them); masks
+open 0.05 round each pad and tent vias; the silk is each part's outline and
+a dot by its first pad (no letters yet). Proton's own readers read Gerber
+and Excellon back, refusing a file with no end, an aperture not defined, a
+coordinate before the format, a line not ended, a region not begun. In CAD
+a board writes all thirteen files into `NAME-fab/` beside it, saying what
+is not routed yet — and will not while it breaks a design rule. Tested (5 +
+1 + 1): every file named, read back and saying what it is; the front's
+pads flashed where the board has them and its tracks at their width; the
+back's zone, the ten pads it is cleared round, its twelve spokes and the
+through pads over it; the masks' openings, the paste, the silk, the edge;
+the drills, plated and not, the placements and the bill; five malformed
+files refused; in the core, a first board written for a fab and read
+back, and a board with a short refused; in the browser, written, and not
+while a rule is broken.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

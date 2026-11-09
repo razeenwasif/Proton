@@ -618,8 +618,14 @@ impl Cads {
                     },
                     Doc::Board => match proton_board::board_lang::read(&open.text) {
                         Ok(b) => {
-                            let built = proton_board::board::build(&b, &open.path, &crate::cad_assembly::load_inside(&open.root));
-                            crate::cad_board::export(&built, &open.path, &open.shown, &format)
+                            let load = crate::cad_assembly::load_inside(&open.root);
+                            let built = proton_board::board::build(&b, &open.path, &load);
+                            let dir = open.path.parent().unwrap_or(Path::new("")).to_path_buf();
+                            let sch = built.schematic.as_ref().and_then(|f| load(&dir.join(f)).ok()).and_then(|t| proton_board::read(&t).ok()).map(|s| proton_board::build(&s));
+                            match sch {
+                                Some(sch) => crate::cad_board::export(&built, &sch, &open.path, &open.shown, &format),
+                                None => Err("its schematic does not read: mend it first".into()),
+                            }
                         }
                         Err(e) => Err(format!("line {} does not read — mend it first: {}", e.line, e.message)),
                     },
@@ -2015,8 +2021,20 @@ mod tests {
         assert_eq!(net(&b, "+12V").unrouted, 2);
         assert!(net(&b, "+12V").needs.as_ref().is_some_and(|w| (w[0] - 0.781).abs() < 0.01));
         assert!(b.svg.starts_with("<svg") && b.boxes.len() == 4 && b.pads.iter().any(|p| p.name == "J1.2" && p.net.as_deref() == Some("+12V") && p.layer == "through"));
-        // A track from the power pin to a fan's: one connection left.
         let at = |n: &str| b.pads.iter().find(|p| p.name == n).map(|p| (p.x, p.y)).unwrap();
+        // Its Gerbers and drills, for a fab: what is left to route is said.
+        let said = c.apply(&root, Command::CadExport { generation: b.generation, format: "gerber".into() });
+        assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.starts_with("wrote hub-fab/ (13 files) — ") && text.contains("not routed yet"))), "{said:?}");
+        assert!(proton_board::gerber::read_gerber(&std::fs::read_to_string(root.join("hub-fab/hub-F_Cu.gbr")).unwrap()).is_ok());
+        assert_eq!(proton_board::gerber::read_excellon(&std::fs::read_to_string(root.join("hub-fab/hub-PTH.drl")).unwrap()).unwrap().len(), 10);
+        // A short, and it is refused.
+        let (p, q) = (at("P1.1"), at("P1.2"));
+        c.apply(&root, Command::CadEdit { generation: b.generation, ops: vec![CadOp::Insert { at: None, text: format!("track GND F.Cu ({}, {}) ({}, {})", p.0, p.1, q.0, q.1) }] });
+        let refused = c.apply(&root, Command::CadExport { generation: b.generation, format: "gerber".into() });
+        assert!(refused.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.starts_with("the board breaks") && text.contains("short"))), "{refused:?}");
+        c.apply(&root, Command::CadUndo { generation: b.generation });
+        c.apply(&root, Command::CadSave);
+        // A track from the power pin to a fan's: one connection left.
         let (a, z) = (at("P1.1"), at("J1.2"));
         let line = format!("track +12V B.Cu width 1 ({}, {}) ({}, {}) ({}, {})", a.0, a.1, a.0, z.1, z.0, z.1);
         let b2 = board(&c.apply(&root, Command::CadEdit { generation: b.generation, ops: vec![CadOp::Insert { at: None, text: line }] }));

@@ -181,15 +181,33 @@ pub fn edit(b: &mut Board, op: CadOp) -> Result<(), String> {
     Ok(())
 }
 
-/// The board written beside its file: `svg` its drawing from the front.
-pub fn export(b: &BoardBuilt, file: &std::path::Path, shown: &str, format: &str) -> Result<String, String> {
+/// The board written beside its file: `svg` its drawing from the front;
+/// `gerber` every file a fab and an assembler take, into `NAME-fab/` —
+/// refused while it breaks a design rule.
+pub fn export(b: &BoardBuilt, sch: &proton_board::Built, file: &std::path::Path, shown: &str, format: &str) -> Result<String, String> {
     match format {
+        "gerber" => {
+            let errors: Vec<&str> = b.findings.iter().filter(|f| f.level == Level::Error).map(|f| f.message.as_str()).collect();
+            if !errors.is_empty() {
+                return Err(format!("the board breaks {} design rule{} — mend {} before it is made: {}", errors.len(), if errors.len() == 1 { "" } else { "s" }, if errors.len() == 1 { "it" } else { "them" }, errors.iter().take(3).copied().collect::<Vec<_>>().join("; ")));
+            }
+            let stem = file.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| "board".into());
+            let dir = file.with_file_name(format!("{stem}-fab"));
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            let files = proton_board::gerber::fab(b, sch, &stem);
+            for (name, text) in &files {
+                std::fs::write(dir.join(name), text).map_err(|e| format!("{name}: {e}"))?;
+            }
+            let left: usize = b.nets.iter().map(|n| n.unrouted).sum();
+            let shown_dir = std::path::Path::new(shown).with_file_name(format!("{stem}-fab")).to_string_lossy().replace('\\', "/");
+            Ok(format!("{shown_dir}/ ({} files){}", files.len(), if left > 0 { format!(" — {left} connection{} not routed yet", if left == 1 { "" } else { "s" }) } else { String::new() }))
+        }
         "svg" => {
             let to = file.with_extension("svg");
             std::fs::write(&to, proton_board::board::svg(b).svg).map_err(|e| format!("{}: {e}", to.display()))?;
             Ok(std::path::Path::new(shown).with_extension("svg").to_string_lossy().replace('\\', "/"))
         }
-        other => Err(format!("a board is written as SVG here, not `{other}`")),
+        other => Err(format!("a board is written as Gerbers and drills (gerber) or SVG, not `{other}`")),
     }
 }
 
