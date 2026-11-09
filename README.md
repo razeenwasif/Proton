@@ -2,14 +2,14 @@
 
 # Proton
 
-A code editor that is also a data notebook, a research workbench, a study
-notebook, a spreadsheet, a logic simulator and a logic workbench — one window,
+A code editor that is also a data notebook, a research workbench, a
+spreadsheet, a logic simulator, a logic workbench and a CAD program — one window,
 seven modes, a shared Vim-style
 modal engine underneath all of them, and an agent that can act in any of them.
 
 Every mode in the window reads and writes a real document: the editor,
 Telescope and language servers, the agent, the Code Visualizer, the plugin
-host, Data's notebooks, Research's investigations, Notebook's sources,
+host, Data's notebooks, Research's investigations,
 Excel's workbooks, Circuit's projects and Logic's files all ship. The creative modes that were here — Design, Model, Game, Canvas, Diffuse
 and Video — moved to an app of their own in October 2026, and LaTeX and the
 Reader to Quark.
@@ -31,7 +31,7 @@ wasmtime's C API, and that half of it is CMake, not Cargo. `brew install cmake`
 on macOS; MSYS2's `mingw-w64-*-cmake` on Windows; most Linux package managers
 already call it `cmake`.
 
-Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃8` switch mode · `␣` leader · `⌘K` Telescope ·
+Panels can be collapsed from the rail, or in Codex from the title bar; text size, density and file tabs are in Settings. Keys: `⌃1`–`⌃7` switch mode · `␣` leader · `⌘K` Telescope ·
 `␣ff` files · `␣fg` grep · `␣fl` your library · `:` command line · `i` `v` `⎋` vim modes ·
 `␣w` splits · `` ⌃` `` terminal · `⌘,` settings. Bare digits are vim counts, not mode switches — that
 collision is why the mode chord is `⌃`.
@@ -166,68 +166,13 @@ file in the sandbox, a proof counts only on Lean's standard axioms, and the
 hypothesis shows Lean's own statement of what was proved beside its own. Lean and
 Mathlib are Proton's, in `~/.proton/lean` (about 15 GB), made with your say-so
 twice like the Lab's Python.
-**Notebook** · Gemini Notebook for studying, being built: notebooks of your own
-sources — a vault, a courses folder, an iCloud archive — a tutor on Claude Code,
-Codex, Gemini or Antigravity that answers from them and cites them, and a
-studio that makes study guides, flashcards, quizzes and exams of them. So far:
-notebooks, each a folder in `~/Github/Notebooks`; sources chosen from your
-folders in a picker — browsed, searched by name and by word, a folder's files
-ticked all at once (its subfolders' too, if you like), with what is left
-out and why; a lab folder added whole as one source — its README, code and
-Makefiles read together and cited by file and line, from the picker or by its
-path, read again when it changes — or found for you as what is like the notebook, or found on the
-web by Discover or Deep Research, which writes a report of what it read — and read once,
-their words kept in the notebook: notes, PDFs, notebooks, LaTeX, captions, Word
-documents and EPUBs (with pandoc), PowerPoints, pictures' words (with
-tesseract), pages of the web kept as their articles, your artifacts — read as
-their articles, KaTeX's formulas read back as TeX, and opened as themselves —
-YouTube videos' captions (with yt-dlp), and recordings, transcribed by Fish Audio when you
-choose, told what it costs; a reader, with a guide to each source on asking;
-sources labelled by topic, and ticked by label; sources kept in
-categories of your own — past exams, lecture slides, labs, books — each
-dragged into one or moved with Move to, a category ticked, folded or renamed;
-sources opened kept as tabs beside the tutor's, ⌃⇥ and ⌃⇧⇥ going round them,
-each where it was left; slides with few words read
-from their pictures; notes;
-and the tutor, which searches the sources you tick through Proton's own MCP
-server and cites them — each citation a number whose passage shows over it and
-opens at its place — as a plain tutor, a learning guide, or a role you write,
-in any language, and which writes notes when asked — a cheatsheet, a summary —
-kept in the notebook's notes for you to read and edit; a studio that makes study guides, briefings, FAQs, glossaries,
-timelines, mind maps, tables and learning objectives of the sources ticked,
-each citing them; flashcards, scheduled by FSRS so they are remembered by the
-exam, reviewed with the keys 1–4, and exported for Anki; and quizzes and
-practice problems — choices, blanks, numbers and written answers — marked as you
-answer, a written answer by another family of model against its rubric, each
-mark quoting the words that earned it and open to dispute, with how you did by
-learning objective; and exams — a new paper set like your past papers, never one
-of theirs reworded, or a past paper itself marked by its solutions — sat against
-the clock with every answer saved as you write it, and printed; and your
-progress by learning objective, with a diagnostic quiz, a lesson on any gap
-with the tutor as a guide, and a Learning Overview that takes the course topic by
-topic; and audio overviews — a deep dive, a brief, a critique, a debate or a
-lecture — spoken by Fish Audio in voices you choose from its library, your own
-clones, or one by its link (with `FISH_API_KEY` exported in your shell, which
-Proton reads and never keeps), with a transcript that follows along; slide decks with speaker notes, revised a slide at a time,
-presented, and written out for PowerPoint; infographics and mind maps saved
-as pictures; and coding practice — problems in Python, C, C++, Java,
-JavaScript or Rust, whichever this machine has the compilers for, each solved in
-an editor beside it and built and run against its tests, sandboxed, with hints
-and a solution when you ask; every problem's own solution is run against its
-tests before you see it. Python's problems run with the Python you choose — a
-conda environment, a venv — and may use the libraries it has, NumPy, SciPy or
-PuLP and its solver among them. Your folders are named in your own settings,
-`{"study": {"roots": ["~/Notes", "~/Courses"], "exclude": ["Notes/Private/"]}}`,
-and catalogued in under a second without opening a file. A file still in
-iCloud is listed under a cloud and never read until you choose to download it,
-having been told its size.
 Design, Model, Game, Canvas, Diffuse and Video, once modes here, are an app
 of their own now, LaTeX and the Reader are Quark's, and Chat, once the first
-mode here, has given way to Fairy. Codex
+mode here, and Notebook have given way to Fairy. Codex
 still edits `.tex` and `.bib` files, with texlab when it is on `PATH`, and
 PDFs still open in the viewer from any mode.
 
-**Excel** · a spreadsheet on ⌃5, after Google Sheets and Excel. A workbook
+**Excel** · a spreadsheet on ⌃4, after Google Sheets and Excel. A workbook
 is a `Name.sheet/` folder of text that diffs — `workbook.json` and a
 `.cells` file a sheet, a line a cell — and `.xlsx`, `.csv` and `.tsv` open
 and save as themselves. Formulas are worked out by Proton's own engine
@@ -247,7 +192,7 @@ tools, `@sheet` sends what is selected, and a range goes to Data as a
 dataframe and a notebook's table comes back as a sheet. Edits are held until
 ⌘S, and quitting with an unsaved workbook asks first.
 
-**Circuit** · digital logic on ⌃6, after hneemann's
+**Circuit** · digital logic on ⌃5, after hneemann's
 [Digital](https://github.com/hneemann/Digital). A project is a
 `Name.circuit/` folder of text — a `.circ` file a circuit, a line a part or
 a wire, test tables, memory contents as `.hex` and state machines — and
@@ -262,12 +207,10 @@ Digital's language run against a circuit and its signals are graphed; truth
 tables, minimised expressions (Quine–McCluskey) and Karnaugh maps come from
 a circuit, and circuits from expressions or from a state machine written as
 text. Out go Verilog, VHDL and SVG. The agent reads, edits, tests and
-analyses circuits with its circuit tools, `@circuit` sends the circuit on
-screen, and Notebook makes circuit practice from your sources, each problem
-built and checked by the simulator before you see it. Edits are held until
-⌘S.
+analyses circuits with its circuit tools, and `@circuit` sends the circuit on
+screen. Edits are held until ⌘S.
 
-**Logic** · on ⌃7, a calculator after
+**Logic** · on ⌃6, a calculator after
 [logic-calculator.com](https://logic-calculator.com/) and a model finder
 after John Slaney's [Logic for Fun](https://logic4fun.comp.anu.edu.au/), with
 proofs. A `.logic` file is a worksheet or a theory in Proton's language, a
@@ -281,11 +224,10 @@ the fewest lines that cannot all hold are marked. Proofs in natural
 deduction (Fitch), the sequent calculus and resolution are checked line by
 line, each mistake named, and found by Proton — always for propositional
 logic. A formula's table can be built in Circuit. The agent asks, solves,
-proves and writes with its logic tools, `@logic` sends the file and the line
-at the cursor, and Notebook makes logic practice, each problem checked by
-the engine before you see it. Edits are held until ⌘S.
+proves and writes with its logic tools, and `@logic` sends the file and the line
+at the cursor. Edits are held until ⌘S.
 
-**CAD** · on ⌃8, parametric parts on a kernel of Proton's own
+**CAD** · on ⌃7, parametric parts on a kernel of Proton's own
 (`crates/proton-cad`, planned in [`docs/CAD.md`](docs/CAD.md)). A `.part` file
 is text: parameters, sketches of lines, arcs and circles held by constraints
 and dimensions, and features made from them — extrudes and revolves joined
@@ -345,7 +287,7 @@ conversation; this adapter does not resume Codex desktop tasks.
 
 ## The engines
 
-Research and Notebook's tutor run on the real CLIs, each on its own sign-in,
+Research runs on the real CLIs, each on its own sign-in,
 driven over the protocol it offers hosts — your account, your settings and your
 subscription, not an API key:
 
@@ -358,16 +300,6 @@ subscription, not an API key:
 
 Proton finds each in `~/.local/bin`, on your login shell's PATH, or at
 `PROTON_CLAUDE_BIN`, `PROTON_CODEX_BIN`, `PROTON_GEMINI_BIN` or `PROTON_AGY_BIN`.
-
-**Artifacts.** Notebook takes what Claude published with its Artifact tool as
-sources. **Import from Claude**, under **Add your artifacts**, finds them in the
-desktop app's session records and in every Claude Code session's own file, with
-the files each page brought along, and keeps a copy of every version in
-`~/Library/Application Support/dev.razeen.proton/artifacts` (`PROTON_ARTIFACTS`
-moves it). They are served from `artifact://`, sandboxed: a page can load what a
-claude.ai artifact can, play its own videos and go full screen, and reach nothing
-of the editor's. One whose page has since been deleted comes in as its address,
-and cannot be added.
 
 ## Antigravity agent connection
 

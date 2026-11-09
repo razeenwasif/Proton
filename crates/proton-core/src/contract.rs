@@ -61,13 +61,6 @@ pub enum Slot {
     Board,
     /// Runs of code, and what they drew.
     Lab,
-    /// A notebook's sources, ticked for the tutor to use, and its notes.
-    Sources,
-    /// The tutor: a conversation grounded in the sources, and what is open
-    /// beside it — a source, a note, something made.
-    Tutor,
-    /// What can be made from the sources, and what has been.
-    Studio,
     /// A sheet's cells, by rows and columns, with the formula bar above and
     /// the sheets' tabs below.
     Grid,
@@ -100,9 +93,6 @@ pub enum DocumentKind {
     /// `research/<slug>/`: Markdown hypotheses and reviews, a JSON-lines
     /// tournament, the plan and the logs.
     Investigation,
-    /// `~/Github/Notebooks/<slug>/`: the notebook, its sources and notes in
-    /// JSON and Markdown, its chats, and what the studio made.
-    StudyNotebook,
     /// `Name.sheet/`: `workbook.json` and a `.cells` file a sheet, a line a
     /// cell. `.xlsx`, `.csv` and `.tsv` are opened and saved too.
     Workbook,
@@ -163,14 +153,6 @@ impl Layout {
                 Slot::Lab,
                 DocumentKind::Investigation,
             ),
-            // The sources, the tutor that answers from them, and what can be
-            // made of them — Gemini Notebook's three columns.
-            ModeId::Study => (
-                Slot::Sources,
-                Slot::Tutor,
-                Slot::Studio,
-                DocumentKind::StudyNotebook,
-            ),
             // The project's workbooks, the grid, and the agent with its
             // sheet tools beside it — shut until asked for, as the grid
             // wants every column it can have.
@@ -226,7 +208,7 @@ impl Layout {
         match self.mode {
             // The noun is prose, so the editing verbs belong to the composer
             // rather than to the mode.
-            ModeId::Research | ModeId::Study | ModeId::Sheet | ModeId::Circuit | ModeId::Logic | ModeId::Cad => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
+            ModeId::Research | ModeId::Sheet | ModeId::Circuit | ModeId::Logic | ModeId::Cad => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
             _ => true,
         }
     }

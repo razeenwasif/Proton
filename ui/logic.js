@@ -2,8 +2,8 @@
  * and what the statement at the cursor is (docs/LOGIC.md); and a theory's
  * models, found by the core's search on a thread and shown one at a time.
  *
- * The editor is a textarea under its own colouring, as Notebook's coding
- * practice has: what is typed is the browser's, undo and input methods too.
+ * The editor is a textarea under its own colouring: what is typed is the
+ * browser's, undo and input methods too.
  * The text goes to the core a moment after typing stops, held there until
  * ⌘S; the line the caret is on is asked a moment after it settles, and the
  * core answers with the engine's: a truth table, what the formula is, its

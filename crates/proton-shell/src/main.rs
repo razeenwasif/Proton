@@ -490,51 +490,6 @@ fn window_icon() -> Option<tauri::image::Image<'static>> {
     }
 }
 
-/// An artifact page, from the copies Proton keeps of what Claude Code
-/// published.
-///
-/// `artifact://localhost/<id>/<version>/<file>` and nothing else: the path is
-/// resolved by `proton_claude::artifacts::resolve`, which answers only with a
-/// file inside the artifact folder. Every page is served under the policy
-/// artifacts are written for — inline script, the CDNs claude.ai allows — and
-/// that policy names neither `ipc:` nor the editor's own origin, so a page
-/// can draw itself and reach nothing of Proton's. The pane frames it
-/// sandboxed besides, with an origin of its own.
-///
-/// A page's `<video>` and `<audio>` seek by asking for ranges of bytes, and
-/// WebKit plays a custom scheme's media only when it is answered so: each
-/// range is answered 206, a piece at a time.
-fn artifact_page(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
-    use proton_claude::artifacts;
-    let range = request.headers().get("range").and_then(|v| v.to_str().ok());
-    let served = artifacts::serve(&artifacts::root(), request.uri().path(), range);
-    let mut builder = tauri::http::Response::builder().status(served.status);
-    for (name, value) in served.headers {
-        builder = builder.header(name, value);
-    }
-    builder.body(served.body).unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
-}
-
-/// Notebook's media: a notebook's audio overview, or a voice's sample.
-///
-/// `study://localhost/<slug>/A001.mp3` and `study://localhost/_voices/<id>.mp3`
-/// and nothing else, resolved by `proton_core::study::media`, which answers
-/// only with an audio file under a notebook's `.notebook/audio` or the voices'
-/// cache — and with the range of it a player seeking asks for.
-fn study_media(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
-    use proton_core::study::media;
-    let settings = proton_core::settings::Settings::person();
-    let folder = settings.get("study.folder").and_then(|v| v.as_str()).and_then(proton_core::settings::research_path);
-    let voices = media::voices_dir();
-    let range = request.headers().get("range").and_then(|v| v.to_str().ok());
-    let served = media::serve(folder.as_deref(), voices.as_deref(), request.uri().path(), range);
-    let mut builder = tauri::http::Response::builder().status(served.status).header("X-Content-Type-Options", "nosniff");
-    for (name, value) in served.headers {
-        builder = builder.header(name, value);
-    }
-    builder.body(served.body).unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
-}
-
 /// Keep the page drawn while the window is out of sight.
 ///
 /// WebKit counts a window covered by others, or on another desktop, as not
@@ -589,8 +544,6 @@ fn main() {
         proton_claude::process::refresh_launch_path();
     });
     tauri::Builder::default()
-        .register_uri_scheme_protocol("artifact", |_, request| artifact_page(&request))
-        .register_uri_scheme_protocol("study", |_, request| study_media(&request))
         .manage(Mutex::new(BridgeSession::new(
             Session::restore(requested_folder(), working_folder()),
         )))

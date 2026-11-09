@@ -12,10 +12,9 @@ in this document retain historical decisions and measurements.
 | Codex | Text buffers, modal editing, search, splits, LSP/DAP, Git, terminal | Language servers, debuggers, and trace backends are external tools |
 | Data | `.ipynb` cells, kernel execution, outputs and dataframe views; an agent whose edits are proposed on the cells; unsaved changes kept | Execution requires a Jupyter kernel; no SQL cells, charts or lineage yet |
 | Research | `research/<slug>/` investigations; rounds on Claude Code, Codex and Antigravity, followed call by call; an Elo leaderboard; your feedback and hypotheses | Experiments run sandboxed once approved; figures, 3D scenes and molecules drawn in the Lab |
-| Notebook | Notebooks of your own sources with a cited tutor on four engines; study guides, flashcards on FSRS, quizzes marked by another family, exams from past papers, audio overviews, slides | The tutor and studio spend each engine's plan, audio Fish credit |
 | Excel | `Name.sheet/` workbooks, `.xlsx`, `.csv`, `.tsv`; Proton's own formula engine recalculating only what a change reaches; a grid drawn by the rows on screen; formats, frozen panes, sorting, filters, colour rules, charts; sheet tools for the agent; ranges to and from Data | `.xlsx` merged cells, conditional formats, filters, pictures, pivot tables and macros are not kept (said on opening); a million rows take about 4 s to open and 0.7–1 GB |
-| Logic | `.logic` worksheets and theories, `.proof` proofs and Logic4Fun's `.l4f`; Proton's own calculator, model finder and provers (`proton-logic`): truth tables, forms, K-maps, models found and counted, why there is none, semantic tableaux, natural deduction, the sequent calculus and resolution checked and found; logic tools for the agent; Notebook's logic practice | Natural deduction is found within a bound for first-order logic (29 of 37 Pelletier problems); no modal, intuitionistic or temporal logics; no equality reasoning in the provers |
-| Circuit | `Name.circuit/` projects and Digital's `.dig` files; Proton's own simulator with gate delays, quick run and Break; editing, subcircuits, memories, test tables and graphs; truth tables, K-maps, synthesis, state machines; Verilog, VHDL and SVG out; circuit tools for the agent; Notebook's circuit practice | No 74xx library, FPGA boards or co-simulation; the written Verilog and VHDL are checked by their text unless Icarus or GHDL is installed |
+| Logic | `.logic` worksheets and theories, `.proof` proofs and Logic4Fun's `.l4f`; Proton's own calculator, model finder and provers (`proton-logic`): truth tables, forms, K-maps, models found and counted, why there is none, semantic tableaux, natural deduction, the sequent calculus and resolution checked and found; logic tools for the agent | Natural deduction is found within a bound for first-order logic (29 of 37 Pelletier problems); no modal, intuitionistic or temporal logics; no equality reasoning in the provers |
+| Circuit | `Name.circuit/` projects and Digital's `.dig` files; Proton's own simulator with gate delays, quick run and Break; editing, subcircuits, memories, test tables and graphs; truth tables, K-maps, synthesis, state machines; Verilog, VHDL and SVG out; circuit tools for the agent | No 74xx library, FPGA boards or co-simulation; the written Verilog and VHDL are checked by their text unless Icarus or GHDL is installed |
 | CAD | `.part` files: parameters, sketches solved by Proton's own constraint solver, extrudes and revolves joined, cut and met with bodies, holes (tapped, counterbored, countersunk), patterns and mirrors, on Proton's own B-rep kernel (`proton-cad`) with its own booleans, each body checked valid and measured exactly; the steps, a 3D view, sketching with the mouse, dimensions typed in place; STL and 3MF out | Fillets, shells, assemblies, routes, drawings, STEP and electronics are later milestones (docs/CAD.md); no agent tools yet; a spline in a profile is refused; near-tangent faces can leave a few triangles unmatched |
 
 ```bash
@@ -85,7 +84,6 @@ One cargo workspace. Every crate below `proton-shell` builds and tests headless.
 | `proton-research` | Investigations as files, and the co-scientist round as a pure state machine |
 | `proton-literature` | The literature's sources — arXiv, Semantic Scholar, OpenAlex, Crossref — each host asked no oftener than it asks, on a worker the core polls; open PDFs downloaded, capped and checked |
 | `proton-lab` | The Lab's Python — a conda environment, or a venv where there is no conda — planned, made and removed on the scientist's say-so, and the jobs that run for it; and Lean and Mathlib, made the same way |
-| `proton-study` / `proton-voice` | Notebook's notebooks and their sources / speech from Fish Audio |
 | `proton-library` / `proton-mcp` | Document retrieval and citations / MCP service |
 | `proton-data` | Notebook documents and kernel integration |
 | `proton-plugin` | Wasmtime plugin host and capability grants |
@@ -1081,363 +1079,16 @@ and its runtime, `proton-raster` and its runtime, `proton-diffuse` and
 `proton-video`, the window's WebAssembly build, and the shell's mesh, picture,
 pen and keychain code. What stays is what the five modes then left used: Codex edits
 `.tex` and `.bib` with texlab from `PATH`, the document viewer draws PDFs for
-Codex, Research and Notebook, and the Lab's 3D scenes are drawn by three.js. A
+Codex and Research, and the Lab's 3D scenes are drawn by three.js. A
 saved session that names their slugs still loads: they are passed over, and a
 project only they listed is closed rather than given to Codex.
 
-### Notebook
-
-Gemini Notebook, for studying from one's own files: notebooks of sources drawn
-from a knowledge base, a tutor that answers from them and cites them, and a
-studio that makes guides, cards, quizzes and exams of them. It is being built in
-milestones; what is here is the knowledge base, notebooks, sources — files,
-pages of the web and videos' captions — the reader, notes, the tutor, the
-studio, flashcards, quizzes with their marking, exams, progress by learning
-objective, audio overviews, slide decks, infographics and coding practice.
-
-**The knowledge base** is the folders the person names (`study.roots` in their
-own settings), less what `study.exclude` leaves out — `.gitignore` lines with
-the root's label first, `OnyxVault/Private/`, beside defaults for vendor
-folders and a rule for datasets (two thousand files with nothing to read).
-`proton-library::catalog` lists every root by `lstat` alone, never opening a
-file: 71,656 files under three roots in 0.63 s cold. What is left out is listed
-with its reason. A shelf in catalog mode then reads what the catalogue says it
-can: Markdown, text, PDFs, Jupyter notebooks read as Markdown, LaTeX cut at its
-sections, CSV by rows, and captions cited by time (`@ 3:12-3:40`). Its
-citations name the root (`Courses/COMP3670/Exam_2020.pdf p. 3`). Nothing is
-walked until Notebook is first opened. The picker ticks a folder's files at once,
-or every file below it, which the core finds in the catalogue (`StudyKbAll`, a
-thousand at most) less what cannot be read or is a source already; a file in
-iCloud among them is added and left there, as one ticked by hand is, until the
-person asks for it to be downloaded.
-
-**A lab folder** is one source (`StudyAddFolder`, `Origin::Folder`, kind
-`folder`, role Lab): a folder of the knowledge base by its root's label and
-path, its rules applying, or any folder by its path. `proton-library::folder`
-walks it as the catalogue walks — hidden files, links and the rules' folders
-passed over, nothing in iCloud brought down — and reads it as one text: the
-files it holds and what it left out with why, then each file under
-`==> lab1/main.c <==`, its README first, Makefiles and other text sniffed for
-NULs, a PDF's pages marked; at most 400 files and 6 MB, and a folder of more
-than 5,000 entries is refused. `chunk::folder` makes each file a section, so
-the tutor's citations name it — `S07 § lab1/main.c L12-40`. Its stamp is its
-files' sizes together and the newest change, checked on opening the notebook
-like a file's.
-
-**iCloud** keeps an offloaded file's name and size on the disk and its bytes on
-Apple's servers; reading one downloads it. `proton-library::dataless` reads the
-`SF_DATALESS` flag from `lstat`, so such a file is listed under a cloud and
-never read, and every worker that reads refuses downloads on its thread
-(`setiopolicy_np` with `IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES` off) so a read
-that slipped past would fail rather than fetch. A file comes down only when the
-person asks for that file, having been told its size, on a thread that takes
-`Downloads` for itself. Measured on a 7,363-file archive: every file that was
-in iCloud before reading the whole knowledge base was in iCloud after.
-
-**A notebook** is a folder in `study.folder` (`~/Github/Notebooks`) of plain
-files — `notebook.json`, `sources.json`, `notes/N001.md` — with its machine
-state in a gitignored `.notebook/` (`proton-study`). A source is read once, on
-a worker, and its words are kept there, so a citation of `S07 p. 12` means the
-same thing after its file is edited, moved or evicted; source ids are never
-reused. Some kinds are read only when they are made sources, through a program
-the machine has, never in a search of the whole knowledge base: Word,
-OpenDocument, RTF and EPUB as Markdown by pandoc; a PowerPoint a slide a page,
-with its speaker notes, from its XML (`unzip` and quick-xml); a picture's words
-by tesseract (`proton-library::formats::office`). A page of the web is a source
-too, fetched on a worker through the literature's polite client and fetched
-again only when asked: an HTML page kept as its article — the element it names
-as one, or the block its paragraphs gather in, without menus, footers, scripts,
-pictures or links' addresses — made Markdown by pandoc with MathML and MathJax's
-`\(…\)` kept as TeX, or by dom_query without pandoc; a PDF kept whole in
-`.notebook/web/`, which the document viewer and `view_pages` open; a YouTube
-video as its English captions, read by yt-dlp without the video
-(`proton-library::formats::web`, `proton-core::study::web`). An **artifact**
-Claude published, as Proton keeps it, is a source too: the latest version's
-page read as its article, and opened as itself, sandboxed, from the reader. A page KaTeX drew keeps no TeX, so its formulas are read
-back from the drawing: the glyphs in order, a script by whether it sits above
-or below, a fraction's parts by which is above, a root, a sum's limits, a
-table's cells by column and row, and the glyphs TeX names by their names
-(`proton-library::formats::katex`). A recording —
-audio or video — is added untranscribed, measured by ffprobe on the reading
-worker (never while its file is in iCloud), and said to have captions beside
-it when it has; it is transcribed only when the person asks, having been told
-its length and what Fish charges (36¢ an hour of sound): ffmpeg cuts its sound
-into mono pieces under Fish's hour, each is sent to `/v1/asr` on
-`transcribe-1-pro`, and the words, put back at their places, are kept as cues
-(`proton-core::study::voice::hear`, `proton-library::formats::captions::from_words`). **Discover** finds
-in the knowledge base what is like a notebook and not in it yet: the words its
-sources share — scored by how many of them use each — and its course are
-searched for, and each file is offered with the passage most like it
-(`proton-study::discover`). On the web, the studio's **Discover** finds pages,
-papers and videos on a topic — or on what the notebook's sources are about —
-and **Deep Research** reads widely and writes a report citing what it read by
-number; both are calls of Claude Code's with WebSearch and WebFetch alone, no
-files and no notebook server, whatever engine the tutor is set to, and both
-are kept as `studio/found/W001.json`, from which the person ticks what to add
-as sources, and may keep the report as one (`proton-study::found`). A source's role (a past paper, a solution, slides, one's own work) is
-guessed from its path and corrected by hand. `proton-core::study` is one for
-the session, whichever project is open; a notebook another Proton holds open is
-read only, under the same lock an investigation has. The reader shows a
-source's words as kept — Markdown cut at its headings, pages, cues — or a PDF
-whose file is here in the document viewer, at a citation's place. A source
-is given its **guide** when the person asks — what it covers, citing it, its
-key topics, and questions to ask of it, each a button that asks the tutor —
-written by one call from that source alone and kept in `.notebook/guides/`;
-and the sources are **labelled** by topic in one call over each one's
-beginning, from a vocabulary the call chooses, kept in `.notebook/labels.json`
-apart from `sources.json`, which only the notebook writes; a label ticks the
-sources about it (`proton-study::guide`). The person's own **categories**
-(`Sources::categories`, in `sources.json` in their order) group the sources in
-the panel: a source is in one or none, its membership dropped when it is taken
-out, and a name is unique whatever its case; taking a category away keeps its
-sources, in none. Each source opened stays as a **tab** beside the tutor's, in
-the window only (`state.tabs`, its last `studySource` event and how far down it
-was read): ⌃⇥ and ⌃⇧⇥ go round them without asking the core again, a source
-opened again replaces its tab's copy, and a source taken out or another
-notebook opened takes the tabs away. A PDF's pages with few words of
-their own — slides that are mostly pictures — are **made readable** on asking,
-told how many calls it takes: drawn by pdftoppm on a worker, never from a file
-in iCloud, then read eight to a call by an engine that can see them (Antigravity's
-print mode cannot, so Claude Code reads for it), each page written out as
-Markdown with its TeX and what its diagrams show, and put in place of the few
-words the PDF held, said to be read from the picture (`proton-study::readable`).
-A source too long for one call to read whole — over 120,000 characters, a
-book — is **digested** on asking, told its words and calls first: cut into
-parts of at most 100,000 characters, each read by one call that writes what
-its sections say in a few cited sentences, where each begins and its key
-terms, at about a fortieth of its length; the parts are kept in
-`.notebook/digests/` with their words' hashes, so a part whose words change is
-digested again alone (`proton-study::digest`). The reader shows the digest
-above the source's words.
-
-**The tutor** answers from the sources ticked, on Claude Code, Codex, Gemini or
-Antigravity, as the notebook has it set (`proton-core::study::tutor`). The
-first three reach the sources through `proton-mcp --notebook`, which serves
-only those ticked, from the words the notebook kept — `notebook_sources`,
-`search_sources`, `read_source`, `digest_source` (a long source's digest,
-section by section), `view_pages`, `notebook_status`, and `read_note`: the
-notebook's notes, listed after the sources ticked or not, since a note is no
-source — and `read_file`, the text files written for the student in `files/`
-(a `.tex` cheatsheet; its PDF is a source) — and have nothing else: Claude Code with no built-in tools (`--tools ""`), Codex in a
-read-only sandbox that never asks, Gemini with no extensions and only Proton's
-server allowed, none with the person's own servers. Antigravity, which takes
-no server, is given the passages found for each question, as any engine is
-when the server cannot be found. Its notes come with them, whole up to 8,000
-characters and by title past that, and the text files in `files/` the same. The tutor is told to follow every claim with
-its citation, copied from the tools, and to say plainly what the sources do
-not cover; Default, Learning Guide and a role of one's own set how it answers.
-Each citation is resolved as the answer streams (`proton-study::cite`): drawn as
-a numbered chip whose passage shows over it and whose click opens the reader
-there, or struck through when it names nothing in the notebook. A chat is kept
-as `chats/C001.json`, its citations as resolved when given; picked up again, or
-when its engine changes, a new conversation is told what was said.
-
-**Leaving a notebook mid-answer.** A tutor still answering when its
-notebook is left — another opened, or it closed — is not stopped: it is
-parked (`Parked`, with a copy of that notebook's `Book`) and polled on the
-heartbeat, and when its turn ends the question and answer are kept in that
-notebook's chat, the notes and files it wrote with them, and it is let go.
-Opened again before then, the notebook takes its tutor back, still answering.
-An idle tutor is let go as before. Until this, leaving stopped it, and the
-question — kept only when its answer ends — was lost with it.
-
-**Notes the tutor writes.** Asked for something to keep — a cheatsheet, a
-summary, a formula sheet — the tutor writes it in its answer between
-four-backtick fences opened ````` ````note Its title ````` (`proton-study::tutor::notes_in`).
-Every engine can, Antigravity included, since nothing is written by the
-engine: when the turn ends Proton takes each block out of the answer and
-keeps it with the code that keeps a note written by hand (`put_note`), as
-`notes/N004.md` with `from` naming the chat, a note that is a source read
-again. The turn records them (`StudyTurn.notes`) and draws each as a button
-that opens it; while the answer streams, a block is shown as “Writing the
-note…”. The next question tells the tutor the ids it was given, and a block
-opened ````` ````note N004 ````` writes that note again; an id that names no
-note makes a new one. A fence never closed keeps nothing. A block opened
-````` ````file sheet.tex ````` is a file instead: kept whole in the notebook's
-`files/` under a plain name (`tutor::file_name`: no slashes, no leading dot),
-recorded on the turn (`StudyTurn.files`), and drawn with Open and, for a
-`.tex`, Compile PDF. Open shows it in Proton, not the desktop's app for it
-(here Quark, which took a PDF sent to it while running and showed nothing): a
-PDF in the document viewer, registered as a source's is so the shell may read
-it; anything else in Notebook, as an editor (`Event::StudyFile`, saved by
-`StudyFileSave`; Compile there saves first). A PDF compiled is made a source,
-ticked (`Origin::Made { file }`, resolved under `files/` wherever a source's
-file is looked for); compiled again, that same source is read again. The
-document viewer's Save a copy… asks the shell's `save_document_as`, which
-copies only a file the viewer was let read, to where macOS's save panel
-(`NSSavePanel`, through `objc2`'s `msg_send!`) says.
-
-A saved web page — `.html`, `.htm`, `.xhtml` — is a source too
-(`Kind::Html`): its article read as a fetched page's is
-(`formats::web::page`), when it is added, never in a search of the whole
-knowledge base. Compiling is only ever
-that button (`study::latex`): the machine's pdflatex — on the PATH, MacTeX's
-`/Library/TeX/texbin`, a TinyTeX of the person's or Quark's — run in `files/`
-with its working files in `files/.build/`, `-no-shell-escape`, no input, on a
-thread, stopped past two minutes; the PDF lands beside the `.tex`, the turn
-marks it and offers Open PDF, and a failure is said by the log's first error
-with its line.
-
-**The studio** makes things of the sources ticked, each by one unattended call
-to the engine the tutor is set to (`proton-core::study::jobs`): study guides,
-briefings, FAQs, glossaries, timelines and reports of one's own asking, as
-Markdown; mind maps, tables of the columns asked for, the course's learning
-objectives and flashcards, as JSON held to a schema. A notebook of up to 120,000
-characters is given to the call whole, each passage after its citation; a larger
-one is reached through `proton-mcp`, given what fits of it: the past papers an
-exam is set from, the digests of its long sources, and its short ones whole.
-Antigravity, which takes no server, can work from a larger notebook only when
-every source in it is given whole or digested whole. Three calls run at once, two on any one
-engine; a call runs fifteen minutes at most; an answer that will not read is
-sent back once, saying why. TeX that JSON ate — `\frac` arriving as a form
-feed and `rac` — is mended (`proton-study::tex`). What was made is kept under
-`studio/`, and every call as `tasks/J0001.json`: what it was told and asked.
-
-**Flashcards** are decks in `studio/decks/` — basic cards and clozes
-(`{{c1::…}}`), each with its topic, objectives and citations — made about ten,
-twenty or forty at a time, easy, medium or hard, with repeats of a deck's cards
-left out (`proton-study::deck`). Every card is scheduled by FSRS-6
-(`proton-study::fsrs`: py-fsrs's scheduler, formula for formula, tested against
-its own numbers, its fuzz seeded so that it replays). The deck's
-`D001.log.jsonl` is the schedule: each rating is appended to it, an undo is a
-line of its own, and every card's memory is replayed from it. A day of study
-begins at four in the morning and holds twenty new cards and two hundred
-reviews unless `study.srs` says otherwise — cards being learnt first, then the
-reviews least likely to be remembered, then new cards; a card being learnt is
-shown up to twenty minutes early when nothing else is left. No card is due
-after the notebook's exam begins, and in the fortnight before it a retention of
-0.95 is asked for rather than 0.9. A deck is reviewed for what is due, crammed
-whole, or gone over for the cards missed in the last week, each card rated 1–4
-with when it would come back; it goes out as CSV, or as a file Anki imports with
-its TeX as MathJax.
-
-**Quizzes and practice problems** are `studio/quizzes/Q001.json`, with every
-attempt at one appended to `Q001.attempts.jsonl` — each answer, each mark, a
-dispute, a finish — and replayed from it (`proton-study::quiz`). A question is
-a choice, choices, blanks (`___`), a number, or a written answer, short or
-worked; it carries a hint, an explanation, its objectives and citations, and a
-written one a rubric of criteria and points and a model answer. Options are
-shuffled when read, since a model puts the right one second more often than
-chance. What can be checked is marked by rule: choices earn each right option
-less each wrong one, blanks are compared normalised, a number within its
-tolerance and in its unit. A written answer is marked by a call of the studio's
-to another family of model than the one that set the quiz — Codex, Claude Code,
-Antigravity, the first of them installed — told the rubric, the model answer and
-what the question's citations say. Its mark must give every criterion at most
-its points and quote the words of the answer that earn them; a quote that is
-not in the answer is sent back once, and the second time the points it was to
-show are not given. A mark disputed is marked again by a third family, if there
-is one; when the two differ by more than a point, the lower counts. An attempt
-says how it went objective by objective (or topic by topic), and can be tried
-again for what it missed; `proton-study::mastery` weighs every answer and card
-review tagged with an objective — a model's mark 0.7, an answer after its hint
-half, the older the less — into where it stands: not started, a focus,
-developing, or a strength.
-
-**Exams** are quizzes with sections, marks and minutes (`proton-study::exam`).
-A practice exam is set by one call that reads the notebook's past papers whole
-— given to it whole even when they are not ticked — writes what they are like
-as the paper's blueprint, and sets a new paper with their sections, marks and
-kinds of question. Each question is held against the past papers' paragraphs
-by TF-IDF, as Research tells hypotheses apart: one that is a past paper's
-reworded is sent back once to be set afresh, and is kept marked as like it if it
-still is. A past paper is transcribed as it was set, each question citing its
-page, its marking scheme drawn from the solutions file whose name matches it.
-Either is practised untimed, marked as it is answered, or sat against the
-clock: a sitting's answers are kept as drafts in `.notebook/drafts/` as they
-are written, it gives no hints and marks nothing until it is handed in — by the
-person, or by the heartbeat when the time is up — and then says how it went
-section by section. A paper goes out as Markdown or as a page to print, alone
-or with its marking scheme.
-
-**Progress** is by learning objective: Notebook's Progress tab says, from every
-answer and review tagged with one, which are focus areas, which developing,
-which strengths and which not started, topic by topic, beside how each quiz
-and exam went. A diagnostic quiz asks a question of each objective. A lesson on
-one is a chat of its own (`chats/C001.json` with its `lesson`), the tutor a
-learning guide in that chat alone, begun on the objective and the passages
-that teach it; it ends, when asked, in a check of three questions. A Learning
-Overview (`studio/overviews/L001.json`, `proton-study::overview`) takes the
-course topic by topic in the order to learn it — each taught in a cited
-summary, its ideas mapped, a few flashcards turned over in place and a check of
-a question or two marked at once — and ends in a quiz; its cards are kept as a
-deck and its quiz as a quiz of their own, so they are scheduled and marked like
-any others.
-
-**Audio overviews** are two hosts talking the sources through — a deep dive, a
-brief, a critique, a debate — or one lecturing (`proton-study::audio`). One call
-writes the script: turns of who says what, with mathematics said in words, the
-same in TeX for the transcript, and each turn's citations; chapters at turns.
-Fish Audio speaks it (`proton-voice`): `POST /v1/tts` with the model
-`s2.1-pro-free` as a header and the turns tagged `<|speaker:i|>`, two thousand
-characters or eight turns at a time, each piece streamed through a part file;
-ffmpeg joins the pieces, and each turn's place in the sound is its share of its
-piece's length. Nothing is sent to Fish until the person has agreed to its free
-tier's terms — what it is sent may be used to improve its models — and chosen
-the voices, listened to first: from Fish's library, from the person's own
-clones (`GET /model?self=true`), or by a voice's id or fish.audio address
-(`GET /model/{id}`), in a Voices view the Audio overview's form links to. Its
-key is read from `FISH_API_KEY` in Proton's environment or the login shell's,
-held in memory only, printed nowhere, and read again when the person says it
-is set; the page is told only whether it was found. A piece
-spoken is kept until the whole is joined, so a voicing stopped part way goes on
-where it stopped rather than paying twice. The sound is kept out of Git, in
-`.notebook/audio/A001.mp3`, and played through `study://localhost/` — a scheme
-that serves a notebook's audio and a voice's sample and nothing else, answering
-a player's seek with the range it asked for (`proton-core::study::media`); the
-window's policy allows media from it alone. The transcript follows the voice,
-and a turn or a chapter clicked is where it plays from.
-
-**Slide decks** are a lecture's slides — a title, points that are phrases, two
-columns to compare, a quote — each with speaker notes citing the sources
-(`proton-study::slides`, `studio/slides/P001.json`). A slide is revised on its
-own, by a call held to one slide's schema that puts it back in its place. A deck
-is presented in the window, and written out as Markdown that pandoc makes a
-PowerPoint of, its TeX as Office's own mathematics. **Infographics** are a page
-at a glance — blocks of a heading, a figure and a sentence or two, and a
-takeaway (`proton-study::infographic`) — drawn by the window from one of three
-templates as plain SVG; it, and a mind map drawn as a tree, are saved as PNG by
-drawing that SVG on a canvas and handing the picture back to be written into the
-notebook's `exports/`. PDFs and video overviews wait on rendering the window's
-own HTML natively, which is not built yet.
-
-**Coding practice** is a set of problems (`proton-study::code`,
-`studio/coding/K001.json`), each a prompt citing the sources, the code a student
-starts from, a solution, hints, an explanation, and tests: a program of their
-own in the problem's language that uses Proton's checks, a small library per
-language that prints one line per test — `PROTON-TEST`, its name, `PASS` or
-`FAIL` and why — which is all Proton reads of a run. Python, C, C++, Java,
-JavaScript and Rust are offered as far as this machine has their compilers,
-found once on the login shell's PATH (`proton-core::study::code::Tools`); a
-compiler installed in the home folder — conda's Python, nvm's Node, rustup's
-toolchain, past its proxy — is given its own folder to read. Python's problems
-run with a Python the person chooses (`study.code.python`), from those found on
-the login shell's PATH, in conda's `environments.txt`, among Jupyter's kernels
-and pyenv's versions, or named by its path or its environment's folder; each is
-asked, without importing anything, which of a list of libraries a course might
-use it has (NumPy, SciPy, pandas, SymPy, NetworkX, PuLP, CVXPY, OR-Tools,
-Pyomo, scikit-learn, statsmodels, PyTorch). The model is told that Python's
-version and libraries and that nothing else will import; the set keeps the
-Python it was checked with, and is run with it after another is chosen. A
-library that starts a solver of its own, as PuLP starts CBC, runs it from
-inside its installation and writes to the run's temporary folder, both of
-which the sandbox allows. Every build and
-run is the Lab's (`proton-lab::exec`): Seatbelt or bubblewrap with no network,
-writes only to the run's folder, the home folder unreadable but for the run and
-the compiler, a clean environment, `ulimit`s on CPU and file size, 90 s to
-build and 10 s to run, its process group killed at the deadline, and what it
-prints kept to 64 KiB. Where there is no sandbox, nothing is run. Before a set
-is kept, each problem's solution is built and run against its tests and its
-starter must build and fail them; what does not is sent back once to be mended,
-then left out. What a student writes is kept beside the set
-(`studio/coding/K001/p1.py`), saved as it is written, and each run of it logged
-to `K001.runs.jsonl`, which gives each problem its best run. The editor is a
-textarea under highlight.js's colouring, keeping the browser's own undo and
-input methods, with the Codex editor's typing rules: Tab to the code's own
-step, Enter keeping the indent and opening a block, brackets and quotes that
-close themselves, ⌘/ to comment and ⌘⏎ to run. TeX JSON ate is mended in what
-is written about a problem, never in its code, where a tab before `out` is a
-tab.
+Chat and then Notebook went to Fairy in November 2026. Chat took the Council
+window with it; Notebook took `proton-study`, `proton-voice`, the core's
+`study` and `engines` modules, `proton-mcp --notebook`, the shell's `study://`
+and `artifact://` schemes, and the practice problems it set in Circuit and
+Logic. A saved session that names `chat` or `study` loads as above. The keys
+moved up to close the gap: Excel is ⌃4, Circuit ⌃5, Logic ⌃6 and CAD ⌃7.
 
 ### Trace
 
@@ -1463,7 +1114,7 @@ trait Mode {
 ```
 
 That is the whole contract. Nothing about the modes that ship is privileged,
-and Research and Notebook were extensions rather than forks.
+and Research was an extension rather than a fork.
 
 **It is built, in `proton-core::contract`, and it is a struct rather than a
 trait.** Every answer above is data: none of it needs to run, and a mode that
@@ -1499,7 +1150,6 @@ bearing rule of the entire project:
 | Codex | Source files |
 | Data | `.ipynb` + `.sql` |
 | Research | `research/<slug>/` — Markdown with TOML front matter, `tournament.jsonl`; papers as `literature/P003.md`, their PDFs beside them and out of Git |
-| Notebook | `~/Github/Notebooks/<slug>/` — the notebook, its sources and notes in JSON and Markdown, its chats, and what the studio made |
 
 It is not tidiness. It is what lets the agent edit a notebook or an
 investigation by writing a patch instead of driving a GUI, and what makes any of

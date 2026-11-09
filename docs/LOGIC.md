@@ -15,8 +15,8 @@ An agent can read, solve and prove too. Asked for on 2026-10-30.
 
 ## Decided (2026-10-30)
 
-- **The label is "Logic"**, on the rail and the title bar, on **⌃7**, after
-  Circuit's ⌃6. In the code it is `logic`: `ModeId::Logic`, the crate
+- **The label is "Logic"**, on the rail and the title bar, on **⌃6**, after
+  Circuit's ⌃5 (⌃7 until Notebook went to Fairy on 2026-11-09). In the code it is `logic`: `ModeId::Logic`, the crate
   `proton-logic`, the core module `logic`, `ui/logic*.js`, commands `Logic*`
   and events `logic*`.
 - **Two languages, one meaning.** Proton's own (below) is what Proton writes
@@ -200,7 +200,8 @@ goal p -> r
   result.
 - **With Notebook:** "Logic practice", made from the sources and checked by
   the engine before it is kept — formulas to classify, arguments to prove,
-  puzzles to encode — each opened in Logic.
+  puzzles to encode — each opened in Logic. (Gone with Notebook, to Fairy,
+  on 2026-11-09.)
 
 ## Not built, and why
 

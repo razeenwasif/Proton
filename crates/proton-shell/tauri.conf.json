@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost artifact: http://artifact.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; media-src 'self' study: http://study.localhost; script-src 'self'; frame-src 'self' artifact: http://artifact.localhost"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; media-src 'self'; script-src 'self'"
     }
   },
   "bundle": {

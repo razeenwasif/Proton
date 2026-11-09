@@ -1,12 +1,11 @@
 import {orderingChecks} from './ordering.js';
-import {studyChecks} from './suite-study.js';
 import {sheetChecks} from './suite-sheet.js';
 import {circuitChecks} from './suite-circuit.js';
 import {logicChecks} from './suite-logic.js';
 import {cadChecks} from './suite-cad.js';
 const frame = document.querySelector('iframe');
 // Keep the test repeatable without changing the local browser preview's layout.
-const layoutKeys = [...['codex', 'data', 'research', 'study', 'sheet', 'circuit', 'logic', 'cad'].map((mode) => `proton.panes.${mode}`)];
+const layoutKeys = [...['codex', 'data', 'research', 'sheet', 'circuit', 'logic', 'cad'].map((mode) => `proton.panes.${mode}`)];
 const savedLayouts = layoutKeys.map((key) => [key, localStorage.getItem(key)]);
 layoutKeys.forEach((key) => localStorage.removeItem(key));
 const restoreLayouts = () => savedLayouts.forEach(([key, value]) => {
@@ -150,7 +149,7 @@ await test('Narrow windows show the requested panel without squeezing out the ed
   assert(!section.querySelector('aside').hidden, 'wide layout did not restore sidebar');
 });
 await test('Each mode keeps a usable stage, and every one has a right panel to toggle', async () => {
-  for (const mode of ['data', 'research', 'study', 'codex']) {
+  for (const mode of ['data', 'research', 'codex']) {
     await win.dispatch({type: 'setMode', mode}); await settle();
     const section = $('.workspace.on'), stage = section.querySelector('main');
     assert(stage.clientWidth >= 320, `${mode} lost its stage`);
@@ -981,7 +980,7 @@ await test('Every mode asks for an opaque window in the theme\'s ground, and nev
   const asked = () => (win.invokes ?? []).filter((c) => c.name === 'set_opaque').map((c) => c.args.color);
   const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
   const before = asked().length;
-  for (const mode of ['data', 'research', 'study', 'sheet', 'circuit', 'codex']) {
+  for (const mode of ['data', 'research', 'sheet', 'circuit', 'codex']) {
     await win.pushEvents([{type: 'modeChanged', mode}]);
   }
   const now = asked().slice(before);
@@ -1435,7 +1434,7 @@ await test('Research sits beside Data after Codex: ⌃3 opens it, in Codex\'s ch
   // Codex, Data and Research side by side, in the title bar and on the rail.
   for (const list of ['.tb-modes', '.mode-rail']) {
     const order = [...doc.querySelectorAll(`${list} [data-mode]`)].map((b) => b.dataset.mode).join();
-    assert(order === 'codex,data,research,study,sheet,circuit,logic,cad', `${list} is not in the new order: ${order}`);
+    assert(order === 'codex,data,research,sheet,circuit,logic,cad', `${list} is not in the new order: ${order}`);
   }
   assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Research is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
   await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
@@ -2159,7 +2158,6 @@ await test('A long name in the project panel scrolls sideways instead of being c
   assert(rows[0].getBoundingClientRect().width >= tree.scrollWidth - 1, 'a highlight would stop short');
   if (was) space.style.setProperty('--col-l', was); else space.style.removeProperty('--col-l');
 });
-await studyChecks({test, assert, win, doc, $, settle, key, shown});
 await sheetChecks({test, assert, win, doc, $, settle, key, shown});
 await circuitChecks({test, assert, win, doc, $, settle, key, shown});
 await logicChecks({test, assert, win, doc, $, settle, key, shown});

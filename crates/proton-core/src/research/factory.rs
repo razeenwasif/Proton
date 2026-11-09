@@ -68,8 +68,8 @@ impl AgentFactory for Engines {
     /// Antigravity runs Gemini, Claude and GPT models alike and does not say
     /// which it is running, so a seat whose investigation names none is
     /// given a Gemini model by name: its family is then known, not assumed,
-    /// and nobody reviews or judges their own. The list is the one remembered
-    /// for Notebook's tutor, else asked of `agy` once.
+    /// and nobody reviews or judges their own. The list is the one an engine
+    /// last remembered, else asked of `agy` once.
     fn default_model(&mut self, seat: Seat) -> Option<String> {
         if seat != Seat::Antigravity {
             return None;

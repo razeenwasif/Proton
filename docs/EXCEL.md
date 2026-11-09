@@ -10,7 +10,8 @@ colour, charts, and an agent that reads and writes ranges. Asked for on
 
 ## Decided
 
-- **The label is "Excel"**, on the rail and the title bar, on **⌃5**. In the
+- **The label is "Excel"**, on the rail and the title bar, on **⌃4** (⌃5 until Notebook
+  went to Fairy on 2026-11-09). In the
   code it is `sheet` — `ModeId::Sheet`, the crate `proton-sheet`, the core
   module `sheet`, `ui/sheet*.js`, commands `Sheet*` and events `sheet*` —
   as Canvas was `raster`.

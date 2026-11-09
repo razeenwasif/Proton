@@ -28,7 +28,7 @@
 //! ## Each mode keeps projects of its own
 //!
 //! Every mode lists the projects opened in it and shows one of them, so the
-//! folder open in Codex is not carried into Research or Notebook: going to
+//! folder open in Codex is not carried into Research or Excel: going to
 //! a mode brings back the project it had, and leaving it brings back the one
 //! the next mode had. The first time a mode is entered with nothing of its
 //! own, it is given a folder of its own — `~/Proton/<Mode>` — made then. A folder open in several modes is
@@ -211,9 +211,6 @@ pub struct Session {
     /// How a Research over a folder of its own is made: over the engines and
     /// the machine's Lab — or, in tests, over a Lab of its own.
     make_research: fn(&Path) -> crate::research::Research,
-    /// Notebook: the person's notebooks and the knowledge base they draw
-    /// from, one for every project here.
-    study: crate::study::Study,
 }
 
 impl Session {
@@ -238,7 +235,6 @@ impl Session {
             research: None,
             person: None,
             make_research: crate::research::Research::kept_in,
-            study: crate::study::Study::new(),
         }
     }
 
@@ -279,13 +275,6 @@ impl Session {
         &self.plugins
     }
 
-    /// Notebook's, made otherwise: for a test, one that says which of its
-    /// files are in iCloud.
-    pub fn with_study(mut self, study: crate::study::Study) -> Session {
-        self.study = study;
-        self
-    }
-
     /// Keep the investigations in `folder`, each a folder in it, for every
     /// project here and every one opened later — rather than in each
     /// project's `research/`.
@@ -324,7 +313,6 @@ impl Session {
     /// chosen in the Research tab is written.
     pub fn with_person_settings(mut self, file: PathBuf) -> Session {
         let folder = crate::settings::Settings::at(file.clone()).research_folder();
-        self.study = std::mem::take(&mut self.study).with_person_settings(&file);
         self.person = Some(file);
         match folder {
             Some(folder) => self.with_research_in(&folder),
@@ -573,7 +561,6 @@ impl Session {
         if let Some(research) = &self.research {
             research.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
         }
-        self.study.shutdown();
         // The machine's Lean, if it is being made: here, not in Research's
         // shutdown, which also runs when the investigations' folder moves.
         crate::research::quit_lean();
@@ -594,7 +581,7 @@ impl Session {
     /// A file some workspace here opened in the document viewer — the page
     /// may still be showing one from a project it has since left.
     pub fn document_file(&self, path: &str) -> Option<PathBuf> {
-        self.workspaces.iter().find_map(|w| w.document_file(Path::new(path))).or_else(|| self.study.document_file(Path::new(path)))
+        self.workspaces.iter().find_map(|w| w.document_file(Path::new(path)))
     }
 
     pub fn workspaces(&self) -> &[Workspace] {
@@ -662,16 +649,8 @@ impl Session {
             },
             Command::CycleWorkspace { by } => self.cycle(by),
             Command::OpenWorkspacePicker => self.open_picker(),
-            Command::SetMode { mode } => {
-                let mut events = self.set_mode(mode);
-                if mode == ModeId::Study {
-                    events.extend(self.study.enter());
-                }
-                events
-            }
+            Command::SetMode { mode } => self.set_mode(mode),
             Command::ResearchFolder { folder } => self.set_research_folder(&folder),
-            // Notebook's are the session's: a notebook is the person's, not a project's.
-            command if crate::study::handles(&command) => self.study.apply(command),
 
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.
@@ -882,7 +861,6 @@ impl Session {
         if let Some(research) = &self.research {
             events.extend(research.lock().unwrap_or_else(|e| e.into_inner()).poll());
         }
-        events.extend(self.study.poll());
         events.extend(self.crossed(side));
         self.claim(events)
     }
@@ -1185,10 +1163,10 @@ impl Session {
     }
 
     /// The two sides of a session from before every mode kept its own:
-    /// Codex's projects are Codex's, Data's are Data's, Research's and
-    /// Notebook's — and every other mode starts on a folder of its own.
+    /// Codex's projects are Codex's, Data's are Data's and Research's — and
+    /// every other mode starts on a folder of its own.
     fn restore_sides(&mut self, sides: &StoredSides) {
-        const DATA_SIDE: [ModeId; 3] = [ModeId::Data, ModeId::Research, ModeId::Study];
+        const DATA_SIDE: [ModeId; 2] = [ModeId::Data, ModeId::Research];
         for (listed, workspace) in self.listed.iter_mut().zip(&self.workspaces) {
             let root = workspace.root().display().to_string();
             *listed = Listed::default();

@@ -515,7 +515,6 @@ impl Logics {
                 }
                 Vec::new()
             }
-            Command::LogicPractice { folder, name, kind, text } => self.practice(root, &folder, &name, &kind, &text),
             Command::LogicFromTable { names, column } => {
                 let names: Vec<String> = names.split(|c: char| c.is_whitespace() || c == ',').filter(|s| !s.is_empty()).map(String::from).collect();
                 let generation = self.open.as_ref().map_or(0, |o| o.generation);
@@ -569,41 +568,6 @@ impl Logics {
         events.push(Event::LogicAnswer { answer: None });
         events.push(notice(format!("made {rel}"), NoticeLevel::Info));
         events
-    }
-
-    /// A practice problem from Notebook, opened: its file in a folder named
-    /// for its set, written from `text` the first time — after that, opened
-    /// as the student left it.
-    fn practice(&mut self, root: &Path, folder: &str, name: &str, kind: &str, text: &str) -> Vec<Event> {
-        if !matches!(kind, "logic" | "proof") {
-            return vec![notice(format!("“{kind}” is not a kind of practice file: logic or proof"), NoticeLevel::Warn)];
-        }
-        let rel = format!("{}/{}.{kind}", slug(folder), slug(name));
-        let file = match inside(root, &rel) {
-            Ok(f) => f,
-            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
-        };
-        if self.open.as_ref().is_some_and(|o| o.path == file) {
-            return self.events(root);
-        }
-        if self.dirty() {
-            return vec![notice("save or discard the open file's changes before opening another".into(), NoticeLevel::Warn)];
-        }
-        if !file.exists() {
-            let made = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&file, text));
-            if let Err(e) = made {
-                return vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)];
-            }
-        }
-        match std::fs::read_to_string(&file) {
-            Ok(text) => {
-                self.show(root, file, text);
-                let mut events = self.events(root);
-                events.push(Event::LogicAnswer { answer: None });
-                events
-            }
-            Err(e) => vec![notice(format!("{rel}: {e}"), NoticeLevel::Warn)],
-        }
     }
 
     fn show(&mut self, root: &Path, path: PathBuf, text: String) {

@@ -29,7 +29,6 @@ import { createEditorState, createEditorPaints } from "./editor-state.js";
 import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
 import { createResearch } from "./research.js";
-import { createStudy } from "./study.js";
 import { createSheet } from "./sheet.js";
 import { createCircuit } from "./circuit.js";
 import { createLogic } from "./logic.js";
@@ -503,7 +502,7 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["codex", "data", "research", "study", "sheet", "circuit", "logic", "cad"];
+const MODES = ["codex", "data", "research", "sheet", "circuit", "logic", "cad"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -899,9 +898,6 @@ const research = createResearch({ root: document, dispatch });
 const lab = createLab({ root: document, dispatch, readLab });
 /* Lean and Mathlib, in which a mathematics investigation's proofs are checked. */
 const lean = createLean({ root: document, dispatch });
-/* Notebook: notebooks of your own sources, and the knowledge base they are
-   chosen from. Drawn from what the core reads of them. */
-const study = createStudy({ root: document, dispatch, shell: HAS_SHELL });
 const sheet = createSheet({ root: document, dispatch,
   // The system's clipboard through the shell; the page's own without one.
   paste: async () => (await pasteText()) ?? (await navigator.clipboard?.readText?.().catch(() => null)) ?? null });
@@ -3352,10 +3348,6 @@ function renderEvent(event) {
       selectCell(event.index);
       break;
 
-    case "claudeCapabilities":
-      study?.capabilities(event.capabilities);
-      break;
-
     case "researchList":
       research?.list(event);
       break;
@@ -3454,123 +3446,6 @@ function renderEvent(event) {
     // What Excel copied, on the system clipboard.
     case "sheetClip":
       void copyText(event.text);
-      break;
-
-    case "studyList":
-      study?.list(event);
-      break;
-
-    case "studyNotebook":
-      study?.notebook(event);
-      break;
-
-    case "studyClosed":
-      study?.closed();
-      break;
-
-    case "studyKb":
-      study?.kb(event);
-      break;
-
-    case "studyKbFolder":
-      study?.kbFolder(event);
-      break;
-
-    case "studyKbResults":
-      study?.kbResults(event);
-      break;
-
-    case "studyArtifacts":
-      study?.artifacts(event);
-      break;
-
-    case "studyKbAll":
-      study?.kbAll(event);
-      break;
-
-    case "studySource":
-      study?.source(event);
-      break;
-
-    case "studyNote":
-      study?.note(event);
-      break;
-
-    // A file the tutor wrote that is not a PDF: in Notebook, to read and edit.
-    case "studyFile":
-      study?.file(event);
-      break;
-
-    case "studyChat":
-      study?.chat(event);
-      break;
-
-    case "studyChatLive":
-      study?.chatLive(event);
-      break;
-
-    case "studyStudio":
-      study?.studio(event);
-      break;
-
-    case "studyMadeOpen":
-      study?.made(event);
-      break;
-
-    case "studyTask":
-      study?.task(event);
-      break;
-
-    case "studyDeck":
-      study?.deck(event);
-      break;
-
-    case "studyReviewing":
-      study?.reviewing(event);
-      break;
-
-    case "studyQuiz":
-      study?.quiz(event);
-      break;
-
-    case "studyProgress":
-      study?.progress(event);
-      break;
-
-    case "studyOverview":
-      study?.learning(event);
-      break;
-
-    case "studyAudio":
-      study?.audio(event);
-      break;
-
-    case "studyVoiceState":
-      study?.voiceState(event);
-      break;
-
-    case "studyVoices":
-      study?.voices(event);
-      break;
-
-    case "studyVoiceSample":
-      study?.voiceSample(event);
-      break;
-
-    case "studySlides":
-      study?.slides(event);
-      break;
-
-    case "studyGraphic":
-      study?.graphic(event);
-      break;
-
-    case "studyCoding":
-      study?.coding(event);
-      break;
-
-    case "studyCodeRan":
-      study?.codeRan(event);
       break;
 
     case "leanEnv":
@@ -3839,7 +3714,7 @@ document.addEventListener("keydown", (e) => {
   // below (⌃-prefixed commands are exactly what a Vim keymap is made of,
   // and on macOS ⌃K in particular already means "kill to end of line"
   // everywhere else on the system).
-  if (e.ctrlKey && /^[1-8]$/.test(e.key)) {
+  if (e.ctrlKey && /^[1-9]$/.test(e.key) && Number(e.key) <= MODES.length) {
     e.preventDefault();
     coreSetMode(MODES[Number(e.key) - 1]);
     return;

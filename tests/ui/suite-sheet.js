@@ -16,25 +16,25 @@ export async function sheetChecks({test, assert, win, doc, $, settle, key, shown
   const cells = (/** @type {any[]} */ list, partial = false, generation = 3) => ({type: 'sheetCells', generation, version: 1, sheet: 0,
     rows: [0, 100], cols: [0, 30], cells: list, partial});
 
-  await test('Excel sits after Notebook: ⌃5 opens it, in Codex\'s chrome and on an opaque ground, and Circuit follows it on ⌃6', async () => {
+  await test('Excel sits after Research: ⌃4 opens it, in Codex\'s chrome and on an opaque ground, and Circuit follows it on ⌃5', async () => {
     const asked = () => (win.invokes ?? []).filter((/** @type {any} */ c) => c.name === 'set_opaque').map((/** @type {any} */ c) => c.args.color);
     const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
     const before = win.commands.length, opaque = asked().length;
     /** @type {HTMLElement} */ (doc.body).focus();
-    key('5', {ctrlKey: true}); await settle();
-    assert(sent(before, 'setMode').some((c) => c.mode === 'sheet'), '⌃5 did not ask for Excel');
+    key('4', {ctrlKey: true}); await settle();
+    assert(sent(before, 'setMode').some((c) => c.mode === 'sheet'), '⌃4 did not ask for Excel');
     assert($('.workspace.on')?.dataset.ws === 'sheet', 'Excel is not on screen');
     assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Excel kept the old chrome');
     assert(!shown($('.titlebar [data-term-toggle]')), 'Excel offers a terminal it cannot show');
     const tab = $('.titlebar [data-mode="sheet"]');
-    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃5') && tab.textContent.trim() === 'Excel', 'the title bar does not show Excel');
+    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃4') && tab.textContent.trim() === 'Excel', 'the title bar does not show Excel');
     assert($('.mode-rail [data-mode="sheet"]')?.textContent.trim() === 'Excel', 'the rail does not say Excel');
     assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Excel is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
-    const before6 = win.commands.length;
-    key('6', {ctrlKey: true}); await settle();
-    assert(sent(before6, 'setMode').some((c) => c.mode === 'circuit'), '⌃6 did not ask for Circuit');
+    const before5 = win.commands.length;
     key('5', {ctrlKey: true}); await settle();
+    assert(sent(before5, 'setMode').some((c) => c.mode === 'circuit'), '⌃5 did not ask for Circuit');
+    key('4', {ctrlKey: true}); await settle();
   });
 
   await test('With no workbook open, Excel lists the project\'s and makes one as a folder or an .xlsx', async () => {

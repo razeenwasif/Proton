@@ -22,8 +22,6 @@ proton-data = { workspace = true }
 proton-dap = { workspace = true }
 proton-index = { workspace = true }
 proton-library = { workspace = true }
-proton-study = { workspace = true }
-proton-voice = { workspace = true }
 # A picture the window drew comes back as base64.
 base64 = "0.22"
 proton-lsp = { workspace = true }

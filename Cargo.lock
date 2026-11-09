@@ -4378,13 +4378,11 @@ dependencies = [
  "proton-plugin",
  "proton-research",
  "proton-sheet",
- "proton-study",
  "proton-syntax",
  "proton-term",
  "proton-text",
  "proton-trace",
  "proton-vcs",
- "proton-voice",
  "serde",
  "serde_json",
  "ts-rs",
@@ -4490,7 +4488,6 @@ dependencies = [
  "base64 0.22.1",
  "proton-core",
  "proton-library",
- "proton-study",
  "serde_json",
 ]
 
@@ -4538,22 +4535,6 @@ dependencies = [
  "tauri",
  "tauri-build",
  "window-vibrancy 0.8.0",
-]
-
-[[package]]
-name = "proton-study"
-version = "0.0.1"
-dependencies = [
- "libc",
- "proton-circuit",
- "proton-library",
- "proton-logic",
- "proton-research",
- "serde",
- "serde_json",
- "sha2",
- "toml 0.9.12+spec-1.1.0",
- "ts-rs",
 ]
 
 [[package]]
@@ -4610,15 +4591,6 @@ version = "0.0.1"
 dependencies = [
  "gix",
  "gix-imara-diff",
-]
-
-[[package]]
-name = "proton-voice"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
- "ureq",
 ]
 
 [[package]]

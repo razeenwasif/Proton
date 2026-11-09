@@ -20,8 +20,8 @@ drawn. Asked for on 2026-11-07.
 
 ## Decided (2026-11-07)
 
-- **The label is "CAD"**, on the rail and the title bar, on **⌃8**, after
-  Logic's ⌃7. In the code it is `cad`: `ModeId::Cad`, the crates
+- **The label is "CAD"**, on the rail and the title bar, on **⌃7**, after
+  Logic's ⌃6 (⌃8 until Notebook went to Fairy on 2026-11-09). In the code it is `cad`: `ModeId::Cad`, the crates
   `proton-cad` (the kernel, parts, assemblies, routes, drawings) and
   `proton-board` (electronics), the core module `cad`, `ui/cad*.js`,
   commands `Cad*` and events `cad*`.

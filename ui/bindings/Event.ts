@@ -13,7 +13,6 @@ import type { CircuitMachineView } from "./CircuitMachineView";
 import type { CircuitProjectView } from "./CircuitProjectView";
 import type { CircuitRunView } from "./CircuitRunView";
 import type { CircuitTestResult } from "./CircuitTestResult";
-import type { ClaudeCapabilities } from "./ClaudeCapabilities";
 import type { ClaudeItem } from "./ClaudeItem";
 import type { Completion } from "./Completion";
 import type { DebugFrame } from "./DebugFrame";
@@ -64,51 +63,6 @@ import type { Span } from "./Span";
 import type { SplitView } from "./SplitView";
 import type { StepView } from "./StepView";
 import type { Stop } from "./Stop";
-import type { StudyArtifactRow } from "./StudyArtifactRow";
-import type { StudyAttempt } from "./StudyAttempt";
-import type { StudyAudioFormat } from "./StudyAudioFormat";
-import type { StudyBlock } from "./StudyBlock";
-import type { StudyCardRow } from "./StudyCardRow";
-import type { StudyCategory } from "./StudyCategory";
-import type { StudyChapter } from "./StudyChapter";
-import type { StudyChatSummary } from "./StudyChatSummary";
-import type { StudyCitation } from "./StudyCitation";
-import type { StudyCodeOutcome } from "./StudyCodeOutcome";
-import type { StudyCodeSaved } from "./StudyCodeSaved";
-import type { StudyCounts } from "./StudyCounts";
-import type { StudyDigestView } from "./StudyDigestView";
-import type { StudyDrafted } from "./StudyDrafted";
-import type { StudyGraphicStyle } from "./StudyGraphicStyle";
-import type { StudyJob } from "./StudyJob";
-import type { StudyKbFile } from "./StudyKbFile";
-import type { StudyKbFolder } from "./StudyKbFolder";
-import type { StudyKbHit } from "./StudyKbHit";
-import type { StudyKbLeft } from "./StudyKbLeft";
-import type { StudyLive } from "./StudyLive";
-import type { StudyMade } from "./StudyMade";
-import type { StudyMadeBody } from "./StudyMadeBody";
-import type { StudyMastery } from "./StudyMastery";
-import type { StudyNoteRow } from "./StudyNoteRow";
-import type { StudyObjective } from "./StudyObjective";
-import type { StudyOverviewTopic } from "./StudyOverviewTopic";
-import type { StudyPaperSection } from "./StudyPaperSection";
-import type { StudyPlace } from "./StudyPlace";
-import type { StudyPython } from "./StudyPython";
-import type { StudyQuestion } from "./StudyQuestion";
-import type { StudyQuizRow } from "./StudyQuizRow";
-import type { StudyResult } from "./StudyResult";
-import type { StudyReview } from "./StudyReview";
-import type { StudyRoot } from "./StudyRoot";
-import type { StudySegment } from "./StudySegment";
-import type { StudySlide } from "./StudySlide";
-import type { StudySourceGuide } from "./StudySourceGuide";
-import type { StudySourceRow } from "./StudySourceRow";
-import type { StudySummary } from "./StudySummary";
-import type { StudyTurn } from "./StudyTurn";
-import type { StudyTutorSettings } from "./StudyTutorSettings";
-import type { StudyView } from "./StudyView";
-import type { StudyVoice } from "./StudyVoice";
-import type { StudyVoiceState } from "./StudyVoiceState";
 import type { Summary } from "./Summary";
 import type { Task } from "./Task";
 import type { TermRun } from "./TermRun";
@@ -250,7 +204,7 @@ modified: boolean,
  * What the agent proposed and nobody has answered yet — also drawn
  * on each cell, and listed here for the agent's panel.
  */
-proposals: Array<ProposalView>, } | { "type": "notebookCells", path: string, cells: Array<CellAt>, modified: boolean, } | { "type": "cellSelected", index: number, } | { "type": "cadHome", parts: Array<CadFound>, } | { "type": "cadPart", part: CadPartView | null, } | { "type": "logicHome", files: Array<LogicFound>, } | { "type": "logicFile", file: LogicFileView | null, } | { "type": "logicModels", models: LogicModelsView | null, } | { "type": "logicAnswer", answer: LogicAnswerView | null, } | { "type": "circuitHome", projects: Array<CircuitFound>, } | { "type": "circuitProject", project: CircuitProjectView | null, } | { "type": "circuitClip", text: string, } | { "type": "circuitExported", path: string, format: string, text: string, } | { "type": "circuitAnalysis", generation: number, analysis: CircuitAnalysisView, } | { "type": "circuitMachine", generation: number, machine: CircuitMachineView, } | { "type": "circuitTests", generation: number, circuit: string, results: Array<CircuitTestResult>, } | { "type": "circuitRun", run: CircuitRunView | null, } | { "type": "sheetHome", workbooks: Array<SheetFound>, } | { "type": "sheetFilterValues", col: number, values: Array<[string, number]>, ticked: Array<string> | null, criteria: string, } | { "type": "sheetMatches", generation: number, sheet: number, ask: number, matches: Array<[number, number]>, total: number, shownOnly: number, hidden: number, } | { "type": "sheetClip", text: string, } | { "type": "sheetBook", book: SheetBookView | null, } | { "type": "sheetCells", generation: number, version: number, sheet: number, rows: [number, number], cols: [number, number], cells: Array<SheetCellView>, partial: boolean, } | { "type": "unsaved", files: Array<string>, } | { "type": "claudeCapabilities", capabilities: ClaudeCapabilities, } | { "type": "researchList", investigations: Array<ResearchSummary>, open: string | null, folder: string, } | { "type": "researchBoard", slug: string, title: string, discipline: ResearchDiscipline, brief: string, plan: string, overview: string, verdicts: string, sandbox: string, 
+proposals: Array<ProposalView>, } | { "type": "notebookCells", path: string, cells: Array<CellAt>, modified: boolean, } | { "type": "cellSelected", index: number, } | { "type": "cadHome", parts: Array<CadFound>, } | { "type": "cadPart", part: CadPartView | null, } | { "type": "logicHome", files: Array<LogicFound>, } | { "type": "logicFile", file: LogicFileView | null, } | { "type": "logicModels", models: LogicModelsView | null, } | { "type": "logicAnswer", answer: LogicAnswerView | null, } | { "type": "circuitHome", projects: Array<CircuitFound>, } | { "type": "circuitProject", project: CircuitProjectView | null, } | { "type": "circuitClip", text: string, } | { "type": "circuitExported", path: string, format: string, text: string, } | { "type": "circuitAnalysis", generation: number, analysis: CircuitAnalysisView, } | { "type": "circuitMachine", generation: number, machine: CircuitMachineView, } | { "type": "circuitTests", generation: number, circuit: string, results: Array<CircuitTestResult>, } | { "type": "circuitRun", run: CircuitRunView | null, } | { "type": "sheetHome", workbooks: Array<SheetFound>, } | { "type": "sheetFilterValues", col: number, values: Array<[string, number]>, ticked: Array<string> | null, criteria: string, } | { "type": "sheetMatches", generation: number, sheet: number, ask: number, matches: Array<[number, number]>, total: number, shownOnly: number, hidden: number, } | { "type": "sheetClip", text: string, } | { "type": "sheetBook", book: SheetBookView | null, } | { "type": "sheetCells", generation: number, version: number, sheet: number, rows: [number, number], cols: [number, number], cells: Array<SheetCellView>, partial: boolean, } | { "type": "unsaved", files: Array<string>, } | { "type": "researchList", investigations: Array<ResearchSummary>, open: string | null, folder: string, } | { "type": "researchBoard", slug: string, title: string, discipline: ResearchDiscipline, brief: string, plan: string, overview: string, verdicts: string, sandbox: string, 
 /**
  * What the scientist has told the team.
  */
@@ -274,86 +228,7 @@ check: boolean,
 /**
  * Whether this Proton asks anybody at all.
  */
-live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "studyList", notebooks: Array<StudySummary>, open: string | null, folder: string | null, } | { "type": "studyNotebook", slug: string, title: string, course: string, exam: string | null, readOnly: string | null, sources: Array<StudySourceRow>, 
-/**
- * The student's groups of sources, in order, each with its sources' ids.
- */
-categories: Array<StudyCategory>, notes: Array<StudyNoteRow>, } | { "type": "studyClosed" } | { "type": "studyKb", roots: Array<StudyRoot>, rules: Array<string>, 
-/**
- * Whether it has been begun on: Notebook has been opened.
- */
-started: boolean, 
-/**
- * Whether its catalogue is in, so the picker can browse.
- */
-ready: boolean, walking: boolean, done: number, total: number, paused: boolean, documents: number, passages: number, } | { "type": "studyKbFolder", root: string, dir: string, folders: Array<StudyKbFolder>, files: Array<StudyKbFile>, left: Array<StudyKbLeft>, } | { "type": "studyArtifacts", artifacts: Array<StudyArtifactRow>, 
-/**
- * Whether the sessions are being read for more.
- */
-importing: boolean, } | { "type": "studyKbAll", root: string, dir: string, files: Array<StudyKbFile>, total: number, } | { "type": "studyKbResults", query: string, files: Array<StudyKbFile>, passages: Array<StudyKbHit>, 
-/**
- * Found for the open notebook, by words it chose: each file one
- * it does not have yet, with the passage most like it.
- */
-discovered: boolean, } | { "type": "studySource", id: string, title: string, kind: string, at: StudyPlace | null, 
-/**
- * Why its words are shown rather than its file, when they are.
- */
-said: string | null, view: StudyView, 
-/**
- * Its guide, if it has one, and its summary's citations.
- */
-guide: StudySourceGuide | null, citations: Array<StudyCitation>, 
-/**
- * For a source too long to read whole: its digest so far, and the
- * citations in it.
- */
-digest: StudyDigestView | null, digest_citations: Array<StudyCitation>, } | { "type": "studyChat", id: string, title: string, settings: StudyTutorSettings, turns: Array<StudyTurn>, live: StudyLive | null, busy: boolean, error: string | null, 
-/**
- * How the tutor reaches the sources, once it has started: `tools`
- * or `passages`.
- */
-grounding: string | null, chats: Array<StudyChatSummary>, 
-/**
- * The objective the chat is a lesson on, if it is one.
- */
-lesson: StudyObjective | null, } | { "type": "studyAudio", made: StudyMade, format: StudyAudioFormat, segments: Array<StudySegment>, chapters: Array<StudyChapter>, timings: Array<[number, number]>, duration: number, 
-/**
- * `waiting`, `voicing`, `ready` or `failed`.
- */
-state: string, why: string | null, done: number, of: number, 
-/**
- * Its sound, as `study://localhost/` names it: `search/A001.mp3`.
- */
-url: string | null, citations: Array<StudyCitation>, voice: StudyVoiceState, } | { "type": "studySlides", made: StudyMade, slides: Array<StudySlide>, citations: Array<StudyCitation>, } | { "type": "studyGraphic", made: StudyMade, style: StudyGraphicStyle, subtitle: string, blocks: Array<StudyBlock>, takeaway: string, citations: Array<StudyCitation>, } | { "type": "studyVoiceState", voice: StudyVoiceState, } | { "type": "studyVoices", query: string, voices: Array<StudyVoice>, total: number, error: string | null, } | { "type": "studyVoiceSample", id: string, url: string | null, error: string | null, } | { "type": "studyProgress", objectives: Array<StudyMastery>, due: number, quizzes: Array<StudyQuizRow>, } | { "type": "studyOverview", made: StudyMade, topics: Array<StudyOverviewTopic>, deck: string | null, quiz: string | null, citations: Array<StudyCitation>, } | { "type": "studyStudio", jobs: Array<StudyJob>, made: Array<StudyMade>, 
-/**
- * The programming languages coding problems can be set in here:
- * those whose compilers this machine has. Empty until they are
- * found.
- */
-languages: Array<string>, 
-/**
- * The Pythons Python's problems could be run with, and what each
- * has; the one they are run with is chosen.
- */
-pythons: Array<StudyPython>, } | { "type": "studyCoding", made: string, saved: Array<StudyCodeSaved>, running: Array<string>, } | { "type": "studyCodeRan", made: string, problem: string, outcome: StudyCodeOutcome, } | { "type": "studyMadeOpen", made: StudyMade, body: StudyMadeBody, citations: Array<StudyCitation>, } | { "type": "studyDeck", made: StudyMade, cards: Array<StudyCardRow>, counts: StudyCounts, citations: Array<StudyCitation>, } | { "type": "studyReviewing", review: StudyReview | null, } | { "type": "studyQuiz", made: StudyMade, questions: Array<StudyQuestion>, attempts: Array<StudyAttempt>, 
-/**
- * Answers being marked now: `2/q03`, the attempt and the question.
- */
-marking: Array<string>, results: Array<StudyResult>, mastery: Array<StudyMastery>, citations: Array<StudyCitation>, 
-/**
- * A sitting's answers so far, not yet handed in.
- */
-drafts: Array<StudyDrafted>, 
-/**
- * An exam paper's sections, how long it is sat for, what the past
- * papers it is like are like, and the past paper it is, if it is one.
- */
-sections: Array<StudyPaperSection>, minutes: number | null, blueprint: string, source: string | null, } | { "type": "studyTask", id: string, title: string, engine: string, model: string, state: string, why: string | null, instructions: string, prompt: string, } | { "type": "studyChatLive", id: string, live: StudyLive, } | { "type": "studyFile", name: string, body: string, pdf: boolean, } | { "type": "studyNote", id: string, title: string, body: string, updated: number, 
-/**
- * Whether it is a source of the notebook too.
- */
-source: string | null, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
+live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
 /**
  * The round's search of the literature, if it has one.
  */

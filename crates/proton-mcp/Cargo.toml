@@ -14,7 +14,6 @@ path = "src/main.rs"
 [dependencies]
 proton-core = { workspace = true }
 proton-library = { workspace = true }
-proton-study = { workspace = true }
 serde_json = { workspace = true }
 # A page drawn for a model, as MCP carries a picture.
 base64 = "0.22"

@@ -417,30 +417,6 @@ fn the_agents_logic_tools_ask_solve_prove_and_write_held_until_saved() {
 }
 
 #[test]
-fn a_practice_problem_from_notebook_opens_in_logic_and_keeps_the_students_work() {
-    let root = project("logic-practice");
-    let mut space = Workspace::rooted(root.clone());
-    space.apply(Command::SetMode { mode: ModeId::Logic });
-    let practise = |space: &mut Workspace| {
-        space.apply(Command::LogicPractice { folder: "Validity and puzzles".into(), name: "Hypothetical syllogism".into(), kind: "proof".into(), text: "system fitch\npremises p -> q, q -> r\ngoal p -> r\n".into() })
-    };
-    let opened = practise(&mut space).iter().find_map(|e| match e {
-        Event::LogicFile { file: Some(f) } => Some(f.path.clone()),
-        _ => None,
-    });
-    assert_eq!(opened.as_deref(), Some("validity-and-puzzles/hypothetical-syllogism.proof"));
-    let file = root.join("validity-and-puzzles/hypothetical-syllogism.proof");
-    std::fs::write(&file, "system fitch\npremises p -> q, q -> r\ngoal p -> r\n\n1  p -> q  premise\n").unwrap();
-    space.apply(Command::LogicClose { discard: false });
-    let again = practise(&mut space).iter().find_map(|e| match e {
-        Event::LogicFile { file: Some(f) } => Some(f.text.clone()),
-        _ => None,
-    });
-    assert!(again.unwrap().ends_with("1  p -> q  premise\n"), "the student's work was written over");
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
 fn a_truth_table_from_logic_is_built_in_circuit_with_its_table_as_a_test() {
     let root = project("logic-circuit");
     let mut space = Workspace::rooted(root.clone());

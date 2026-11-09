@@ -419,9 +419,9 @@ fn a_project_opened_in_codex_is_not_carried_into_data() {
 }
 
 #[test]
-fn research_and_notebook_keep_projects_of_their_own() {
+fn research_and_excel_keep_projects_of_their_own() {
     // Each mode lists what was opened in it: Data's project is not
-    // Research's, nor Notebook's, and each comes back to its own.
+    // Research's, nor Excel's, and each comes back to its own.
     let scratch = Scratch::new("own-each");
     let mut session = Session::new(scratch.at("alpha"));
     mode(&mut session, ModeId::Data);
@@ -429,7 +429,7 @@ fn research_and_notebook_keep_projects_of_their_own() {
     mode(&mut session, ModeId::Research);
     assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Research), "Data's project was carried into Research");
     session.apply(Command::OpenWorkspace { path: scratch.at("nested/alpha") });
-    mode(&mut session, ModeId::Study);
+    mode(&mut session, ModeId::Sheet);
     assert_eq!(here(&session), "alpha");
     mode(&mut session, ModeId::Data);
     assert_eq!(here(&session), "beta");
@@ -457,23 +457,23 @@ fn a_mode_with_no_project_of_its_own_is_given_a_folder_of_its_own() {
         assert_eq!(here(&session), "beta");
         mode(&mut session, ModeId::Codex);
         assert_eq!(here(&session), "alpha", "Codex lost its project to Logic");
-        mode(&mut session, ModeId::Study);
-        assert!(session.active().root().ends_with("Notebook"), "Notebook has its own: {:?}", session.active().root());
+        mode(&mut session, ModeId::Circuit);
+        assert!(session.active().root().ends_with("Circuit"), "Circuit has its own: {:?}", session.active().root());
     }
     // After a restart each mode still has its own.
     let mut session = Session::restore_from(Some(store), None, None).with_mode_homes(&homes);
     assert_eq!(here(&session), "alpha");
     mode(&mut session, ModeId::Logic);
     assert_eq!(here(&session), "beta", "Logic's project was not kept");
-    mode(&mut session, ModeId::Study);
-    assert!(session.active().root().ends_with("Notebook"));
+    mode(&mut session, ModeId::Circuit);
+    assert!(session.active().root().ends_with("Circuit"));
 }
 
 #[test]
 fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes() {
     // A file from when the window had two sides: Codex's projects, Data's,
-    // and the one Data showed — read into Codex's and Data's, Research's and
-    // Notebook's; every other mode starts on a folder of its own.
+    // and the one Data showed — read into Codex's, Data's and Research's;
+    // every other mode starts on a folder of its own.
     let scratch = Scratch::new("old-sides");
     let homes = scratch.root.join("homes");
     let store = scratch.root.join("session.json");
@@ -488,7 +488,7 @@ fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes
     .unwrap();
     let mut session = Session::restore_from(Some(store), None, None).with_mode_homes(&homes);
     assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
-    for data_side in [ModeId::Data, ModeId::Research, ModeId::Study] {
+    for data_side in [ModeId::Data, ModeId::Research] {
         mode(&mut session, data_side);
         assert_eq!(here(&session), "beta", "{data_side:?} lost Data's project");
     }
@@ -498,7 +498,7 @@ fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes
 
 #[test]
 fn a_project_only_a_mode_that_left_listed_is_closed_not_given_to_codex() {
-    // A session from when Game and Chat were modes here: their folders are
+    // A session from when Game, Chat and Notebook were modes here: their folders are
     // closed on the way in, out of every list — not handed to Codex.
     let scratch = Scratch::new("left-modes");
     let homes = scratch.root.join("homes");
@@ -509,12 +509,15 @@ fn a_project_only_a_mode_that_left_listed_is_closed_not_given_to_codex() {
     let game = folder_of(&scratch.root.join("Game")).display().to_string();
     std::fs::create_dir_all(scratch.root.join("Chat")).unwrap();
     let chat = folder_of(&scratch.root.join("Chat")).display().to_string();
+    std::fs::create_dir_all(scratch.root.join("Notebook")).unwrap();
+    let notebook = folder_of(&scratch.root.join("Notebook")).display().to_string();
     std::fs::write(
         &store,
-        serde_json::json!({"version": 1, "open": [alpha, game, chat, beta], "active": 0, "recents": [],
+        serde_json::json!({"version": 1, "open": [alpha, game, chat, notebook, beta], "active": 0, "recents": [],
                            "modes": [{"mode": "codex", "listed": [alpha], "shown": alpha},
                                      {"mode": "game", "listed": [game, beta], "shown": game},
                                      {"mode": "chat", "listed": [chat], "shown": chat},
+                                     {"mode": "study", "listed": [notebook], "shown": notebook},
                                      {"mode": "data", "listed": [beta], "shown": beta}]})
         .to_string(),
     )

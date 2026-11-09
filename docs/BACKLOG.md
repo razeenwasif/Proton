@@ -3,50 +3,6 @@
 What is planned and not built. Each item says what it is, what is still
 open about it, and what it waits on. Items leave this file when they land.
 
-## Notebook
-
-Gemini Notebook in Proton (S0–S10 and the S3 extras, on master). What is
-left of the plan, and what came of building it.
-
-### Waiting on the person
-
-- **The live runs (S11).** Each of these spends a little of a plan or of Fish
-  credit, so each is run by hand: `tutor_live` (all four engines answering
-  from the sources through `proton-mcp --notebook`), `cards_live`,
-  `quiz_live` (a quiz, a mark by another family, an exam, a past paper,
-  objectives, a diagnostic, a learning overview, slides, an infographic,
-  and coding problems checked by building and running them), `audio_live` (a brief spoken by Fish, with
-  `FISH_API_KEY` and `PROTON_FISH_VOICES`; and a recording transcribed),
-  `sources_live` (pages of the web, Discover and Deep Research, a guide,
-  labels, and a slide read from its picture), and `study_live` over the
-  real folders. Gemini needs its sign-in first.
-- **The pilot.** A course and its exam to build a notebook for end to end:
-  its past papers, a practice exam sat against the clock, cards reviewed
-  over days.
-- **Rendering the window's HTML natively (S9).** PDFs of an exam, a report
-  or a deck, and Video Overviews — slides drawn as pictures, each with its
-  narration, joined by ffmpeg — wait on a hidden webview's
-  `createPDF`/`takeSnapshot` (through objc2), which can only be tried in a
-  build of the app run alongside the person's own. The alternative is a
-  managed Typst. Until then an exam prints from its HTML, and a deck goes
-  out as a PowerPoint.
-
-### Later builds
-
-- **Joining an audio overview.** Asking the hosts a question as they talk —
-  Gemini Notebook's interactive mode: speech in, a grounded answer, spoken
-  in a host's voice, then back to the script. Open: Fish's streaming, and
-  hearing the question.
-- **Transcribing on the machine.** whisper.cpp and a model (from about
-  150 MB), installed with two say-sos as the Lab's Python is, for
-  recordings that are not to leave it; Fish transcribes today, paid.
-- **A PowerPoint's pictures.** Slides read from a .pptx are its words alone;
-  reading its pictures needs its slides drawn, which needs LibreOffice or
-  Keynote.
-- **The web through every engine.** Discover and Deep Research run on Claude
-  Code, whose web tools can be given alone; Codex's and Gemini's web search
-  are untried unattended.
-
 ## Research
 
 Research's milestones after Lean (P0–P7, `6c103a9`).
@@ -149,9 +105,6 @@ What is left of it.
   and drives it through a full adder's rows skips itself while they are not
   on this Mac (`brew install icarus-verilog ghdl`); VHDL has no run check
   yet.
-- **Circuit practice made by a model.** Notebook's problems are checked by
-  the simulator when they are made, and that is tested with a model's answer
-  written by hand; no set has been made by one of your engines yet.
 
 ### Later builds
 
@@ -170,7 +123,7 @@ A CAD mode, asked for on 2026-11-07, is planned in [`CAD.md`](CAD.md):
 parametric parts on Proton's own boundary-representation kernel,
 assemblies with mates and clearance checks, liquid-cooling routes with their
 loop schematic, drawings (blueprint among the styles), and electronics —
-schematics, footprints, boards and Gerbers. "CAD" on ⌃8. First use: the
+schematics, footprints, boards and Gerbers. "CAD" on ⌃7. First use: the
 person's FormD T1 build with a custom loop.
 
 ### Waiting on the person
@@ -189,8 +142,8 @@ A logic mode after logic-calculator.com and Logic for Fun, asked for on
 calculator (truth tables, properties, normal forms, Karnaugh maps,
 equivalence, arguments), a model finder for puzzles written in first-order
 logic, and proofs by semantic tableaux, natural deduction, sequent calculus
-and resolution; "Logic" on ⌃8, Proton's own language and Logic4Fun's both
-read and written; the agent's logic tools and Notebook's logic practice.
+and resolution; "Logic" on ⌃6, Proton's own language and Logic4Fun's both
+read and written; the agent's logic tools.
 Fitch's rule names were settled at L6: `forall x`'s written, the common
 others read.
 

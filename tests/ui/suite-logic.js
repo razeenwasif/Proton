@@ -31,19 +31,19 @@ export async function logicChecks({test, assert, win, doc, $, settle, key, shown
     await new Promise((r) => setTimeout(r, 300));
   };
 
-  await test('Logic sits after Circuit: ⌃7 opens it, in Codex\'s chrome and on an opaque ground', async () => {
+  await test('Logic sits after Circuit: ⌃6 opens it, in Codex\'s chrome and on an opaque ground', async () => {
     const asked = () => (win.invokes ?? []).filter((/** @type {any} */ c) => c.name === 'set_opaque').map((/** @type {any} */ c) => c.args.color);
     const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
     const before = win.commands.length, opaque = asked().length;
     /** @type {HTMLElement} */ (doc.body).focus();
-    key('7', {ctrlKey: true}); await settle();
-    assert(sent(before, 'setMode').some((c) => c.mode === 'logic'), '⌃7 did not ask for Logic');
+    key('6', {ctrlKey: true}); await settle();
+    assert(sent(before, 'setMode').some((c) => c.mode === 'logic'), '⌃6 did not ask for Logic');
     assert($('.workspace.on')?.dataset.ws === 'logic', 'Logic is not on screen');
     assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'Logic kept the old chrome');
     assert(!shown($('.titlebar [data-term-toggle]')), 'Logic offers a terminal it cannot show');
     const tab = $('.titlebar [data-mode="logic"]');
-    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃7') && tab.textContent.trim() === 'Logic', 'the title bar does not show Logic');
+    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃6') && tab.textContent.trim() === 'Logic', 'the title bar does not show Logic');
     assert($('.mode-rail [data-mode="logic"]')?.textContent.trim() === 'Logic', 'the rail does not say Logic');
     assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `Logic is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
   });

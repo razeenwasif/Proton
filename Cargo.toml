@@ -20,13 +20,11 @@ members = [
     "crates/proton-research",
     "crates/proton-sheet",
     "crates/proton-shell",
-    "crates/proton-study",
     "crates/proton-syntax",
     "crates/proton-term",
     "crates/proton-text",
     "crates/proton-trace",
     "crates/proton-vcs",
-    "crates/proton-voice",
 ]
 
 [workspace.package]
@@ -41,7 +39,6 @@ proton-agent = { path = "crates/proton-agent" }
 proton-cad = { path = "crates/proton-cad" }
 proton-claude = { path = "crates/proton-claude" }
 proton-circuit = { path = "crates/proton-circuit" }
-proton-voice = { path = "crates/proton-voice" }
 proton-council = { path = "crates/proton-council" }
 proton-core = { path = "crates/proton-core" }
 proton-dap = { path = "crates/proton-dap" }
@@ -56,7 +53,6 @@ proton-lsp = { path = "crates/proton-lsp" }
 proton-plugin = { path = "crates/proton-plugin" }
 proton-research = { path = "crates/proton-research" }
 proton-lab = { path = "crates/proton-lab" }
-proton-study = { path = "crates/proton-study" }
 proton-syntax = { path = "crates/proton-syntax" }
 proton-term = { path = "crates/proton-term" }
 proton-text = { path = "crates/proton-text" }

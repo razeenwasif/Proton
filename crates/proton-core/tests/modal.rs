@@ -195,21 +195,21 @@ fn mode_ids_round_trip_through_their_slugs_and_indices() {
         assert_eq!(ModeId::from_index(i + 1), Some(*mode));
     }
     assert_eq!(ModeId::from_index(0), None);
-    assert_eq!(ModeId::from_index(9), None);
-    // Notebook is ⌃4, after Research, Excel ⌃5, Circuit ⌃6, Logic ⌃7 and CAD ⌃8, the last. The modes
-    // that left — Chat for Fairy, LaTeX and the Reader for Quark, and Design,
-    // Model, Game, Video, Canvas and Diffuse for an app of their own — are no slug's.
+    assert_eq!(ModeId::from_index(8), None);
+    // Excel is ⌃4, after Research, Circuit ⌃5, Logic ⌃6 and CAD ⌃7, the last. The
+    // modes that left — Chat and Notebook for Fairy, LaTeX and the Reader for
+    // Quark, and Design, Model, Game, Video, Canvas and Diffuse for an app of
+    // their own — are no slug's.
     assert_eq!(ModeId::from_index(1), Some(ModeId::Codex));
-    assert_eq!(ModeId::from_index(4), Some(ModeId::Study));
-    assert_eq!(ModeId::from_index(5), Some(ModeId::Sheet));
+    assert_eq!(ModeId::from_index(4), Some(ModeId::Sheet));
     assert_eq!((ModeId::Sheet.slug(), ModeId::Sheet.label()), ("sheet", "Excel"));
-    assert_eq!(ModeId::from_index(8), Some(ModeId::Cad));
+    assert_eq!(ModeId::from_index(7), Some(ModeId::Cad));
     assert_eq!((ModeId::Cad.slug(), ModeId::Cad.label()), ("cad", "CAD"));
-    assert_eq!(ModeId::from_index(6), Some(ModeId::Circuit));
+    assert_eq!(ModeId::from_index(5), Some(ModeId::Circuit));
     assert_eq!((ModeId::Circuit.slug(), ModeId::Circuit.label()), ("circuit", "Circuit"));
-    assert_eq!(ModeId::from_index(7), Some(ModeId::Logic));
+    assert_eq!(ModeId::from_index(6), Some(ModeId::Logic));
     assert_eq!((ModeId::Logic.slug(), ModeId::Logic.label()), ("logic", "Logic"));
-    for gone in ["chat", "tex", "pdf", "design", "modeling", "game", "video", "raster", "diffuse"] {
+    for gone in ["chat", "study", "tex", "pdf", "design", "modeling", "game", "video", "raster", "diffuse"] {
         assert_eq!(ModeId::from_slug(gone), None, "{gone}");
     }
 }

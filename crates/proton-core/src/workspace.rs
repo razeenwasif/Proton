@@ -125,8 +125,6 @@ pub struct Workspace {
     embedder: Option<proton_library::Embedder>,
     /// Library searches waiting on a query vector.
     asking: Vec<Asking>,
-    /// What each agent offers, for Notebook's tutor to choose from.
-    engines: crate::engines::Engines,
     /// The investigations, in the Research tab: the project's own, in its
     /// `research/`, or the session's, where the person keeps them in a
     /// folder of their own and every project shows the same ones.
@@ -417,7 +415,6 @@ impl Workspace {
             pickers: Pickers::new(root),
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
-            engines: crate::engines::Engines::new(root),
             research: Arc::new(Mutex::new(crate::research::Research::new(root))),
             research_shared: false,
             documents: std::collections::BTreeSet::new(),
@@ -773,7 +770,6 @@ impl Workspace {
                         layout: self.mode.layout(),
                     },
                 ]);
-                events.extend(self.engines.sync());
                 events.extend(self.research().sync());
                 // Excel's home page and workbook, when it is the mode on
                 // screen: finding the workbooks walks the project.
@@ -1288,88 +1284,6 @@ impl Workspace {
             Command::ResearchFolder { .. } => {
                 vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
             }
-            // Notebook is the window's, whichever project is open: the
-            // session answers its commands before a workspace sees them.
-            Command::StudyFolder { .. }
-            | Command::StudyRoots { .. }
-            | Command::StudyExclude { .. }
-            | Command::StudyKbPause { .. }
-            | Command::StudyKbRefresh
-            | Command::StudyKbBrowse { .. }
-            | Command::StudyKbSearch { .. }
-            | Command::StudyKbAll { .. }
-            | Command::StudyDiscover { .. }
-            | Command::StudyNew { .. }
-            | Command::StudyOpen { .. }
-            | Command::StudyClose
-            | Command::StudyDetails { .. }
-            | Command::StudyArchive { .. }
-            | Command::StudyAdd { .. }
-            | Command::StudyAddFolder { .. }
-            | Command::StudyDownload { .. }
-            | Command::StudyPaste { .. }
-            | Command::StudyAddUrls { .. }
-            | Command::StudyTranscribe { .. }
-            | Command::StudyMakeReadable { .. }
-            | Command::StudyMakeDigest { .. }
-            | Command::StudyArtifacts
-            | Command::StudyImportArtifacts
-            | Command::StudyAddArtifacts { .. }
-            | Command::StudyRemove { .. }
-            | Command::StudySelect { .. }
-            | Command::StudyRefresh { .. }
-            | Command::StudyRole { .. }
-            | Command::StudyShow { .. }
-            | Command::StudyShowNote { .. }
-            | Command::StudyNote { .. }
-            | Command::StudyNoteDelete { .. }
-            | Command::StudyNoteSource { .. }
-            | Command::StudyAsk { .. }
-            | Command::StudyFileOpen { .. }
-            | Command::StudyFileCompile { .. }
-            | Command::StudyFileSave { .. }
-            | Command::StudyCategoryAdd { .. }
-            | Command::StudyCategoryRename { .. }
-            | Command::StudyCategoryRemove { .. }
-            | Command::StudyCategoryMove { .. }
-            | Command::StudyCategorize { .. }
-            | Command::StudyStopAnswer
-            | Command::StudyChatNew
-            | Command::StudyChatOpen { .. }
-            | Command::StudyTutor { .. }
-            | Command::StudySaveAnswer { .. }
-            | Command::StudyMake { .. }
-            | Command::StudyCodeRun { .. }
-            | Command::StudyCodeSave { .. }
-            | Command::StudyCodePython { .. }
-            | Command::StudyCodePythons
-            | Command::StudyCancelJob { .. }
-            | Command::StudyShowMade { .. }
-            | Command::StudyBinMade { .. }
-            | Command::StudyShowTask { .. }
-            | Command::StudyReview { .. }
-            | Command::StudyRate { .. }
-            | Command::StudyReviewUndo
-            | Command::StudyReviewEnd
-            | Command::StudyCard { .. }
-            | Command::StudyCardDelete { .. }
-            | Command::StudyDeckExport { .. }
-            | Command::StudyQuizStart { .. }
-            | Command::StudyQuizAnswer { .. }
-            | Command::StudyQuizDispute { .. }
-            | Command::StudyQuizMarkAgain { .. }
-            | Command::StudyQuizFinish { .. }
-            | Command::StudyExamSit { .. }
-            | Command::StudyExamExport { .. }
-            | Command::StudyProgress
-            | Command::StudyLesson { .. }
-            | Command::StudyVoiceSetup { .. }
-            | Command::StudyVoiceFind { .. }
-            | Command::StudyVoiceSample { .. }
-            | Command::StudyVoiceKey
-            | Command::StudyAudioVoice { .. }
-            | Command::StudySlidesExport { .. }
-            | Command::StudySaveImage { .. } => vec![notice("Notebook is the window's, not a project's.".into(), NoticeLevel::Warn)],
             Command::ResearchNew { title, goal, discipline, literature } => self.research().create(&title, &goal, discipline, literature),
             Command::ResearchOpen { slug } => self.research().open(&slug),
             Command::ResearchFork { slug, round, title, direction } => self.research().fork(&slug, round, &title, &direction),
@@ -1512,7 +1426,6 @@ impl Workspace {
             | Command::CircuitExport { .. }
             | Command::CircuitImport { .. }
             | Command::CircuitSelect { .. }
-            | Command::CircuitPractice { .. }
             | Command::CircuitFromTable { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.circuits.apply(&root, command);
@@ -1533,7 +1446,6 @@ impl Workspace {
             | Command::LogicSolve { .. }
             | Command::LogicStop
             | Command::LogicProve { .. }
-            | Command::LogicPractice { .. }
             | Command::LogicFromTable { .. }) => {
                 let root = self.root().to_path_buf();
                 let mut events = self.logics.apply(&root, command);
@@ -2849,11 +2761,8 @@ impl Workspace {
             }
         }
 
-        // What the agents say they offer, when they answer.
-        events.extend(self.engines.poll());
-
-        // Research's rounds, the same way: their calls are conversations
-        // with the same engines, each one task long. Unless they are the
+        // Research's rounds: their calls are conversations with the
+        // engines, each one task long. Unless they are the
         // session's, which polls them once for every project.
         if !self.research_shared {
             events.extend(self.research().poll());

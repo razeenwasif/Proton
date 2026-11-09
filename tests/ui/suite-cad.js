@@ -36,23 +36,23 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     await settle();
   };
 
-  await test('CAD sits after Logic: ⌃8 opens it, in Codex\'s chrome and on an opaque ground, and is the last', async () => {
+  await test('CAD sits after Logic: ⌃7 opens it, in Codex\'s chrome and on an opaque ground, and is the last', async () => {
     const asked = () => (win.invokes ?? []).filter((/** @type {any} */ c) => c.name === 'set_opaque').map((/** @type {any} */ c) => c.args.color);
     const ground = win.getComputedStyle(doc.documentElement).getPropertyValue('--bg').trim().toLowerCase();
     await win.dispatch({type: 'setMode', mode: 'codex'}); await settle();
     const before = win.commands.length, opaque = asked().length;
     /** @type {HTMLElement} */ (doc.body).focus();
-    key('8', {ctrlKey: true}); await settle();
-    assert(sent(before, 'setMode').some((c) => c.mode === 'cad'), '⌃8 did not ask for CAD');
+    key('7', {ctrlKey: true}); await settle();
+    assert(sent(before, 'setMode').some((c) => c.mode === 'cad'), '⌃7 did not ask for CAD');
     assert($('.workspace.on')?.dataset.ws === 'cad', 'CAD is not on screen');
     assert(shown($('.titlebar')) && !shown($('.chrome-rail')) && !shown($('.statusline')), 'CAD kept the old chrome');
     const tab = $('.titlebar [data-mode="cad"]');
-    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃8') && tab.textContent.trim() === 'CAD', 'the title bar does not show CAD');
+    assert(tab?.getAttribute('aria-selected') === 'true' && tab.title.includes('⌃7') && tab.textContent.trim() === 'CAD', 'the title bar does not show CAD');
     assert($('.mode-rail [data-mode="cad"]')?.textContent.trim() === 'CAD', 'the rail does not say CAD');
     assert(!asked().slice(opaque).includes(null) && asked().at(-1) === ground, `CAD is not on the ground: ${JSON.stringify(asked().slice(opaque))}`);
-    const before9 = win.commands.length;
-    key('9', {ctrlKey: true}); await settle();
-    assert(!sent(before9, 'setMode').length, '⌃9 asked for a mode');
+    const before8 = win.commands.length;
+    key('8', {ctrlKey: true}); await settle();
+    assert(!sent(before8, 'setMode').length, '⌃8 asked for a mode');
   });
 
   await test('With no part open, CAD lists the folder\'s parts, opens one and makes another', async () => {

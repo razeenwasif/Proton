@@ -9,8 +9,8 @@ build circuits too. Asked for on 2026-10-28.
 
 ## Decided (2026-10-28)
 
-- **The label is "Circuit"**, on the rail and the title bar, on **⌃6**, after
-  Excel's ⌃5. In the code it is `circuit`: `ModeId::Circuit`, the crate
+- **The label is "Circuit"**, on the rail and the title bar, on **⌃5**, after
+  Excel's ⌃4 (⌃6 until Notebook went to Fairy on 2026-11-09). In the code it is `circuit`: `ModeId::Circuit`, the crate
   `proton-circuit`, the core module `circuit`, `ui/circuit*.js`, commands
   `Circuit*` and events `circuit*`.
 - **A project is a folder of text that diffs**, `Name.circuit/`, which is
@@ -209,7 +209,7 @@ The parts a course on digital logic uses, in the first version:
   test run.
 - **With Notebook:** a source's exercise, such as "build a 4-bit adder", can
   open a project with its test table, and the tutor can see what the
-  tests said.
+  tests said. (Gone with Notebook, to Fairy, on 2026-11-09.)
 
 ## Not built, and why
 
