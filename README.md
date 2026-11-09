@@ -246,7 +246,10 @@ An `.assembly` places parts by mates — two faces picked and held flat,
 flush, on one axis, a gap or an angle apart — solved by the same solver,
 which says what can still move; it checks where parts overlap or come too
 near, lists the parts in a bill of materials, and takes itself apart for an
-exploded view. Edits are held until ⌘S.
+exploded view. A library makes parts from published standards — a Mini-ITX
+board on ATX's holes, SFX supplies, graphics cards, fans, radiators, pumps,
+G1/4 fittings, ISO screws, the FormD T1 and its limits — each written into
+the folder as a part file like any other. Edits are held until ⌘S.
 
 ## The three things that hold it together
 

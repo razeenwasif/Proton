@@ -343,7 +343,7 @@ impl Cads {
     }
 
     pub fn events(&mut self, root: &Path) -> Vec<Event> {
-        let mut out = vec![Event::CadHome { parts: find(root) }];
+        let mut out = vec![Event::CadHome { parts: find(root) }, Event::CadFamilies { families: crate::cad_assembly::families() }];
         out.extend(self.doc_events());
         out
     }
@@ -352,6 +352,33 @@ impl Cads {
         match command {
             Command::CadNew { name } => self.new_doc(root, &name, Doc::Part),
             Command::CadNewAssembly { name } => self.new_doc(root, &name, Doc::Assembly),
+            Command::CadLibrary { family, params, add } => {
+                let path = match crate::cad_assembly::write_library_part(root, &family, &params) {
+                    Ok(p) => p,
+                    Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+                };
+                let made = notice(format!("made {path}"), NoticeLevel::Info);
+                let open_asm = self.open.as_ref().filter(|o| o.kind == Doc::Assembly).map(|o| (o.generation, o.shown.clone(), o.text.clone()));
+                match (add, open_asm) {
+                    (true, Some((generation, shown, text))) => {
+                        let Ok(a) = proton_cad::assembly::read(&text) else { return vec![made, notice("the assembly's text does not read: mend it, then add the part".into(), NoticeLevel::Warn)] };
+                        let name = crate::cad_assembly::instance_name(&a, &path);
+                        let line = format!("part {name} from {}", quoted(&crate::cad_assembly::relative(&shown, &path)));
+                        let mut out = vec![made, Event::CadHome { parts: find(root) }];
+                        out.extend(self.apply(root, Command::CadEdit { generation, ops: vec![CadOp::Insert { at: None, text: line }] }));
+                        out
+                    }
+                    _ => {
+                        if self.dirty() {
+                            return vec![made, Event::CadHome { parts: find(root) }];
+                        }
+                        let mut out = vec![made];
+                        out.extend(self.apply(root, Command::CadOpen { path }));
+                        out.push(Event::CadHome { parts: find(root) });
+                        out
+                    }
+                }
+            }
             Command::CadFit { generation } => {
                 let Some(open) = self.open.as_mut().filter(|o| o.generation == generation && o.kind == Doc::Assembly) else { return Vec::new() };
                 let a = match proton_cad::assembly::read(&open.text) {

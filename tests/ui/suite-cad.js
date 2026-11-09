@@ -441,6 +441,34 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     await win.pushEvents([part()]); await settle();
   });
 
+  await test('The library makes a part from its families: on the home page to open, in an assembly to add', async () => {
+    const families = [
+      {name: 'fan', title: 'Fan', group: 'Cooling', params: [{name: 'size', default: '120', choices: ['80', '92', '120', '140'], note: 'mm'}, {name: 'thickness', default: '25', choices: ['15', '25', '38'], note: 'mm'}]},
+      {name: 'formd-t1', title: 'FormD T1 (V2.1)', group: 'Cases', params: [{name: 'wall', default: '1.5', choices: [], note: 'mm'}]},
+    ];
+    await win.pushEvents([{type: 'cadPart', part: null}, {type: 'cadAssembly', assembly: null}, {type: 'cadFamilies', families}]); await settle();
+    const lib = ws().querySelector('[data-cad-library]');
+    assert(shown(lib) && [...lib.querySelectorAll('[data-cad-family]')].map((b) => b.dataset.cadFamily).join() === 'fan,formd-t1', 'the library\'s families are not listed');
+    lib.querySelector('[data-cad-family="fan"]').click(); await settle();
+    const size = ws().querySelector('[data-cad-library] [data-cad-lib-param="size"]');
+    assert(size?.value === '120', 'the family\'s form does not show its defaults');
+    size.value = '140';
+    size.dispatchEvent(new win.Event('change', {bubbles: true}));
+    let before = win.commands.length;
+    ws().querySelector('[data-cad-library] [data-cad-lib-make]').click(); await settle();
+    assert(JSON.stringify(sent(before, 'cadLibrary')[0]) === JSON.stringify({type: 'cadLibrary', family: 'fan', params: [['size', '140']], add: false}), `Make did not ask for it: ${JSON.stringify(sent(before, 'cadLibrary'))}`);
+    // In an assembly: made and added.
+    await win.pushEvents([{type: 'cadPart', part: null}, {type: 'cadAssembly', assembly: {...structuredClone(ASSEMBLY), generation: 9, dirty: false}}]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    const t1 = ws().querySelector('[data-cad-settings] [data-cad-family="formd-t1"]');
+    assert(t1, 'the assembly does not offer the library');
+    t1.click(); await settle();
+    before = win.commands.length;
+    ws().querySelector('[data-cad-settings] [data-cad-lib-make]').click(); await settle();
+    assert(JSON.stringify(sent(before, 'cadLibrary')[0]) === JSON.stringify({type: 'cadLibrary', family: 'formd-t1', params: [], add: true}), `Make and add did not ask for it: ${JSON.stringify(sent(before, 'cadLibrary'))}`);
+    await win.pushEvents([part()]); await settle();
+  });
+
   await test('The 3D view draws the bodies as the core cut them, or says why it cannot', async () => {
     for (let i = 0; i < 30 && !(debug().view || debug().noView); i++) await settle();
     const v = debug().view;

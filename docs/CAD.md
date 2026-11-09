@@ -624,6 +624,48 @@ taken apart, an assembly made from the home page. Measured (release): 26
 parts held by 75 mates solved in 10 ms, and their fit checked in 24 ms — 20
 overlaps of 80 mm³ found, as set.
 
+K8 — the parts library and the FormD T1. A library part is made by a family
+with its parameters and written into the project's `library/` folder as a
+`.part` file of the language — read back and printed the same, built and
+edited like any other — from the home page, or made and added to the
+assembly open. The families: a Mini-ITX board (170.18 mm square, ATX 2.2's
+holes C, F, H and J at (6.35, 10.16), (163.83, 33.02), (6.35, 165.1) and
+(163.83, 165.1) mm from its rear-left corner, ⌀3.96 — read off Figure 3 of
+the specification: hole C 4.900 in from hole A, F 11.100 in and 0.900 in
+forward, H and J 6.100 in forward — and its rear I/O stack inside ATX's
+158.75 × 44.45 mm aperture); SFX and SFX-L power supplies (125 × 63.5 × 100
+and 130 deep, SFX12V); M.2 drives (22 wide, 2230–22110); memory (133.35
+long); graphics cards by their published length, height and slots of
+20.32 mm, the bracket full height (120.02), with G1/4 ports for a water block;
+fans of 80, 92, 120 and 140 mm, 15, 25 or 38 thick, holes ⌀4.3 at 71.5,
+82.5, 105 and 124.5 mm; radiators of one to three 120 or 140 fans, M3 holes
+for their fans and two G1/4 ports, the end tanks' length and the ports'
+spacing parameters to check against a maker's drawing; a CPU block's and a
+D5's or DDC's envelope, with a reservoir; G1/4 fittings (13.157 mm thread) —
+straight and elbow for 14/16, 12/16 and 10/13 tube, extenders and plugs, the
+socket a named face to route from; ISO 4762 socket, 7380 button and 10642
+flat-head screws M2–M5; ISO 4032 nuts; 6-32 and M3 standoffs. The FormD T1
+is NCASE's published figures (the T1 Sandwich Kit's page, read 2026-11-09):
+13.5 × 22 × 33.5 cm — 9.95 L — shelled to a wall the person measures, with
+the source cited in the file; where the board, card, spine and power supply
+sit inside is not published, and the file says so. Its published limits are
+a check: a card no more than 140 × 325 mm and 3.25 slots; the CPU cooler no
+higher than 113 mm less 20 a slot (NCASE's table, 48 mm at 3.25 slots to
+88 at 1.25); one 120 or 240 radiator, or with the bracket kit two 240s or a
+280 and a 240, the pairs only with a single-slot card and a 280 on the side;
+a 240 with its fans no more than 46 mm thick (V2.0); SFX-L cautioned against
+with water cooling. NCASE publishes no model of the case (its 3D files are
+accessories) and its manual's spacings are pictures, so the inside waits for
+the person's measurements. Tested (9 + 1 + 1): every family made with every
+choice, read back the same, built, checked closed and drawn; the board's
+holes against ATX's inches; supplies, drives and memory against their sizes;
+every fan's holes and volume; a radiator's length, width, holes, ports and
+threads; a G1/4 thread, every screw head's ISO size, a nut's flats, a
+standoff's; a card's size and slots; the T1's size, 9.95 L and walls; NCASE's
+cooler table and every rule; in the core, a library part written, made again
+to the same file, opened, and added to an assembly by its path from there;
+in the browser, a family chosen, a value changed, made, and made and added.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |
@@ -650,9 +692,11 @@ overlaps of 80 mm³ found, as set.
 
 ## Open
 
-- **The FormD T1's figures** are looked up from what FormD publishes when
-  the build is made (2.1 assumed until then); the person measures where
-  nothing is published.
+- **The FormD T1's inside.** NCASE publishes its outside (13.5 × 22 × 33.5
+  cm, 9.95 L) and its limits, now in the library; where the board, the card,
+  the spine and the power supply sit is not published (no model; the
+  manual's spacings are pictures), so the person measures them — or NCASE's
+  current revision (V2.5) is assumed only where the person says so.
 - **The parts in the build** come as a PCPartPicker list with the loop's
   pieces and tubes, after CAD is finished.
 - **Splines in profiles** are refused (K2): extruded or turned, a spline

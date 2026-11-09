@@ -7,6 +7,13 @@
 import { PART } from "./preview-cad-part.js";
 import { ASSEMBLY } from "./preview-cad-assembly.js";
 
+/** A few of the library's families, as the core lists them. */
+const FAMILIES = [
+  { name: "fan", title: "Fan", group: "Cooling", params: [{ name: "size", default: "120", choices: ["80", "92", "120", "140"], note: "square, mm" }, { name: "thickness", default: "25", choices: ["15", "25", "38"], note: "mm" }] },
+  { name: "gpu", title: "Graphics card", group: "Graphics", params: [{ name: "length", default: "304", choices: [], note: "mm" }, { name: "slots", default: "3", choices: [], note: "slots" }] },
+  { name: "formd-t1", title: "FormD T1 (V2.1)", group: "Cases", params: [{ name: "wall", default: "1.5", choices: [], note: "mm" }] },
+];
+
 /** @param {(events: any[]) => void} _deliver */
 export function createCadPreview(_deliver) {
   const parts = [{ path: "case/foot.part", name: "foot", kind: "part" }, { path: "pump-bracket.part", name: "pump-bracket", kind: "part" }, { path: "rig.assembly", name: "rig", kind: "assembly" }];
@@ -23,7 +30,7 @@ export function createCadPreview(_deliver) {
   };
   const blank = (/** @type {string} */ name) => ({ ...PART, name, title: name, text: `part "${name}"\nunits mm\n`, material: null, params: [], steps: [], bodies: [], sketches: [], errors: [], notes: [], canUndo: false, canRedo: false, bounds: [-50, -50, -50, 50, 50, 50] });
   return {
-    sync: () => [home(), partEvent(), asmEvent()],
+    sync: () => [home(), { type: "cadFamilies", families: FAMILIES }, partEvent(), asmEvent()],
     /** @param {any} command */
     command(command) {
       switch (command.type) {
@@ -52,6 +59,7 @@ export function createCadPreview(_deliver) {
           if (!open || command.generation !== open.generation) return [];
           open.text = command.text;
           return [partEvent(), asmEvent()];
+        case "cadLibrary":
         case "cadNewAssembly":
         case "cadFit":
         case "cadEdit":

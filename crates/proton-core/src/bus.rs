@@ -754,6 +754,14 @@ pub enum Command {
     CadNew {
         name: String,
     },
+    /// A part made from the library — `family` with `params`, the rest its
+    /// defaults — written as `library/NAME.part`; opened, or with `add`
+    /// added to the assembly open.
+    CadLibrary {
+        family: String,
+        params: Vec<(String, String)>,
+        add: bool,
+    },
     /// An assembly made: `name.assembly`, its head and nothing in it.
     CadNewAssembly {
         name: String,
@@ -1376,6 +1384,10 @@ pub enum Event {
     /// The part open, built and drawn — or none.
     CadPart {
         part: Option<Box<crate::cad::CadPartView>>,
+    },
+    /// The parts library's families, for CAD's pages.
+    CadFamilies {
+        families: Vec<crate::cad_assembly::CadFamily>,
     },
     /// The assembly open, solved and drawn — or none.
     CadAssembly {

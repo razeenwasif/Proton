@@ -14,6 +14,7 @@ import { escapeHtml as esc, icon } from "./html.js";
 /** @typedef {import("./bindings/CadInstance").CadInstance} Instance */
 /** @typedef {import("./bindings/CadMate").CadMate} Mate */
 /** @typedef {import("./bindings/CadFound").CadFound} Found */
+/** @typedef {import("./bindings/CadFamily").CadFamily} Family */
 
 /** The mates, as the window offers them: word, label, what it takes. */
 export const MATES = [
@@ -109,7 +110,7 @@ const triple = (/** @type {string} */ key, /** @type {number[]} */ v, /** @type 
   `<span class="cd-triple">${v.map((x, k) => `<input data-cad-a-f="${key}${k}" value="${esc(num(x))}" aria-label="${esc(label)} ${"xyz"[k]}">`).join("")}</span>`;
 
 /** The settings of what is chosen, or of the assembly.
- *  @param {AssemblyView} a @param {{step: number | null, picks: string[], exploded: string | null, found: Found[], size: string}} st */
+ *  @param {AssemblyView} a @param {{step: number | null, picks: string[], exploded: string | null, found: Found[], size: string, families?: Family[], family?: string | null, values?: Record<string, string>}} st */
 export function settingsHtml(a, st) {
   let html = "";
   if (st.picks.length) {
@@ -159,10 +160,38 @@ export function settingsHtml(a, st) {
       `<ul class="cd-clashes">${a.clashes.map((c) => `<li class="${c.overlap ? "bad" : ""}">${esc(c.a)} · ${esc(c.b)}: ${c.overlap ? (c.volume == null ? "overlap" : `overlap ${c.volume.toFixed(2)} mm³`) : `${c.gap.toFixed(3)} mm apart`}</li>`).join("")}</ul>`;
     html += `<section class="cd-card"><div class="cd-head">Assembly</div>` + field("Name", `<span class="cd-ro">${esc(a.title ?? a.name)}</span>`) + field("Units", `<span class="cd-ro">${esc(a.units)}</span>`) + status + `</section>` +
       `<section class="cd-card"><div class="cd-head">Add</div><form class="cd-inline" data-cad-add-instance><select name="path" aria-label="The file">${opts}</select><input name="name" placeholder="name" aria-label="Instance name"><button class="cd-btn">Add</button></form>` +
-      (opts ? "" : `<p class="cd-muted">No parts in the folder yet: make one on the home page.</p>`) + `</section>` +
+      (opts ? "" : `<p class="cd-muted">No parts in the folder yet: make one, or one from the library.</p>`) +
+      (st.families?.length ? `<details class="cd-lib-in"${st.family ? " open" : ""}><summary>From the library</summary>${libraryHtml(st.families, st.family ?? null, st.values ?? {}, true)}</details>` : "") + `</section>` +
       `<section class="cd-card"><div class="cd-head">Fit</div>${clashes}<div class="cd-row-btns"><button class="cd-btn" data-cad-fit-check${a.instances.length > 1 ? "" : " disabled"}>Check fit</button></div></section>` +
       `<section class="cd-card"><div class="cd-head">Bill of materials</div>${bom ? `<table class="cd-bom"><tr><th>#</th><th>Part</th><th>Material</th></tr>${bom}</table>` : `<p class="cd-muted">No parts yet.</p>`}` +
       `<div class="cd-row-btns"><button class="cd-btn" data-cad-export="step"${a.bodies.length ? "" : " disabled"}>Write STEP</button><button class="cd-btn" data-cad-export="stl"${a.bodies.length ? "" : " disabled"}>Write STL</button><button class="cd-btn" data-cad-export="3mf"${a.bodies.length ? "" : " disabled"}>Write 3MF</button></div></section>`;
   }
   return html;
+}
+
+/** The library's families by group, each a button; and the chosen one's
+ *  form: a field for each parameter, a list where it is a choice.
+ *  @param {Family[]} families @param {string | null} chosen @param {Record<string, string>} values @param {boolean} add */
+export function libraryHtml(families, chosen, values, add) {
+  const groups = [...new Set(families.map((f) => f.group))];
+  const list = groups.map((g) => `<div class="cd-lib-group"><div class="cd-head">${esc(g)}</div>${families.filter((f) => f.group === g).map((f) => `<button class="cd-lib${f.name === chosen ? " on" : ""}" data-cad-family="${esc(f.name)}" type="button">${esc(f.title)}</button>`).join("")}</div>`).join("");
+  const f = families.find((x) => x.name === chosen);
+  const form = f
+    ? `<form class="cd-lib-form" data-cad-lib-form><div class="cd-head">${esc(f.title)}</div>` +
+      f.params.map((p) => {
+        const v = values[p.name] ?? p.default;
+        const control = p.choices.length
+          ? `<select data-cad-lib-param="${esc(p.name)}" aria-label="${esc(p.name)}">${p.choices.map((c) => `<option${c === v ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>`
+          : `<input data-cad-lib-param="${esc(p.name)}" value="${esc(v)}" aria-label="${esc(p.name)}">`;
+        return `<label class="cd-field" title="${esc(p.note)}"><span>${esc(p.name.replace(/_/g, " "))}</span>${control}</label>`;
+      }).join("") +
+      `<div class="cd-row-btns"><button class="cd-btn" data-cad-lib-make>${add ? "Make and add" : "Make"}</button></div></form>`
+    : "";
+  return `<div class="cd-lib-list">${list}</div>${form}`;
+}
+
+/** What the library form says, by parameter: only what differs from a
+ *  default is sent. @param {Family} f @param {Record<string, string>} values @returns {[string, string][]} */
+export function libraryParams(f, values) {
+  return f.params.filter((p) => values[p.name] != null && values[p.name] !== p.default).map((p) => [p.name, values[p.name]]);
 }

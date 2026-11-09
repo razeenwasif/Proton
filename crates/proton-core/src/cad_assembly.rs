@@ -158,6 +158,92 @@ pub struct CadAssemblyView {
     pub bounds: Vec<f64>,
 }
 
+/// A parameter of a library family, for the window's form.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CadFamilyParam {
+    pub name: String,
+    pub default: String,
+    /// Empty when it takes any value.
+    pub choices: Vec<String>,
+    pub note: String,
+}
+
+/// A family of the parts library.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CadFamily {
+    pub name: String,
+    pub title: String,
+    pub group: String,
+    pub params: Vec<CadFamilyParam>,
+}
+
+/// The library's families, as the window lists them.
+pub fn families() -> Vec<CadFamily> {
+    proton_cad::library::families()
+        .into_iter()
+        .map(|f| CadFamily {
+            name: f.name.into(),
+            title: f.title.into(),
+            group: f.group.into(),
+            params: f.params.iter().map(|p| CadFamilyParam { name: p.name.into(), default: p.default.into(), choices: p.choices.iter().map(|c| c.to_string()).collect(), note: p.note.into() }).collect(),
+        })
+        .collect()
+}
+
+/// A library part written into the project: `library/STEM.part`, or the
+/// same with a number if a different part has the name; the path as the
+/// project names it.
+pub fn write_library_part(root: &Path, family: &str, params: &[(String, String)]) -> Result<String, String> {
+    let made = proton_cad::library::make(family, params)?;
+    let dir = root.join("library");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("library/: {e}"))?;
+    for k in 1.. {
+        let name = if k == 1 { format!("{}.part", made.stem) } else { format!("{}-{k}.part", made.stem) };
+        let file = dir.join(&name);
+        match std::fs::read_to_string(&file) {
+            Ok(text) if text == made.text => return Ok(format!("library/{name}")),
+            Ok(_) => continue,
+            Err(_) => {
+                std::fs::write(&file, &made.text).map_err(|e| format!("library/{name}: {e}"))?;
+                return Ok(format!("library/{name}"));
+            }
+        }
+    }
+    unreachable!()
+}
+
+/// An instance's name for a file: its stem, as a name, not one taken.
+pub fn instance_name(a: &lang::Assembly, path: &str) -> String {
+    let stem = Path::new(path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "part".into());
+    let mut base: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    if base.chars().next().is_none_or(|c| c.is_ascii_digit()) {
+        base.insert(0, '_');
+    }
+    let taken: Vec<&str> = a.items.iter().filter_map(|n| item_name(&n.item)).collect();
+    if !taken.contains(&base.as_str()) {
+        return base;
+    }
+    (2..).map(|k| format!("{base}{k}")).find(|x| !taken.contains(&x.as_str())).expect("a name")
+}
+
+/// The path from an assembly (as the project names it) to a file of the
+/// project.
+pub fn relative(from: &str, to: &str) -> String {
+    let dir: Vec<&str> = from.rsplit_once('/').map_or(Vec::new(), |(d, _)| d.split('/').collect());
+    let parts: Vec<&str> = to.split('/').collect();
+    let mut k = 0;
+    while k < dir.len() && k + 1 < parts.len() && dir[k] == parts[k] {
+        k += 1;
+    }
+    let mut out: Vec<String> = dir[k..].iter().map(|_| "..".to_string()).collect();
+    out.extend(parts[k..].iter().map(|s| s.to_string()));
+    out.join("/")
+}
+
 /// Parts built, kept until their files change.
 #[derive(Debug, Default)]
 pub struct PartCache {
@@ -553,6 +639,36 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/preview-cad-assembly.js");
         std::fs::write(&path, out).unwrap();
         println!("wrote {} ({} bytes)", path.display(), std::fs::metadata(&path).unwrap().len());
+    }
+
+    #[test]
+    fn a_library_part_is_written_into_the_project_and_opened_or_added() {
+        let root = scratch("library");
+        let mut c = Cads::default();
+        let said = c.apply(&root, Command::CadLibrary { family: "fan".into(), params: vec![("size".into(), "140".into())], add: false });
+        assert!(root.join("library/fan-140x25.part").exists());
+        let part = said.iter().find_map(|e| if let Event::CadPart { part: Some(p) } = e { Some(p.clone()) } else { None }).expect("the part opened");
+        assert_eq!(part.path, "library/fan-140x25.part");
+        assert!(part.errors.is_empty() && part.bodies.len() == 1);
+        // Made again the same: the same file; different: another.
+        c.apply(&root, Command::CadClose { discard: false });
+        c.apply(&root, Command::CadLibrary { family: "fan".into(), params: vec![("size".into(), "140".into())], add: false });
+        assert!(!root.join("library/fan-140x25-2.part").exists());
+        // Into an assembly, by its path from there.
+        c.apply(&root, Command::CadClose { discard: false });
+        std::fs::create_dir_all(root.join("builds")).unwrap();
+        std::fs::write(root.join("builds/rig.assembly"), "assembly \"Rig\"\nunits mm\n").unwrap();
+        let g = view(&c.apply(&root, Command::CadOpen { path: "builds/rig.assembly".into() })).generation;
+        let v = view(&c.apply(&root, Command::CadLibrary { family: "fan".into(), params: vec![("size".into(), "140".into())], add: true }));
+        assert_eq!(v.generation, g);
+        assert!(v.text.contains("part fan_140x25 from \"../library/fan-140x25.part\""), "{}", v.text);
+        assert!(v.errors.is_empty() && v.bodies.len() == 1, "{:?}", v.errors);
+        let v = view(&c.apply(&root, Command::CadLibrary { family: "fan".into(), params: vec![("size".into(), "140".into())], add: true }));
+        assert!(v.text.contains("part fan_140x252 from"), "{}", v.text);
+        // The families are sent with the home page.
+        assert!(c.events(&root).iter().any(|e| matches!(e, Event::CadFamilies { families } if families.iter().any(|f| f.name == "formd-t1"))));
+        assert_eq!(super::relative("rig.assembly", "library/x.part"), "library/x.part");
+        assert_eq!(super::relative("a/b/rig.assembly", "a/library/x.part"), "../library/x.part");
     }
 
     #[test]

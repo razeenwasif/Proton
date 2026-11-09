@@ -10,7 +10,7 @@
 
 import { escapeHtml as esc, icon } from "./html.js";
 import { createSketcher, fresh } from "./cad-sketch.js";
-import { asmText, historyHtml, lineIndex, offsets, relPath, settingsHtml } from "./cad-assembly.js";
+import { asmText, historyHtml, libraryHtml, libraryParams, lineIndex, offsets, relPath, settingsHtml } from "./cad-assembly.js";
 
 /** @typedef {import("./bindings/CadFound").CadFound} Found */
 /** @typedef {import("./bindings/CadPartView").CadPartView} PartView */
@@ -105,6 +105,7 @@ export function createCad(host) {
     list: q("[data-cad-list]"),
     home: q("[data-cad-home]"),
     found: q("[data-cad-found]"),
+    library: q("[data-cad-library]"),
     form: /** @type {HTMLFormElement} */ (q("[data-cad-form]")),
     part: q("[data-cad-part]"),
     title: q("[data-cad-title]"),
@@ -143,6 +144,9 @@ export function createCad(host) {
     /** Faces picked in an assembly to mate, by reference. @type {string[]} */ picks: [],
     /** The exploded view shown, by name. @type {string | null} */ exploded: null,
     /** A mate's value as typed. */ mateSize: "",
+    /** The library's families. @type {import("./bindings/CadFamily").CadFamily[]} */ families: [],
+    /** The family chosen in the library, and its values as typed. @type {string | null} */ family: null,
+    /** @type {Record<string, string>} */ libValues: {},
   };
   /** @type {Awaited<ReturnType<typeof import("./cad-view.js").mountView>> | null} */
   let view = null;
@@ -178,6 +182,7 @@ export function createCad(host) {
       .join("");
     els.list.innerHTML = rows || `<p class="xl-empty">No .part files in this folder yet.</p>`;
     els.found.innerHTML = rows;
+    if (els.library) els.library.innerHTML = state.families.length ? `<h3>Library</h3><p class="cd-muted">Parts made from published standards — boards, power, graphics, cooling, fasteners and the FormD T1 — each written into the folder's <code>library/</code> as a part like any other.</p>${libraryHtml(state.families, state.family, state.libValues, false)}` : "";
   }
 
   /* ── the part ─────────────────────────────────────────────────── */
@@ -221,7 +226,7 @@ export function createCad(host) {
 
   function renderStep() {
     if (state.asm) {
-      els.step.innerHTML = settingsHtml(state.asm, { step: state.step, picks: state.picks, exploded: state.exploded, found: state.parts, size: state.mateSize });
+      els.step.innerHTML = settingsHtml(state.asm, { step: state.step, picks: state.picks, exploded: state.exploded, found: state.parts, size: state.mateSize, families: state.families, family: state.family, values: state.libValues });
       return;
     }
     const p = state.part;
@@ -693,6 +698,21 @@ export function createCad(host) {
       else render();
       return;
     }
+    const fam = /** @type {HTMLElement | null} */ (t.closest("[data-cad-family]"));
+    if (fam) {
+      state.family = state.family === fam.dataset.cadFamily ? null : fam.dataset.cadFamily ?? null;
+      state.libValues = {};
+      renderList();
+      if (state.asm) renderStep();
+      return;
+    }
+    if (t.closest("[data-cad-lib-make]")) {
+      e.preventDefault();
+      const f = state.families.find((x) => x.name === state.family);
+      if (!f) return;
+      host.dispatch({ type: "cadLibrary", family: f.name, params: libraryParams(f, state.libValues), add: !!state.asm && !!t.closest("[data-cad-settings]") });
+      return;
+    }
     const kindBtn = /** @type {HTMLElement | null} */ (t.closest("[data-cad-mate-kind]"));
     if (kindBtn && state.asm && state.picks.length === 2) {
       const kind = kindBtn.dataset.cadMateKind ?? "planar";
@@ -819,6 +839,7 @@ export function createCad(host) {
     if (t.matches("[data-cad-f]")) changed(t);
     if (t.matches("[data-cad-a-f]")) changedAssembly();
     if (t.matches("[data-cad-mate-value]")) state.mateSize = /** @type {HTMLInputElement} */ (t).value;
+    if (t.matches("[data-cad-lib-param]")) state.libValues[/** @type {HTMLElement} */ (t).dataset.cadLibParam ?? ""] = /** @type {HTMLInputElement} */ (t).value;
     if (t.matches("[data-cad-edge-size]")) state.edgeSize = /** @type {HTMLInputElement} */ (t).value;
     if (t.matches("[data-cad-param-value]")) {
       const name = /** @type {HTMLElement} */ (t).dataset.cadParamValue ?? "";
@@ -830,6 +851,7 @@ export function createCad(host) {
   ws.addEventListener("submit", (e) => {
     const form = /** @type {HTMLFormElement} */ (e.target);
     e.preventDefault();
+    if (form.matches("[data-cad-lib-form]")) return;
     if (form === els.form) {
       const name = /** @type {HTMLInputElement} */ (form.querySelector("input")).value.trim();
       const kind = /** @type {HTMLSelectElement | null} */ (form.querySelector("[data-cad-kind]"))?.value;
@@ -897,6 +919,12 @@ export function createCad(host) {
     home(e) {
       state.parts = e.parts;
       renderList();
+    },
+    /** @param {{families: import("./bindings/CadFamily").CadFamily[]}} e */
+    families(e) {
+      state.families = e.families;
+      renderList();
+      if (state.asm) renderStep();
     },
     /** @param {{assembly: AssemblyView | null}} e */
     assembly(e) {
@@ -971,7 +999,7 @@ export function createCad(host) {
       });
     },
     debug() {
-      return { asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
+      return { family: state.family, libValues: state.libValues, asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
     },
   };
 }

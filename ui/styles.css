@@ -4159,6 +4159,13 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cd-bom th, .cd-bom td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--xl-line); }
 .cd-clashes { margin: 4px 0; padding-left: 16px; font-size: var(--z-xs); }
 .cd-clashes .bad { color: var(--red, #f7768e); }
+.cd-library { margin-top: 18px; max-width: 720px; }
+.cd-lib-list { display: flex; flex-wrap: wrap; gap: 12px 18px; }
+.cd-lib-group { min-width: 160px; }
+.cd-lib { display: block; width: 100%; text-align: left; padding: 3px 6px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; font-size: var(--z-xs); cursor: pointer; }
+.cd-lib:hover, .cd-lib.on { background: var(--xl-head); }
+.cd-lib-form { margin-top: 10px; padding: 8px; border: 1px solid var(--xl-line); border-radius: 6px; max-width: 360px; }
+.cd-lib-in summary { cursor: pointer; font-size: var(--z-xs); color: var(--muted); margin: 6px 0; }
 .cd-picks { margin: 4px 0 8px; padding: 0; list-style: none; font: var(--z-xs)/1.5 var(--mono, ui-monospace, monospace); color: var(--muted); max-height: 9em; overflow: auto; }
 .cd-picks li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cd-card code { font: var(--z-xs) var(--mono, ui-monospace, monospace); }

@@ -42,6 +42,7 @@ pub mod curve;
 pub mod export;
 pub mod frame;
 pub mod intersect;
+pub mod library;
 pub mod loft;
 pub mod march;
 pub mod mass;
