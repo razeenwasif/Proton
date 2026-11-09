@@ -18,16 +18,20 @@
 
 use std::collections::HashMap;
 
+use crate::blend::{self, Kind, Pick};
 use crate::boolean::{boolean, Op};
 use crate::brep::check::check;
 use crate::brep::Solid;
 use crate::frame::{Frame, Transform};
-use crate::part::ast::{Combine, Counter, Diag, HoleSize, Item, Part, Repeat, Spot, Units};
+use crate::curve::Curve;
+use crate::loft;
+use crate::part::ast::{Combine, Counter, Diag, EdgeFilter, EdgePick, HoleSize, Item, Part, Repeat, Spot, Units};
 use crate::part::expr::{self, eval};
 use crate::profile::{self, Edge, Loop, Profile, Region, Seg};
 use crate::sketch::{self, Drawn, Report};
 use crate::surface::Surface;
-use crate::sweep;
+use crate::shell;
+use crate::sweep::{self, Step};
 use crate::vec::{Vec2, Vec3};
 
 #[derive(Debug, Clone)]
@@ -87,6 +91,9 @@ pub struct Model {
     recipes: HashMap<String, Vec<Recipe>>,
     /// The sketch each feature was made from, to say why a face is gone.
     made_from: HashMap<String, String>,
+    /// Features not made of tools — rounds, chamfers, shells — which a
+    /// pattern or mirror cannot make again: what each is.
+    unrepeatable: HashMap<String, &'static str>,
 }
 
 /// What a feature builds: a profile in a frame, swept — built again moved
@@ -100,22 +107,33 @@ pub struct Tool {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Sweep {
     Extrude { s0: f64, s1: f64 },
     Revolve { axis: (Vec2, Vec2), angle: f64 },
+    /// Along a path, in the world.
+    Along { path: Vec<Step> },
+    /// To a second profile, in its own frame.
+    Loft { to: Profile, frame: Frame },
 }
 
 impl Tool {
     pub fn solid(&self) -> Result<Solid, String> {
-        match self.sweep {
-            Sweep::Extrude { s0, s1 } => sweep::extrude(&self.profile, &self.frame, s0, s1, &self.name),
-            Sweep::Revolve { axis, angle } => sweep::revolve(&self.profile, &self.frame, axis, angle, &self.name),
+        match &self.sweep {
+            Sweep::Extrude { s0, s1 } => sweep::extrude(&self.profile, &self.frame, *s0, *s1, &self.name),
+            Sweep::Revolve { axis, angle } => sweep::revolve(&self.profile, &self.frame, *axis, *angle, &self.name),
+            Sweep::Along { path } => sweep::along(&self.profile, &self.frame, path, &self.name),
+            Sweep::Loft { to, frame } => loft::loft(&self.profile, &self.frame, to, frame, &self.name),
         }
     }
 
     pub fn moved(&self, t: &Transform) -> Tool {
-        Tool { frame: self.frame.transformed(t), ..self.clone() }
+        let sweep = match &self.sweep {
+            Sweep::Along { path } => Sweep::Along { path: path.iter().map(|s| s.transformed(t)).collect() },
+            Sweep::Loft { to, frame } => Sweep::Loft { to: to.clone(), frame: frame.transformed(t) },
+            other => other.clone(),
+        };
+        Tool { frame: self.frame.transformed(t), sweep, ..self.clone() }
     }
 
     /// Mirrored in `plane`. A frame's mirror image turns the other way,
@@ -124,14 +142,17 @@ impl Tool {
     pub fn mirrored(&self, plane: &Frame) -> Tool {
         let n = plane.z;
         let dir = |v: Vec3| v - n * (2.0 * v.dot(n));
-        let f = &self.frame;
-        let (x, y) = (dir(f.x), dir(f.y));
-        let frame = Frame { origin: f.origin - n * (2.0 * (f.origin - plane.origin).dot(n)), x, y, z: x.cross(y) };
-        let sweep = match self.sweep {
-            Sweep::Extrude { s0, s1 } => Sweep::Extrude { s0: -s1, s1: -s0 },
-            Sweep::Revolve { axis, angle } => Sweep::Revolve { axis, angle: -angle },
+        let flip = |f: &Frame| {
+            let (x, y) = (dir(f.x), dir(f.y));
+            Frame { origin: f.origin - n * (2.0 * (f.origin - plane.origin).dot(n)), x, y, z: x.cross(y) }
         };
-        Tool { frame, sweep, ..self.clone() }
+        let sweep = match &self.sweep {
+            Sweep::Extrude { s0, s1 } => Sweep::Extrude { s0: -s1, s1: -s0 },
+            Sweep::Revolve { axis, angle } => Sweep::Revolve { axis: *axis, angle: -angle },
+            Sweep::Along { path } => Sweep::Along { path: path.iter().map(|s| s.mirrored(plane.origin, n)).collect() },
+            Sweep::Loft { to, frame } => Sweep::Loft { to: to.clone(), frame: flip(frame) },
+        };
+        Tool { frame: flip(&self.frame), sweep, ..self.clone() }
     }
 }
 
@@ -206,6 +227,25 @@ impl Model {
                 return Err(format!("`{reference}` is not flat"));
             }
         }
+        Err(self.lost(reference))
+    }
+
+    /// Every face named `reference`, in any body: (body, face). Why not,
+    /// when there is none.
+    pub fn faces_named(&self, reference: &str) -> Result<Vec<(usize, usize)>, String> {
+        let found: Vec<(usize, usize)> = self.bodies.iter().enumerate().flat_map(|(b, body)| body.solid.named(reference).map(move |f| (b, f))).collect();
+        if found.is_empty() {
+            return Err(self.lost(reference));
+        }
+        Ok(found)
+    }
+
+    /// Why no face is called `reference`.
+    fn lost(&self, reference: &str) -> String {
+        if let Some(what) = self.unrepeatable.get(reference) {
+            return format!("the {what} `{reference}` has no faces left");
+        }
+        (|| -> Result<(), String> {
         let Some((feature, part)) = reference.split_once('.') else {
             return Err(format!("nothing called `{reference}`: XY, XZ, YZ, a sketch, or a face like `plate.top`"));
         };
@@ -219,7 +259,10 @@ impl Model {
             }
             return Err(format!("`{reference}` is gone: nothing that `{feature}` made is left there"));
         }
-        Err(format!("`{feature}` has no face called `{part}`: an extrude's are `top`, `bottom` and `side(SHAPE)`, a revolve's `start`, `end` and `side(SHAPE)`"))
+        Err(format!("`{feature}` has no face called `{part}`: an extrude's are `top`, `bottom` and `side(SHAPE)`, a revolve's, sweep's or loft's `start`, `end` and `side(SHAPE)`, a shell's `inside(FACE)`"))
+        })()
+        .err()
+        .unwrap_or_default()
     }
 
     /// The body named, or why not.
@@ -286,13 +329,20 @@ fn op(c: Combine) -> Op {
     }
 }
 
-/// Make tools into their body: a new one, or the one named.
+/// Make tools into their body: a new one, or the one named. Tools that do
+/// not touch one another are made one solid first and used at once — a
+/// pattern of holes is one cut, not one a hole.
 fn apply(m: &mut Model, name: &str, line: usize, recipe: &Recipe) -> Result<(), String> {
+    let mut made = Vec::new();
     for tool in &recipe.tools {
-        let made = tool.solid()?;
-        if let Some(p) = check(&made).first() {
+        let s = tool.solid()?;
+        if let Some(p) = check(&s).first() {
             return Err(format!("`{name}` is not a valid solid: {p}"));
         }
+        made.push(s);
+    }
+    let made = if recipe.how == Some(Combine::Intersect) { made } else { apart(made) };
+    for made in made {
         match recipe.how {
             None => match m.bodies.iter_mut().find(|b| b.name == recipe.body) {
                 Some(b) => b.solid = boolean(&b.solid, &made, Op::Union).map_err(|e| format!("`{name}` could not join `{}`: {e}", recipe.body))?,
@@ -305,6 +355,23 @@ fn apply(m: &mut Model, name: &str, line: usize, recipe: &Recipe) -> Result<(), 
         }
     }
     Ok(())
+}
+
+/// Solids gathered into as few as can be, each of pieces whose boxes do
+/// not touch.
+fn apart(solids: Vec<Solid>) -> Vec<Solid> {
+    let mut out: Vec<(Solid, Vec<crate::vec::Aabb>)> = Vec::new();
+    for s in solids {
+        let b = s.bounds().expanded(1e-3);
+        match out.iter_mut().find(|(_, boxes)| boxes.iter().all(|x| !x.overlaps(&b))) {
+            Some((acc, boxes)) => {
+                acc.merge(s);
+                boxes.push(b);
+            }
+            None => out.push((s, vec![b])),
+        }
+    }
+    out.into_iter().map(|(s, _)| s).collect()
 }
 
 /// Build the part.
@@ -320,6 +387,7 @@ pub fn build(part: &Part) -> Model {
         threads: Vec::new(),
         recipes: HashMap::new(),
         made_from: HashMap::new(),
+        unrepeatable: HashMap::new(),
     };
     let (env, wrong) = expr::params(part);
     for (line, why) in wrong {
@@ -523,7 +591,7 @@ pub fn build(part: &Part) -> Model {
                     };
                     let mut out = Vec::new();
                     for f in &pt.of {
-                        for r in m.recipes.get(f).ok_or_else(|| format!("no feature called `{f}` is made above to repeat"))? {
+                        for r in m.recipes.get(f).ok_or_else(|| m.cannot_repeat(f, "repeat"))? {
                             let tools = moves.iter().flat_map(|t| r.tools.iter().map(move |tool| tool.moved(t))).collect();
                             out.push(Recipe { tools, how: r.how, body: r.body.clone() });
                         }
@@ -537,7 +605,7 @@ pub fn build(part: &Part) -> Model {
                     let pl = plane(&mi.plane, &m)?;
                     let mut out = Vec::new();
                     for f in &mi.of {
-                        for r in m.recipes.get(f).ok_or_else(|| format!("no feature called `{f}` is made above to mirror"))? {
+                        for r in m.recipes.get(f).ok_or_else(|| m.cannot_repeat(f, "mirror"))? {
                             out.push(Recipe { tools: r.tools.iter().map(|t| t.mirrored(&pl)).collect(), how: r.how, body: r.body.clone() });
                         }
                     }
@@ -561,8 +629,63 @@ pub fn build(part: &Part) -> Model {
                     m.errors.push(Diag::new(line, 1, e));
                 }
             }
+            Item::Fillet(fi) => match eval(&fi.radius, &env) {
+                Ok(r) => blend_feature(&mut m, &fi.name, line, &fi.edges, Kind::Round(r * k)),
+                Err(e) => m.errors.push(Diag::new(line, 1, e)),
+            },
+            Item::Chamfer(c) => {
+                let d = eval(&c.distance, &env).and_then(|d| Ok((d, c.other.as_ref().map(|o| eval(o, &env)).transpose()?)));
+                match d {
+                    Ok((d, other)) => blend_feature(&mut m, &c.name, line, &c.edges, Kind::Chamfer(d * k, other.unwrap_or(d) * k)),
+                    Err(e) => m.errors.push(Diag::new(line, 1, e)),
+                }
+            }
+            Item::Shell(sh) => {
+                let done = (|| -> Result<(), String> {
+                    if m.taken(&sh.name) {
+                        return Err(format!("`{}` is a name already", sh.name));
+                    }
+                    let t = eval(&sh.thickness, &env)? * k;
+                    let b = m.bodies.iter().position(|b| b.name == sh.body).ok_or_else(|| format!("no body called `{}` is made above", sh.body))?;
+                    let mut open = Vec::new();
+                    for f in &sh.open {
+                        let mine: Vec<usize> = m.faces_named(f)?.into_iter().filter(|x| x.0 == b).map(|x| x.1).collect();
+                        if mine.is_empty() {
+                            return Err(format!("`{f}` is not a face of `{}`", sh.body));
+                        }
+                        open.extend(mine);
+                    }
+                    m.bodies[b].solid = shell::shell(&m.bodies[b].solid, t, &open, &sh.name)?;
+                    Ok(())
+                })();
+                match done {
+                    Ok(()) => {
+                        m.unrepeatable.insert(sh.name.clone(), "shell");
+                    }
+                    Err(e) => m.errors.push(Diag::new(line, 1, e)),
+                }
+            }
+            Item::Sweep(sw) => {
+                let made = (|| {
+                    let s = sketch_for(&m, &sw.sketch).map_err(here(line))?;
+                    let p = s.profile.as_ref().map_err(|d| (d.line, format!("`{}` cannot sweep `{}`: {}", sw.name, sw.sketch, d.message)))?;
+                    let path = path_of(&m, &sw.path, &s.frame).map_err(here(line))?;
+                    Ok(Tool { profile: p.clone(), frame: s.frame, sweep: Sweep::Along { path }, name: sw.name.clone() })
+                })();
+                make(&mut m, &sw.name, line, Some(&sw.sketch), made.map(|t| vec![t]), sw.into.clone());
+            }
+            Item::Loft(lo) => {
+                let made = (|| {
+                    let a = sketch_for(&m, &lo.from).map_err(here(line))?;
+                    let pa = a.profile.as_ref().map_err(|d| (d.line, format!("`{}` cannot loft from `{}`: {}", lo.name, lo.from, d.message)))?;
+                    let b = sketch_for(&m, &lo.to).map_err(here(line))?;
+                    let pb = b.profile.as_ref().map_err(|d| (d.line, format!("`{}` cannot loft to `{}`: {}", lo.name, lo.to, d.message)))?;
+                    Ok(Tool { profile: pa.clone(), frame: a.frame, sweep: Sweep::Loft { to: pb.clone(), frame: b.frame }, name: lo.name.clone() })
+                })();
+                make(&mut m, &lo.name, line, Some(&lo.from), made.map(|t| vec![t]), lo.into.clone());
+            }
             Item::Feature { keyword, .. } => {
-                m.notes.push(Diag::new(line, 1, format!("`{keyword}` is not built yet: it comes with K5")));
+                m.notes.push(Diag::new(line, 1, format!("`{keyword}` is not built yet: a thread on a shaft is drawn, not modelled — it comes with drawings (K10)")));
             }
             Item::Blank | Item::Comment(_) | Item::Units(_) | Item::Param { .. } => {}
         }
@@ -588,7 +711,7 @@ fn here(line: usize) -> impl Fn(String) -> (usize, String) {
 
 /// A feature's tools made into its body.
 fn make(m: &mut Model, name: &str, line: usize, sketch: Option<&str>, made: Result<Vec<Tool>, (usize, String)>, into: Option<(Combine, String)>) {
-    if m.recipes.contains_key(name) || m.sketch(name).is_some() || (into.is_none() && m.body(name).is_some()) {
+    if m.recipes.contains_key(name) || m.unrepeatable.contains_key(name) || m.sketch(name).is_some() || (into.is_none() && m.body(name).is_some()) {
         m.errors.push(Diag::new(line, 1, format!("`{name}` is a name already")));
         return;
     }
@@ -650,4 +773,180 @@ fn axis_of(m: &Model, name: &str) -> Result<(Vec3, Vec3), String> {
     let at = |p: Vec2| s.frame.origin + s.frame.x * (p.x * k) + s.frame.y * (p.y * k);
     let (pa, pb) = (at(a), at(b));
     Ok((pa, (pb - pa).unit_or(Vec3::Z)))
+}
+
+impl Model {
+    /// Whether a name is used already, by a feature, sketch or body.
+    fn taken(&self, name: &str) -> bool {
+        self.recipes.contains_key(name) || self.unrepeatable.contains_key(name) || self.sketch(name).is_some() || self.body(name).is_some()
+    }
+
+    /// Why a pattern or mirror cannot make `f` again.
+    fn cannot_repeat(&self, f: &str, how: &str) -> String {
+        match self.unrepeatable.get(f) {
+            Some(what) => format!("`{f}` is a {what}, which a pattern or mirror cannot {how}: {how} the features it was made on, then make it after"),
+            None => format!("no feature called `{f}` is made above to {how}"),
+        }
+    }
+}
+
+/// The edges picked, by body: `(body, picks)`. Edges that are not
+/// corners — seams, smooth joins — are left out of `.edges`; named by
+/// their two faces, they are kept, to be refused saying why.
+fn picked(m: &Model, picks: &[EdgePick]) -> Result<Vec<(usize, Vec<Pick>)>, String> {
+    let mut out: Vec<(usize, Vec<Pick>)> = Vec::new();
+    let mut add = |b: usize, p: Pick| {
+        let at = match out.iter().position(|x| x.0 == b) {
+            Some(i) => i,
+            None => {
+                out.push((b, Vec::new()));
+                out.len() - 1
+            }
+        };
+        if !out[at].1.iter().any(|q| q.edge == p.edge) {
+            out[at].1.push(p);
+        }
+    };
+    for pick in picks {
+        let mut found = 0;
+        match pick {
+            EdgePick::Between(a, b) => {
+                let (fa, fb) = (m.faces_named(a)?, m.faces_named(b)?);
+                for (bi, body) in m.bodies.iter().enumerate() {
+                    let sa: Vec<usize> = fa.iter().filter(|x| x.0 == bi).map(|x| x.1).collect();
+                    let sb: Vec<usize> = fb.iter().filter(|x| x.0 == bi).map(|x| x.1).collect();
+                    if sa.is_empty() || sb.is_empty() {
+                        continue;
+                    }
+                    for (e, u) in blend::uses(&body.solid).iter().enumerate() {
+                        if u.len() != 2 {
+                            continue;
+                        }
+                        let (f, g) = (u[0].0, u[1].0);
+                        let first = if sa.contains(&f) && sb.contains(&g) {
+                            Some(f)
+                        } else if sa.contains(&g) && sb.contains(&f) {
+                            Some(g)
+                        } else {
+                            None
+                        };
+                        if first.is_some() {
+                            add(bi, Pick { edge: e, first });
+                            found += 1;
+                        }
+                    }
+                }
+                if found == 0 {
+                    return Err(format!("`{a}` and `{b}` do not meet: there is no edge between them"));
+                }
+            }
+            EdgePick::Of { of, filters } => {
+                let targets: Vec<(usize, Option<Vec<usize>>)> = match m.bodies.iter().position(|b| &b.name == of) {
+                    Some(b) => vec![(b, None)],
+                    None => {
+                        let faces = m.faces_named(of)?;
+                        let mut bodies: Vec<usize> = faces.iter().map(|x| x.0).collect();
+                        bodies.dedup();
+                        bodies.into_iter().map(|b| (b, Some(faces.iter().filter(|x| x.0 == b).map(|x| x.1).collect()))).collect()
+                    }
+                };
+                for (bi, faces) in targets {
+                    let s = &m.bodies[bi].solid;
+                    for (e, u) in blend::uses(s).iter().enumerate() {
+                        let first = match &faces {
+                            None => None,
+                            Some(fs) => match u.iter().find(|x| fs.contains(&x.0)) {
+                                Some(x) => Some(x.0),
+                                None => continue,
+                            },
+                        };
+                        let Some(convex) = blend::corner(s, e, u) else { continue };
+                        let curve = &s.edges[e].curve;
+                        let keep = filters.iter().all(|f| match f {
+                            EdgeFilter::Parallel(a) => {
+                                let axis = match a.as_str() {
+                                    "x" => Vec3::X,
+                                    "y" => Vec3::Y,
+                                    _ => Vec3::Z,
+                                };
+                                matches!(curve, Curve::Line(l) if l.dir.cross(axis).length() <= 1e-9)
+                            }
+                            EdgeFilter::Convex => convex,
+                            EdgeFilter::Concave => !convex,
+                            EdgeFilter::Round => matches!(curve, Curve::Circle(_) | Curve::Ellipse(_)),
+                            EdgeFilter::Straight => matches!(curve, Curve::Line(_)),
+                        });
+                        if keep {
+                            add(bi, Pick { edge: e, first });
+                            found += 1;
+                        }
+                    }
+                }
+                if found == 0 {
+                    let which = if filters.is_empty() { String::new() } else { format!("({})", filters.iter().map(|f| f.word()).collect::<Vec<_>>().join(", ")) };
+                    return Err(format!("`{of}.edges{which}` picks no edges"));
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// A round or chamfer made on the edges picked, body by body.
+fn blend_feature(m: &mut Model, name: &str, line: usize, picks: &[EdgePick], kind: Kind) {
+    let what = match kind {
+        Kind::Round(_) => "fillet",
+        Kind::Chamfer(..) => "chamfer",
+    };
+    let done = (|| -> Result<(), String> {
+        if m.taken(name) {
+            return Err(format!("`{name}` is a name already"));
+        }
+        for (b, ps) in picked(m, picks)? {
+            let s = blend::blend(&m.bodies[b].solid, &ps, kind, name).map_err(|e| format!("`{name}`: {e}"))?;
+            m.bodies[b].solid = s;
+        }
+        Ok(())
+    })();
+    match done {
+        Ok(()) => {
+            m.unrepeatable.insert(name.to_string(), what);
+        }
+        Err(e) => m.errors.push(Diag::new(line, 1, e)),
+    }
+}
+
+/// A sketch's lines and arcs as a path in the world, run from its end on
+/// the profile's plane `on`.
+fn path_of(m: &Model, name: &str, on: &Frame) -> Result<Vec<Step>, String> {
+    let ps = sketch_for(m, name)?;
+    let segs = profile::path_from_sketch(&ps.drawn, &ps.x, name, ps.line).map_err(|d| d.message)?;
+    let k = m.units.mm();
+    let f = ps.frame;
+    let at = |q: Vec2| f.origin + f.x * (q.x * k) + f.y * (q.y * k);
+    let mut steps: Vec<Step> = segs
+        .iter()
+        .map(|&(seg, fwd)| match seg {
+            Seg::Line { a, b } => {
+                if fwd {
+                    Step::Line { a: at(a), b: at(b) }
+                } else {
+                    Step::Line { a: at(b), b: at(a) }
+                }
+            }
+            Seg::Arc { c, a0, a1, .. } => Step::Arc { center: at(c), axis: if fwd { f.z } else { -f.z }, start: at(if fwd { seg.start() } else { seg.end() }), angle: a1 - a0 },
+            Seg::Circle { .. } => unreachable!("refused"),
+        })
+        .collect();
+    let level = |p: Vec3| (p - on.origin).dot(on.z).abs() <= 10.0 * crate::tol::LINEAR;
+    if !level(steps[0].start()) && level(steps.last().expect("a step").end()) {
+        steps.reverse();
+        for st in &mut steps {
+            *st = match *st {
+                Step::Line { a, b } => Step::Line { a: b, b: a },
+                Step::Arc { center, axis, angle, .. } => Step::Arc { center, axis: -axis, start: st.end(), angle },
+            };
+        }
+    }
+    Ok(steps)
 }

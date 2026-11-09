@@ -28,7 +28,7 @@ use proton_cad::export::{stl, threemf};
 use proton_cad::mass::mass;
 use proton_cad::mesh::{tessellate, Mesh, Quality};
 use proton_cad::model::{self, Model};
-use proton_cad::part::ast::{Diag, Entity, Item, Noted, Part, Shape, Size, Sketch, SketchItem, Spot};
+use proton_cad::part::ast::{Diag, EdgePick, Entity, Item, Noted, Part, Shape, Size, Sketch, SketchItem, Spot};
 use proton_cad::part::{self, expr as pexpr, parse, print};
 use proton_cad::sketch::{self as sketcher, Geom};
 use proton_cad::surface::Surface;
@@ -112,6 +112,17 @@ pub struct CadStep {
     /// A sketch's plane, and its offset.
     pub on: Option<String>,
     pub offset: Option<String>,
+    /// A fillet's or chamfer's edges, each as written: `a.top & a.side(r.left)`,
+    /// `a.edges(parallel z)`.
+    pub edges: Vec<String>,
+    /// A fillet's radius, a chamfer's distance, a shell's thickness.
+    pub value: Option<String>,
+    /// A chamfer's second distance.
+    pub other: Option<String>,
+    /// What a sweep runs along, or the sketch a loft goes to.
+    pub path: Option<String>,
+    /// The faces a shell takes away.
+    pub open: Vec<String>,
 }
 
 /// A face of a body: its name, its surface's kind, and for a flat one its
@@ -140,6 +151,11 @@ pub struct CadBody {
     pub face_of: Vec<u32>,
     pub faces: Vec<CadFace>,
     pub edges: Vec<Vec<f32>>,
+    /// Each edge's name to round or chamfer it by — `a.top & a.side(r.left)`,
+    /// its two faces — or none for a seam or a smooth join, which is no
+    /// corner; and whether it is `convex`, `concave`, or neither.
+    pub edge_picks: Vec<Option<String>>,
+    pub edge_turns: Vec<String>,
     /// Cubic millimetres, square millimetres, and where its centre of mass
     /// is, from the exact geometry.
     pub volume: f64,
@@ -569,6 +585,11 @@ fn item_name(i: &Item) -> Option<&str> {
         Item::Hole(h) => Some(&h.name),
         Item::Pattern(p) => Some(&p.name),
         Item::Mirror(m) => Some(&m.name),
+        Item::Fillet(f) => Some(&f.name),
+        Item::Chamfer(c) => Some(&c.name),
+        Item::Shell(sh) => Some(&sh.name),
+        Item::Sweep(sw) => Some(&sw.name),
+        Item::Loft(l) => Some(&l.name),
         _ => None,
     }
 }
@@ -618,6 +639,39 @@ fn rename(p: &mut Part, old: &str, new: &str) {
                         *x = new.to_string();
                     }
                 }
+            }
+            Item::Fillet(proton_cad::part::ast::Fillet { edges, .. }) | Item::Chamfer(proton_cad::part::ast::Chamfer { edges, .. }) => {
+                for e in edges {
+                    match e {
+                        EdgePick::Between(a, b) => {
+                            face(a);
+                            face(b);
+                        }
+                        EdgePick::Of { of, .. } => face(of),
+                    }
+                }
+            }
+            Item::Shell(sh) => {
+                if sh.body == old {
+                    sh.body = new.to_string();
+                }
+                sh.open.iter_mut().for_each(face);
+            }
+            Item::Sweep(sw) => {
+                for x in [&mut sw.sketch, &mut sw.path] {
+                    if x == old {
+                        *x = new.to_string();
+                    }
+                }
+                body(&mut sw.into);
+            }
+            Item::Loft(l) => {
+                for x in [&mut l.from, &mut l.to] {
+                    if x == old {
+                        *x = new.to_string();
+                    }
+                }
+                body(&mut l.into);
             }
             _ => {}
         }
@@ -811,7 +865,7 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
         };
         let error = m.errors.iter().find(|d| d.line >= span.0 && d.line <= span.1).map(|d| d.message.clone());
         let note = m.notes.iter().find(|d| d.line == n.line).map(|d| d.message.clone());
-        let blank = CadStep { index: i as u32, line, kind: String::new(), name: String::new(), text: String::new(), error, note, sketch: None, distance: None, symmetric: false, through: false, how: None, body: None, axis: None, angle: None, on: None, offset: None };
+        let blank = CadStep { index: i as u32, line, kind: String::new(), name: String::new(), text: String::new(), error, note, sketch: None, distance: None, symmetric: false, through: false, how: None, body: None, axis: None, angle: None, on: None, offset: None, edges: Vec::new(), value: None, other: None, path: None, open: Vec::new() };
         let step = match &n.item {
             Item::Sketch(s) => {
                 let mut head = format!("sketch {} on {}", s.name, s.on.reference);
@@ -854,6 +908,29 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
                 body: Some(c.with.clone()),
                 ..blank
             },
+            Item::Fillet(f) => CadStep { kind: "fillet".into(), name: f.name.clone(), text: line_of(&n.item), edges: picks_of(&f.edges), value: Some(print::expr(&f.radius)), ..blank },
+            Item::Chamfer(c) => CadStep { kind: "chamfer".into(), name: c.name.clone(), text: line_of(&n.item), edges: picks_of(&c.edges), value: Some(print::expr(&c.distance)), other: c.other.as_ref().map(print::expr), ..blank },
+            Item::Shell(sh) => CadStep { kind: "shell".into(), name: sh.name.clone(), text: line_of(&n.item), body: Some(sh.body.clone()), value: Some(print::expr(&sh.thickness)), open: sh.open.clone(), ..blank },
+            Item::Sweep(sw) => CadStep {
+                kind: "sweep".into(),
+                name: sw.name.clone(),
+                text: line_of(&n.item),
+                sketch: Some(sw.sketch.clone()),
+                path: Some(sw.path.clone()),
+                how: sw.into.as_ref().map(|(h, _)| h.word().to_string()),
+                body: sw.into.as_ref().map(|(_, b)| b.clone()),
+                ..blank
+            },
+            Item::Loft(l) => CadStep {
+                kind: "loft".into(),
+                name: l.name.clone(),
+                text: line_of(&n.item),
+                sketch: Some(l.from.clone()),
+                path: Some(l.to.clone()),
+                how: l.into.as_ref().map(|(h, _)| h.word().to_string()),
+                body: l.into.as_ref().map(|(_, b)| b.clone()),
+                ..blank
+            },
             Item::Feature { keyword, text } => {
                 // Its name, when its first word is one: `hole m3 on …`.
                 let first = text.split_whitespace().next().unwrap_or("");
@@ -890,6 +967,18 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
         can_redo: false,
         bounds: if bounds.is_empty() { vec![-50.0, -50.0, -50.0, 50.0, 50.0, 50.0] } else { vec![bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z] },
     }
+}
+
+/// A fillet's or chamfer's edges, each as the file writes it.
+fn picks_of(edges: &[EdgePick]) -> Vec<String> {
+    edges
+        .iter()
+        .map(|e| {
+            let one = Item::Fillet(proton_cad::part::ast::Fillet { name: "x".into(), edges: vec![e.clone()], radius: proton_cad::part::ast::Expr::Num(1.0) });
+            let line = line_of(&one);
+            line.trim_start_matches("fillet x on ").trim_end_matches(" radius 1").to_string()
+        })
+        .collect()
 }
 
 /// An item's own line, as the file writes it.
@@ -935,6 +1024,17 @@ fn body_view(b: &model::Body, bounds: &mut Aabb) -> CadBody {
             indices.push(i);
         }
     }
+    // Each edge by its two faces, and which way it turns.
+    let uses = proton_cad::blend::uses(&b.solid);
+    let turns: Vec<(Option<String>, String)> = (0..b.solid.edges.len())
+        .map(|e| match proton_cad::blend::corner(&b.solid, e, &uses[e]) {
+            Some(convex) => {
+                let (f, g) = (&b.solid.faces[uses[e][0].0].name, &b.solid.faces[uses[e][1].0].name);
+                (Some(format!("{f} & {g}")), if convex { "convex" } else { "concave" }.to_string())
+            }
+            None => (None, if uses[e].len() == 2 && uses[e][0].0 == uses[e][1].0 { "seam" } else { "smooth" }.to_string()),
+        })
+        .collect();
     let faces = b
         .solid
         .faces
@@ -960,6 +1060,8 @@ fn body_view(b: &model::Body, bounds: &mut Aabb) -> CadBody {
         face_of: mesh.face_of.clone(),
         faces,
         edges: mesh.edges.iter().map(|e| e.iter().flat_map(|p| [p.x as f32, p.y as f32, p.z as f32]).collect()).collect(),
+        edge_picks: turns.iter().map(|t| t.0.clone()).collect(),
+        edge_turns: turns.into_iter().map(|t| t.1).collect(),
         volume: ms.map_or(0.0, |m| m.volume),
         area: ms.map_or(0.0, |m| m.area),
         centroid: ms.map_or(vec![0.0; 3], |m| vec![m.centroid.x, m.centroid.y, m.centroid.z]),
@@ -1361,7 +1463,7 @@ mod preview {
     /// The sample part the browser preview shows, as the core draws it:
     /// `cargo test -p proton-core --lib dump_part_for_the_preview -- --ignored`
     /// writes `ui/preview-cad-part.js`.
-    pub const SAMPLE: &str = "part \"Pump bracket\"\nunits mm\nmaterial aluminium-6061\nparam t = 3\nparam hole = 3.4\n\n# The plate, with the pump's two screws.\nsketch base on XY\n  rect r corner origin size = (80, 40)\n  circle h1 center (10, 10) diameter = hole\n  circle h2 center (70, 10) diameter = hole\n  horizontal h1.center h2.center\n  hdistance r.bl h1.center = 10\n  vdistance r.bl h1.center = 10\n  hdistance h1.center h2.center = 60\nend\nextrude plate from base distance t\n\nsketch post on plate.top\n  circle p center (40, 26) radius = 6\nend\nextrude boss from post distance 8\nfillet plate.edges(parallel z) radius 2\n";
+    pub const SAMPLE: &str = "part \"Pump bracket\"\nunits mm\nmaterial aluminium-6061\nparam t = 3\nparam hole = 3.4\n\n# The plate, with the pump's two screws.\nsketch base on XY\n  rect r corner origin size = (80, 40)\n  circle h1 center (10, 10) diameter = hole\n  circle h2 center (70, 10) diameter = hole\n  horizontal h1.center h2.center\n  hdistance r.bl h1.center = 10\n  vdistance r.bl h1.center = 10\n  hdistance h1.center h2.center = 60\nend\nextrude plate from base distance t\n\nsketch post on plate.top\n  circle p center (40, 26) radius = 6\nend\nextrude boss from post distance 8\nfillet corners on plate.edges(parallel z) radius 2\n";
 
     #[test]
     #[ignore]

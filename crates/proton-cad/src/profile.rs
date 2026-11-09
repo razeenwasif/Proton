@@ -513,3 +513,69 @@ pub fn from_sketch(drawn: &[Drawn], x: &[f64], sketch: &str, line: usize) -> Res
     }
     Ok(p)
 }
+
+/// A sketch's lines and arcs as one path, end to end, for a sweep: each
+/// shape with whether the path runs it from its start, in order from one
+/// end — the first drawn shape's free end, if it has one — to the other,
+/// or round to where it began if the path closes.
+pub fn path_from_sketch(drawn: &[Drawn], x: &[f64], sketch: &str, line: usize) -> Result<Vec<(Seg, bool)>, Diag> {
+    let err = |line: usize, msg: String| Diag::new(line, 3, msg);
+    let mut segs: Vec<(Seg, usize, String)> = Vec::new();
+    for d in drawn.iter().filter(|d| !d.construction) {
+        let seg = match &d.geom {
+            Geom::Point(_) => continue,
+            Geom::Line(a, b) => Seg::Line { a: at(x, *a), b: at(x, *b) },
+            Geom::Arc { center, start, end } => {
+                let (c, s, e) = (at(x, *center), at(x, *start), at(x, *end));
+                let a0 = (s.y - c.y).atan2(s.x - c.x);
+                let a1 = a0 + ((e.y - c.y).atan2(e.x - c.x) - a0).rem_euclid(TAU);
+                Seg::Arc { c, r: c.distance(s), a0, a1 }
+            }
+            Geom::Circle { .. } => return Err(err(d.line, format!("`{}` is a whole circle: a path is lines and arcs end to end — to go round, revolve", d.name))),
+            Geom::Spline(_) => return Err(err(d.line, format!("`{}` is a spline: a path is lines and arcs", d.name))),
+        };
+        if seg.length() <= tol::LINEAR {
+            return Err(err(d.line, format!("`{}` has no length", d.name)));
+        }
+        segs.push((seg, d.line, d.name.clone()));
+    }
+    if segs.is_empty() {
+        return Err(Diag::new(line, 1, format!("`{sketch}` has no lines or arcs to make a path of")));
+    }
+    let mut nodes: Vec<Vec2> = Vec::new();
+    let mut node = |p: Vec2| match nodes.iter().position(|q| q.distance(p) <= tol::LINEAR) {
+        Some(i) => i,
+        None => {
+            nodes.push(p);
+            nodes.len() - 1
+        }
+    };
+    let ends: Vec<(usize, usize)> = segs.iter().map(|(s, _, _)| (node(s.start()), node(s.end()))).collect();
+    let mut degree = vec![0usize; nodes.len()];
+    for &(a, b) in &ends {
+        degree[a] += 1;
+        degree[b] += 1;
+    }
+    if let Some(n) = degree.iter().position(|&d| d > 2) {
+        return Err(Diag::new(line, 1, format!("`{sketch}` branches at {}: a path runs one way", show(nodes[n]))));
+    }
+    // From the first shape's free end, if it has one, else any end.
+    let open: Vec<usize> = (0..nodes.len()).filter(|&n| degree[n] == 1).collect();
+    let start = if open.contains(&ends[0].0) { ends[0].0 } else if open.contains(&ends[0].1) { ends[0].1 } else { open.first().copied().unwrap_or(ends[0].0) };
+    let mut used = vec![false; segs.len()];
+    let mut out = Vec::new();
+    let mut at_node = start;
+    while let Some((j, fwd)) = (0..segs.len()).find_map(|j| match ends[j] {
+        (a, _) if !used[j] && a == at_node => Some((j, true)),
+        (_, b) if !used[j] && b == at_node => Some((j, false)),
+        _ => None,
+    }) {
+        used[j] = true;
+        at_node = if fwd { ends[j].1 } else { ends[j].0 };
+        out.push((segs[j].0, fwd));
+    }
+    if let Some(j) = used.iter().position(|u| !u) {
+        return Err(err(segs[j].1, format!("`{}` is not joined to the rest of the path in `{sketch}`", segs[j].2)));
+    }
+    Ok(out)
+}

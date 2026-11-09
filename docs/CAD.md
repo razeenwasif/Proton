@@ -44,6 +44,23 @@ drawn. Asked for on 2026-11-07.
   view; the kernel sends meshes tessellated from exact geometry and keeps
   the geometry itself.
 
+## Decided (2026-11-09)
+
+- **A blueprint is a layout of the build:** the assembly drawn to show how
+  it looks and how it fits together — the whole from the front, side, top
+  and at an angle, exploded along its mates, cut through the case, the
+  clearances between parts dimensioned, every part ballooned against the
+  bill of materials (K10). White lines on blue is a way to draw it, not
+  what it is.
+- **"Schematic" meant custom boards:** the small PCBs a compact Mini-ITX
+  build uses to look tidy — power adapters and extensions, fan and RGB
+  hubs, front I/O — designed here, with a schematic as the first step of
+  each (E0–E5).
+- **The order:** all of CAD first — K5 to K13 and E0 to E5. Then the
+  person's PCPartPicker list and their loop's pieces and tubes, modelled
+  into a complete custom loop in the FormD T1 as the last test, the T1's
+  published figures looked up. K14 (simulation, CAM) only if asked.
+
 ## The kernel
 
 A boundary representation: a solid is shells of faces, a face is a surface
@@ -63,9 +80,12 @@ symmetric, with draft), sweep along a path, loft between two profiles of
 the same edge count; union, cut and intersect; holes (simple, counterbored,
 countersunk, tapped, with M2–M8, UNC 6-32 and G1/4 threads as cosmetic
 threads and their tap drills); linear, circular and mirrored patterns;
-shell; constant-radius fillets and chamfers where the faces either side are
-analytic (plane–plane, plane–cylinder, cylinder–cylinder at right angles),
-and refused with the reason elsewhere; sheet metal (K12).
+shell; constant-radius fillets and chamfers where they come out as one of
+the kernel's surfaces — along a straight edge between faces running its way
+(planes, cylinders along it), a cylinder or a plane; along a round edge
+between faces turned about its axis, a torus or a cone — with mitred,
+smooth and ball-cornered ends, and refused with the reason elsewhere (two
+pipes in a tee); sheet metal (K12).
 
 **Robustness** is the hard part of any kernel, and is designed for, not
 hoped for: one tolerance (10⁻⁶ mm in a part of a metre), predicates that
@@ -99,7 +119,7 @@ end
 
 extrude plate from base distance t
 hole m3 on plate.top at h1.center, h2.center thread M3 through
-fillet plate.edges(parallel z) radius 2
+fillet corners on plate.edges(parallel z) radius 2
 ```
 
 A statement a line; `#` starts a comment, kept with the file. In a sketch a
@@ -139,10 +159,24 @@ kept for drawings. `pattern NAME of F, F … linear (x, y, z) count N` or
 bodies they were made into; `mirror NAME of F, F … about PLANE` makes them
 again mirrored in `XY`, `XZ`, `YZ` or a flat face. `union BODY with OTHER`,
 `cut BODY with OTHER` and `intersect BODY with OTHER` make two bodies one.
-Faces are named for what made them: an extrude's `NAME.top` and
+`fillet NAME on EDGES radius R` rounds edges and `chamfer NAME on EDGES
+distance D [and D2]` cuts them flat, the second distance along the second
+face; an edge is named by its two faces, `plate.top & plate.side(r.left)`,
+or picked among a body's or a face's, `plate.edges(parallel z)`,
+`boss.top.edges(convex, round)` (`parallel x|y|z`, `convex`, `concave`,
+`round`, `straight`), seams and smooth joins left out. `shell NAME of BODY
+thickness T [open FACE, FACE …]` hollows a body to walls that thick, the
+faces named taken away. `sweep NAME from SKETCH along PATH` carries a
+profile along a sketch's lines and arcs, end to end and turning only on
+arcs, the profile standing square to the path where it starts; `loft NAME
+from SKETCH to SKETCH` joins two profiles of as many edges in parallel
+planes. Faces are named for what made them: an extrude's `NAME.top` and
 `NAME.bottom`, a revolve's `NAME.start` and `NAME.end`, each side
 `NAME.side(r.left)` after the shape that swept it, a hole's walls
-`NAME.side(wall1)`; a face keeps its name through every boolean, so a sketch
+`NAME.side(wall1)`, a sweep's or loft's ends `NAME.start` and `NAME.end`, a
+round's and a chamfer's faces `NAME` (a ball at a corner `NAME.corner`), a
+shell's inside `NAME.inside(FACE)` and the sides of its openings
+`NAME.rim`; a face keeps its name through every boolean, so a sketch
 or a hole placed on it finds it after an edit, and one that is gone is said
 to be, with why.
 
@@ -197,8 +231,12 @@ isometric views, sections, details; hidden lines worked out from the exact
 geometry, so a hole's silhouette is a line where the cylinder turns away.
 Dimensions (linear, radial, diameter, angular, ordinate) attached to the
 geometry and moved with it; centre marks, thread notes, a title block, a
-bill of materials with balloons for an assembly. **Blueprint** is a style:
-white lines on blue. Out as PDF, SVG and DXF.
+bill of materials with balloons for an assembly. **The blueprint** of an
+assembly is a sheet laid out for it: the build from four sides and at an
+angle, an exploded view, a section through the case, the clearances that
+matter dimensioned (a card to a panel, a radiator to a fan, a tube to
+anything), and the parts ballooned and listed — on paper or white on blue.
+Out as PDF, SVG and DXF.
 
 ## Electronics
 
@@ -208,7 +246,13 @@ white lines on blue. Out as PDF, SVG and DXF.
   left unconnected).
 - **Footprints,** generated from IPC-7351 nominal land patterns: chip
   resistors and capacitors 0402–2512, SOT, SOIC, TSSOP, QFP, QFN,
-  through-hole headers, USB-C, and fan and RGB headers.
+  through-hole headers, USB-C, and fan and RGB headers — and the PC's own
+  connectors, for the boards compact builds use: ATX 24-pin, EPS 8-pin,
+  PCIe 6+2-pin, 12V-2×6, SATA power, 4-pin fan, 3-pin 5 V ARGB, and the
+  USB 2.0, USB 3 and USB-C front-panel headers.
+- **Current:** a net says what it carries (a 12V-2×6 adapter carries up to
+  50 A), and its tracks and zones are checked for width against IPC-2152
+  for the copper weight and the rise in temperature allowed.
 - **The board:** its outline drawn, or taken from a sketch of a part so it
   fits the case; two or four layers; placement, a ratsnest, tracks and vias
   routed by hand with clearances kept as they are drawn, zones poured with
@@ -251,8 +295,9 @@ hand.
 
 ## Milestones
 
-Each lands with its tests passing, in this order: the parts and the build
-first (K0–K11), then the electronics (E0–E5), then what is left (K12–K14).
+Each lands with its tests passing, in this order: the parts (K0–K11), the
+electronics (E0–E5), sheet metal and files read in (K12–K13); then the
+person's build as the last test. K14 only if asked.
 
 **Built** (2026-11-07): K0 — `crates/proton-cad`, with no dependencies: points,
 directions and boxes; frames and rigid motions; one tolerance (10⁻⁶ mm,
@@ -444,6 +489,55 @@ ball grazing a tube's wall, two curves a micrometre apart — leaves a few
 triangles unmatched. Measured (release): 49 holes patterned through a plate
 and a boss joined, 0.71 s.
 
+K5 — rounds, chamfers, shells, sweeps and lofts. A round is built on the
+solid, not by booleans: in the plane across an edge each face is a line or
+a circle, the ball's centre runs where both faces moved its radius meet (a
+line or a circle: the spine), and where it touches them are the rails,
+which take the edge's place; a chamfer's rails are walked a distance over
+each face. Then each end: one edge at a corner of three faces runs its
+rails on to the corner's other edges — cut back at a ridge, lengthened at a
+valley — and bounds the third face by where the round meets it; two edges
+at an angle are mitred where their rounds cross; two running on smoothly
+(a line into an arc, a hole's rim into itself) share the ball's circle;
+three edges of three planes get a piece of the ball, put on the sphere's
+equator so no pole or seam is in it. A shell moves every face in (a plane
+moved, a cylinder, sphere or torus's tube shrunk, a cone along its axis),
+each edge to where its moved faces meet — moved with them where they meet
+smoothly — and each vertex to where its edges meet, and cuts that from the
+solid; a flat face taken away on its own is opened by a prism on the
+inside's copy of it carried out through the wall, so a rounded box's rim
+stands square, and faces taken away side by side are moved out with the
+inside. A sweep is an extrude for each straight step of its path and a
+revolve about each arc's axis — which lies in the profile's plane, the
+profile standing square to the arc — joined where one ends and the next
+starts, the two caps that lie on one another taken out; a path in space,
+bending every way, sweeps as one in the plane does. A loft finds which edge
+of one profile meets which of the other by turning one loop until every
+pair is flat or about one axis, and builds planes and cones between them.
+Tools that do not touch one another — a pattern's holes — are now made one
+solid and cut at once. In the window an edge is found under the pointer
+before a face (the nearest within six pixels with no face in front of it),
+named by its faces, and picked to round or chamfer; a round's settings take
+its edges, one a line, and an edge clicked is added to the round chosen; a
+face clicked opens or closes a shell chosen. Tested (14): one edge, a box's
+top mitred, every edge of a box rounded (against Steiner's formula, volume
+and area), rounded corners and then a rounded top run on smoothly, a hole's
+rim and a boss's foot (Pappus), chamfers of one and two distances, mitred,
+and round a hole's rim; a tee, a round wider than its face, a smooth join,
+three chamfers at a corner, nothing picked and a fillet patterned each
+refused saying why; trays, closed shells (a void of its own), rounded boxes
+shelled closed and open at their top; a tube along a bent path and a ring
+round a closed one (Pappus), a sharp corner refused; a pyramid's and a
+cone's frustums lofted, a square to a circle refused; an M3 hole's rim, an
+L's inside corner, a hole through a round, two rounded blocks joined; and
+at random, 120 boxes turned any way with half their edges rounded or
+chamfered (every vertex's case, against the edges' sections less their
+corners), 30 tubes bent every way in space, and 30 boxes shelled with faces
+open at random — every one within 10⁻⁶ of its formula. Measured (release):
+a box rounded all over 1.2 ms, and shelled open 26 ms; 64 holes patterned
+113 ms (1.66 s a hole at a time), their 64 rims rounded 42 ms more; a tube
+with two bends 7.7 ms.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |
@@ -470,13 +564,11 @@ and a boss joined, 0.71 s.
 
 ## Open
 
-- **The FormD T1's figures.** Which version (2.1 is assumed), and the
-  person's measurements where FormD publishes none.
-- **The parts in the build:** which motherboard, card, radiator, pump and
-  fittings, so their parts are made to their sizes first.
-- **Whether electronics should come before the build is finished**, if a
-  board for the case (a fan or lighting controller, front I/O) is wanted
-  sooner.
+- **The FormD T1's figures** are looked up from what FormD publishes when
+  the build is made (2.1 assumed until then); the person measures where
+  nothing is published.
+- **The parts in the build** come as a PCPartPicker list with the loop's
+  pieces and tubes, after CAD is finished.
 - **Splines in profiles** are refused (K2): extruded or turned, a spline
   sweeps a surface of linear extrusion or of revolution, which the five
   analytic surfaces do not include. They can be added as two exact swept
@@ -485,8 +577,15 @@ and a boss joined, 0.71 s.
   ball grazing a cylinder — leave slivers whose triangles can fail to match
   (1 in 200 random pairs). A boolean that cannot be made says so and leaves
   the part as it was.
-- **Each hole is its own boolean**, so a pattern of n holes costs about n
-  times one (0.71 s for 49). Cutting a pattern's tools together would be
-  faster, if it is wanted.
+- **Rounds and chamfers meeting four or more to a corner**, rounds of two
+  sizes meeting, three chamfers at a corner, and a round next to a fitted
+  curve are refused, naming the corner. An edge is named by its two faces,
+  so where a boolean has left two edges between the same two faces,
+  picking one picks both.
+- **A shell's corners are of three faces**; walls thicker than a face is
+  wide, or than a round is curved, are refused. A curved face taken away
+  that meets its neighbours smoothly is refused too.
+- **Lofts** are between one-region profiles without holes, every face flat
+  or about one axis.
 - **3MF is stored, not compressed**: about 60 bytes a point and 45 a
   triangle. A deflate of Proton's own would make it a fifth of that.

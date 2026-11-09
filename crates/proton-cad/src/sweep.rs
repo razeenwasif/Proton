@@ -12,6 +12,7 @@
 //! beside it (a cone's apex, a sphere's), and an edge along the axis
 //! sweeps nothing.
 
+use std::collections::HashMap;
 use std::f64::consts::TAU;
 
 use crate::brep::{Coedge, Solid};
@@ -334,4 +335,225 @@ impl Sweep<'_> {
         s.shells_by_connection();
         Ok(s)
     }
+}
+
+/* ── along a path ──────────────────────────────────────────────────── */
+
+/// A piece of a path: a straight run, or an arc turned about an axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Step {
+    Line { a: Vec3, b: Vec3 },
+    /// From `start`, `angle` radians (more than none) about the line through
+    /// `center` along the unit `axis`, anticlockwise looking down it.
+    Arc { center: Vec3, axis: Vec3, start: Vec3, angle: f64 },
+}
+
+impl Step {
+    pub fn start(&self) -> Vec3 {
+        match *self {
+            Step::Line { a, .. } => a,
+            Step::Arc { start, .. } => start,
+        }
+    }
+
+    pub fn end(&self) -> Vec3 {
+        match *self {
+            Step::Line { b, .. } => b,
+            Step::Arc { center, axis, start, angle } => Transform::rotation(center, axis, angle).apply_point(start),
+        }
+    }
+
+    /// The way it runs at its start (`at_end` false) or its end.
+    pub fn tangent(&self, at_end: bool) -> Vec3 {
+        match *self {
+            Step::Line { a, b } => (b - a).unit_or(Vec3::X),
+            Step::Arc { center, axis, .. } => {
+                let p = if at_end { self.end() } else { self.start() };
+                axis.cross(p - center).unit_or(Vec3::X)
+            }
+        }
+    }
+
+    pub fn length(&self) -> f64 {
+        match *self {
+            Step::Line { a, b } => a.distance(b),
+            Step::Arc { center, axis, start, angle } => {
+                let w = start - center;
+                (w - axis * w.dot(axis)).length() * angle
+            }
+        }
+    }
+
+    pub fn transformed(&self, t: &Transform) -> Step {
+        match *self {
+            Step::Line { a, b } => Step::Line { a: t.apply_point(a), b: t.apply_point(b) },
+            Step::Arc { center, axis, start, angle } => Step::Arc { center: t.apply_point(center), axis: t.apply_vec(axis), start: t.apply_point(start), angle },
+        }
+    }
+
+    /// Mirrored in the plane through `origin` with unit normal `n`: an arc
+    /// turns the other way about the mirrored axis, so about its reverse.
+    pub fn mirrored(&self, origin: Vec3, n: Vec3) -> Step {
+        let point = |p: Vec3| p - n * (2.0 * (p - origin).dot(n));
+        let dir = |v: Vec3| v - n * (2.0 * v.dot(n));
+        match *self {
+            Step::Line { a, b } => Step::Line { a: point(a), b: point(b) },
+            Step::Arc { center, axis, start, angle } => Step::Arc { center: point(center), axis: -dir(axis), start: point(start), angle },
+        }
+    }
+}
+
+/// The profile in `frame` carried along `path`, standing square to it: a
+/// straight step is an extrude, an arc a revolve about its axis — which
+/// lies in the profile's plane, the profile standing square to the arc —
+/// and the pieces are joined where one ends and the next starts. A path
+/// that comes back to its start closes on itself.
+pub fn along(profile: &Profile, frame: &Frame, path: &[Step], name: &str) -> Result<Solid, String> {
+    let first = path.first().ok_or("a sweep needs a path")?;
+    if frame.z.cross(first.tangent(false)).length() > 1e-6 {
+        return Err("the profile must stand square to the path where it starts: its sketch's plane is not across the path there".into());
+    }
+    if (first.start() - frame.origin).dot(frame.z).abs() > 10.0 * tol::LINEAR {
+        return Err("the path must start in the profile's plane".into());
+    }
+    for w in path.windows(2) {
+        if w[0].end().distance(w[1].start()) > 10.0 * tol::LINEAR {
+            return Err("the path's pieces do not join end to end".into());
+        }
+        if w[0].tangent(true).dot(w[1].tangent(false)) < 1.0 - 1e-9 {
+            let p = w[0].end();
+            return Err(format!("the path turns sharply at ({:.3}, {:.3}, {:.3}): a sweep goes round a corner on an arc", p.x, p.y, p.z));
+        }
+    }
+    let mut f = *frame;
+    let mut out: Option<Solid> = None;
+    for step in path {
+        let piece = match *step {
+            Step::Line { a, b } => {
+                let d = b - a;
+                let len = d.length();
+                let s = if d.dot(f.z) > 0.0 { extrude(profile, &f, 0.0, len, name)? } else { extrude(profile, &f, -len, 0.0, name)? };
+                f.origin += d;
+                s
+            }
+            Step::Arc { center, axis, angle, .. } => {
+                let (a0, a1) = (f.to_local(center), f.to_local(center + axis));
+                if a0.z.abs() > 10.0 * tol::LINEAR || a1.z.abs() > 10.0 * tol::LINEAR {
+                    return Err("an arc of the path is not square to the profile".into());
+                }
+                let s = revolve(profile, &f, (Vec2::new(a0.x, a0.y), Vec2::new(a1.x, a1.y)), angle, name).map_err(|e| format!("the profile cannot go round a bend of the path: {e}"))?;
+                f = f.transformed(&Transform::rotation(center, axis, angle));
+                s
+            }
+        };
+        out = Some(match out {
+            None => piece,
+            Some(mut s) => {
+                s.merge(piece);
+                close_caps(s)?
+            }
+        });
+    }
+    let mut s = out.expect("a step");
+    let start = (first.start(), first.tangent(false));
+    let last = path.last().expect("a step");
+    let end = (last.end(), last.tangent(true));
+    for face in &mut s.faces {
+        if let Surface::Plane(p) = face.surface {
+            let n = if face.reversed { -p.frame.z } else { p.frame.z };
+            let on = |(q, t): (Vec3, Vec3)| (q - p.frame.origin).dot(p.frame.z).abs() <= 10.0 * tol::LINEAR && n.cross(t).length() <= 1e-6;
+            if face.name.ends_with(".top") || face.name.ends_with(".bottom") || face.name.ends_with(".start") || face.name.ends_with(".end") {
+                if on(start) {
+                    face.name = format!("{name}.start");
+                } else if on(end) {
+                    face.name = format!("{name}.end");
+                }
+            }
+        }
+    }
+    Ok(s)
+}
+
+/// Pairs of flat faces lying on one another, facing each other, with the
+/// same corners — where one piece of a sweep ends and the next starts, or
+/// a closed path comes round — taken out, their edges and vertices made
+/// one.
+pub fn close_caps(mut s: Solid) -> Result<Solid, String> {
+    let near = |a: Vec3, b: Vec3| a.distance(b) <= 10.0 * tol::LINEAR;
+    loop {
+        let corners = |s: &Solid, f: usize| -> Vec<usize> {
+            let mut v: Vec<usize> = s.faces[f].loops.iter().flatten().flat_map(|c| [s.edges[c.edge].start, s.edges[c.edge].end]).collect();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+        let mut found = None;
+        'search: for i in 0..s.faces.len() {
+            for j in i + 1..s.faces.len() {
+                let (a, b) = (&s.faces[i], &s.faces[j]);
+                let (Surface::Plane(pa), Surface::Plane(pb)) = (a.surface, b.surface) else { continue };
+                if !crate::intersect::same(&a.surface, &b.surface) {
+                    continue;
+                }
+                let na = if a.reversed { -pa.frame.z } else { pa.frame.z };
+                let nb = if b.reversed { -pb.frame.z } else { pb.frame.z };
+                if na.dot(nb) > -0.5 {
+                    continue;
+                }
+                let (va, vb) = (corners(&s, i), corners(&s, j));
+                if va.len() != vb.len() || !vb.iter().all(|&y| va.iter().any(|&x| near(s.vertices[x].point, s.vertices[y].point))) {
+                    continue;
+                }
+                found = Some((i, j, va, vb));
+                break 'search;
+            }
+        }
+        let Some((i, j, va, vb)) = found else { break };
+        // The second face's vertices and edges become the first's.
+        let mut vmap: Vec<usize> = (0..s.vertices.len()).collect();
+        for &y in &vb {
+            let x = *va.iter().find(|&&x| near(s.vertices[x].point, s.vertices[y].point)).expect("matched");
+            vmap[y] = x;
+        }
+        let edges_of = |s: &Solid, f: usize| -> Vec<usize> { s.faces[f].loops.iter().flatten().map(|c| c.edge).collect() };
+        let (ea, eb) = (edges_of(&s, i), edges_of(&s, j));
+        let mut emap: HashMap<usize, (usize, bool)> = HashMap::new();
+        for &y in &eb {
+            let (ys, ye) = (vmap[s.edges[y].start], vmap[s.edges[y].end]);
+            let ym = s.edges[y].point(0.5 * (s.edges[y].t0 + s.edges[y].t1));
+            let hit = ea.iter().copied().find(|&x| {
+                let e = &s.edges[x];
+                let mid_on = e.curve.distance(ym) <= 10.0 * tol::LINEAR;
+                mid_on && ((e.start == ys && e.end == ye) || (e.start == ye && e.end == ys))
+            });
+            let Some(x) = hit else { return Err("the pieces of the sweep do not meet edge to edge".into()) };
+            emap.insert(y, (x, s.edges[x].start == ys && s.edges[x].end == ye && !(ys == ye && s.edges[x].curve.tangent(s.edges[x].t0).dot(s.edges[y].curve.tangent(s.edges[y].t0)) < 0.0)));
+        }
+        for e in &mut s.edges {
+            e.start = vmap[e.start];
+            e.end = vmap[e.end];
+        }
+        for (k, face) in s.faces.iter_mut().enumerate() {
+            if k == i || k == j {
+                continue;
+            }
+            for c in face.loops.iter_mut().flatten() {
+                if let Some(&(x, same)) = emap.get(&c.edge) {
+                    c.edge = x;
+                    if !same {
+                        c.forward = !c.forward;
+                    }
+                }
+            }
+        }
+        let (hi, lo) = (i.max(j), i.min(j));
+        s.faces.remove(hi);
+        s.faces.remove(lo);
+        s.prune();
+    }
+    s.shells_by_connection();
+    if let Some(p) = crate::brep::check::check(&s).first() {
+        return Err(format!("the sweep is not a valid solid: {p}"));
+    }
+    Ok(s)
 }

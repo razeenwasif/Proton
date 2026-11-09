@@ -4152,4 +4152,7 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cd-line { width: 100%; box-sizing: border-box; margin: 4px 0; padding: 6px 8px; border: 1px solid var(--xl-line); border-radius: 5px; background: var(--xl-head);
   color: var(--text); font: var(--z-xs)/1.45 var(--mono, ui-monospace, monospace); resize: vertical; outline: none; }
 .cd-line:focus { border-color: var(--accent); }
+.cd-picks { margin: 4px 0 8px; padding: 0; list-style: none; font: var(--z-xs)/1.5 var(--mono, ui-monospace, monospace); color: var(--muted); max-height: 9em; overflow: auto; }
+.cd-picks li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-card code { font: var(--z-xs) var(--mono, ui-monospace, monospace); }
 .cd-field select:disabled, .cd-field input:disabled { opacity: .5; }

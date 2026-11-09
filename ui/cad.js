@@ -31,7 +31,24 @@ export const stepText = {
   /** @param {string} name @param {string} sketch @param {string} axis @param {string} [angle] @param {string} [how] @param {string} [body] */
   revolve: (name, sketch, axis, angle, how = "", body = "") =>
     `revolve ${name} from ${sketch} about ${axis}${angle?.trim() ? ` angle ${angle.trim()}` : ""}${how && body ? ` ${how} ${body}` : ""}`,
+  /** @param {string} name @param {string[]} edges each as written: `a.top & a.side(r.left)` @param {string} radius */
+  fillet: (name, edges, radius) => `fillet ${name} on ${edges.join(", ")} radius ${radius.trim() || "1"}`,
+  /** @param {string} name @param {string[]} edges @param {string} distance @param {string} [other] the second face's */
+  chamfer: (name, edges, distance, other) => `chamfer ${name} on ${edges.join(", ")} distance ${distance.trim() || "1"}${other?.trim() ? ` and ${other.trim()}` : ""}`,
+  /** @param {string} name @param {string} body @param {string} thickness @param {string[]} [open] faces taken away */
+  shell: (name, body, thickness, open = []) => `shell ${name} of ${body} thickness ${thickness.trim() || "2"}${open.length ? ` open ${open.join(", ")}` : ""}`,
+  /** @param {string} name @param {string} sketch @param {string} path @param {string} [how] @param {string} [body] */
+  sweep: (name, sketch, path, how = "", body = "") => `sweep ${name} from ${sketch} along ${path}${how && body ? ` ${how} ${body}` : ""}`,
+  /** @param {string} name @param {string} from @param {string} to @param {string} [how] @param {string} [body] */
+  loft: (name, from, to, how = "", body = "") => `loft ${name} from ${from} to ${to}${how && body ? ` ${how} ${body}` : ""}`,
 };
+
+/** A list of names as typed: one a line, blank lines left out. @param {string} text */
+export const lines = (text) => text.split("\n").map((x) => x.trim()).filter(Boolean);
+
+/** A pick taken out of a list if it is in it, put in if not.
+ *  @param {string[]} list @param {string} x */
+export const toggled = (list, x) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
 
 /** A face a sketch or a hole can be put on by name: an extrude's or a
  *  revolve's cap, or a side named for the shape that swept it. @param {string} name */
@@ -64,6 +81,13 @@ function summary(s) {
   if (s.kind === "extrude") return `${s.sketch} · ${s.through ? "through" : s.distance}${s.symmetric ? " each way" : ""}${into}`;
   if (s.kind === "revolve") return `${s.sketch} · about ${s.axis}${s.angle ? ` · ${s.angle}°` : ""}${into}`;
   if (s.kind === "hole") return `on ${s.on}`;
+  // A pick by a body's or face's edges reads as it is; two faces' edges count.
+  const n = (/** @type {number} */ k) => (k === 1 && s.edges[0]?.includes(".edges") ? s.edges[0] : `${k} edge${k === 1 ? "" : "s"}`);
+  if (s.kind === "fillet") return `${n(s.edges.length)} · r ${s.value}`;
+  if (s.kind === "chamfer") return `${n(s.edges.length)} · ${s.value}${s.other ? ` × ${s.other}` : ""}`;
+  if (s.kind === "shell") return `${s.body} · ${s.value} thick${s.open.length ? ` · ${s.open.length} open` : ""}`;
+  if (s.kind === "sweep") return `${s.sketch} along ${s.path}${into}`;
+  if (s.kind === "loft") return `${s.sketch} to ${s.path}${into}`;
   if (["union", "cut", "intersect"].includes(s.kind)) return `with ${s.body}`;
   return s.note ?? "";
 }
@@ -111,6 +135,8 @@ export function createCad(host) {
     /** A step just added, chosen when it comes back; a sketch, opened. @type {{name: string, open: boolean} | null} */ want: null,
     /** The part last fitted in view. */ fitted: 0,
     /** Why there is no 3D view, if there is none. @type {string | null} */ noView: null,
+    /** Edges picked in the view to round or chamfer, by body and name. @type {{body: string, pick: string}[]} */ edges: [],
+    /** The radius or distance they get. */ edgeSize: "1",
   };
   /** @type {Awaited<ReturnType<typeof import("./cad-view.js").mountView>> | null} */
   let view = null;
@@ -164,7 +190,7 @@ export function createCad(host) {
     const steps = p.steps
       .map((s) => {
         const mark = s.error ? `<i class="cd-bad" title="${esc(s.error)}">!</i>` : s.note ? `<i class="cd-later" title="${esc(s.note)}">·</i>` : "";
-        const kind = /** @type {Record<string, string>} */ ({ sketch: "sketch", revolve: "revolve", extrude: "extrude", hole: "hole", pattern: "pattern", mirror: "mirror", union: "extrude", cut: "extrude", intersect: "extrude" })[s.kind] ?? "file";
+        const kind = /** @type {Record<string, string>} */ ({ sketch: "sketch", revolve: "revolve", extrude: "extrude", hole: "hole", pattern: "pattern", mirror: "mirror", union: "extrude", cut: "extrude", intersect: "extrude", fillet: "fillet", chamfer: "chamfer", shell: "shell", sweep: "sweep", loft: "loft" })[s.kind] ?? "file";
         return `<button class="cd-row${s.index === state.step ? " on" : ""}${s.error ? " bad" : ""}${s.note ? " later" : ""}${s.index === state.sketching ? " drawing" : ""}" data-cad-step="${s.index}" title="${esc(s.error ?? s.note ?? s.text)}">${icon(kind)}<span class="cd-row-name">${esc(s.name || s.kind)}</span><span class="cd-row-what">${esc(summary(s))}</span>${mark}</button>`;
       })
       .join("");
@@ -193,6 +219,13 @@ export function createCad(host) {
           ? `<div class="cd-row-btns"><button class="cd-btn" data-cad-sketch-on="${esc(face.name)}">Sketch on this face</button>${at ? `<button class="cd-btn" data-cad-hole-at>Hole here</button>` : ""}</div>`
           : face.plane ? `<p class="cd-muted">A flat face not named for what made it: sketch on a cap or a side instead.</p>` : "") +
         `</section>`;
+    }
+    if (state.edges.length && (!s || (s.kind !== "fillet" && s.kind !== "chamfer"))) {
+      html += `<section class="cd-card" data-cad-edges><div class="cd-head">${state.edges.length} edge${state.edges.length === 1 ? "" : "s"} picked</div>` +
+        `<ul class="cd-picks">${state.edges.map((e) => `<li>${esc(e.pick)}</li>`).join("")}</ul>` +
+        field("Size", `<input data-cad-edge-size value="${esc(state.edgeSize)}" aria-label="Radius or distance">`) +
+        `<div class="cd-row-btns"><button class="cd-btn" data-cad-round>Round</button><button class="cd-btn" data-cad-chamfer>Chamfer</button><button class="cd-btn quiet" data-cad-unpick-edges>Clear</button></div>` +
+        `<p class="cd-muted">Click more edges in the view to add them, or one picked to take it out.</p></section>`;
     }
     if (!s) {
       const bodies = p.bodies.map((b) => `<li><span>${esc(b.name)}</span><span class="cd-muted">${volumeText(b.volume)} · ${(b.area / 100).toFixed(2)} cm²</span></li>`).join("");
@@ -244,6 +277,31 @@ export function createCad(host) {
         field("Angle", `<input data-cad-f="angle" value="${esc(s.angle ?? "")}" placeholder="360" aria-label="Angle">`) +
         ops + err + (body ? `<p class="cd-muted">${volumeText(body.volume)}</p>` : "") +
         `<div class="cd-row-btns"><button class="cd-btn quiet" data-cad-remove="${s.index}">Delete</button></div></section>`;
+    } else if (s.kind === "fillet" || s.kind === "chamfer") {
+      const round = s.kind === "fillet";
+      html += `<section class="cd-card"><div class="cd-head">${round ? "Round" : "Chamfer"}</div>${named}` +
+        field("Edges", `<textarea class="cd-line" data-cad-f="edges" rows="${Math.max(2, s.edges.length)}" spellcheck="false" aria-label="Edges, one a line">${esc(s.edges.join("\n"))}</textarea>`) +
+        field(round ? "Radius" : "Distance", `<input data-cad-f="value" value="${esc(s.value ?? "")}" aria-label="${round ? "Radius" : "Distance"}">`) +
+        (round ? "" : field("Second face", `<input data-cad-f="other" value="${esc(s.other ?? "")}" placeholder="the same" aria-label="Distance along the second face">`)) +
+        err + `<p class="cd-muted">Click an edge in the view to add it, or one listed to take it out. Each is its two faces, or a body's or face's <code>.edges</code>, with <code>(parallel z)</code>, <code>(convex)</code>, <code>(concave)</code>, <code>(round)</code> or <code>(straight)</code> to pick among them.</p>` +
+        `<div class="cd-row-btns"><button class="cd-btn quiet" data-cad-remove="${s.index}">Delete</button></div></section>`;
+    } else if (s.kind === "shell") {
+      const all = [...new Set([...earlier.filter((x) => (x.kind === "extrude" || x.kind === "revolve" || x.kind === "sweep" || x.kind === "loft") && !x.how).map((x) => x.name), ...(s.body ? [s.body] : [])])];
+      html += `<section class="cd-card"><div class="cd-head">Shell</div>${named}` +
+        field("Body", `<select data-cad-f="body" aria-label="Body">${options(all, s.body)}</select>`) +
+        field("Thickness", `<input data-cad-f="value" value="${esc(s.value ?? "")}" aria-label="Wall thickness">`) +
+        field("Open faces", `<textarea class="cd-line" data-cad-f="open" rows="${Math.max(2, s.open.length)}" spellcheck="false" aria-label="Faces taken away, one a line">${esc(s.open.join("\n"))}</textarea>`) +
+        err + `<p class="cd-muted">Click a face in the view to open it, or again to close it.</p>` +
+        `<div class="cd-row-btns"><button class="cd-btn quiet" data-cad-remove="${s.index}">Delete</button></div></section>`;
+    } else if (s.kind === "sweep" || s.kind === "loft") {
+      const sweep = s.kind === "sweep";
+      const body = p.bodies.find((b) => b.name === s.name);
+      html += `<section class="cd-card"><div class="cd-head">${sweep ? "Sweep" : "Loft"}</div>${named}` +
+        field(sweep ? "Profile" : "From", `<select data-cad-f="sketch" aria-label="${sweep ? "Profile" : "From"}">${options([...new Set([...sketches, s.sketch ?? ""])], s.sketch)}</select>`) +
+        field(sweep ? "Along" : "To", `<select data-cad-f="path" aria-label="${sweep ? "Path" : "To"}">${options([...new Set([...sketches, s.path ?? ""])], s.path)}</select>`) +
+        ops + err + (body ? `<p class="cd-muted">${volumeText(body.volume)}</p>` : "") +
+        `<p class="cd-muted">${sweep ? "The profile stands square to the path where it starts; the path is lines and arcs end to end, turning on arcs." : "Two profiles with as many edges each, in parallel planes: lines to lines, arcs and circles to ones above them."}</p>` +
+        `<div class="cd-row-btns"><button class="cd-btn quiet" data-cad-remove="${s.index}">Delete</button></div></section>`;
     } else {
       // Holes, patterns, mirrors and the rest: their line, to edit as it is.
       const what = /** @type {Record<string, string>} */ ({ hole: "Hole", pattern: "Pattern", mirror: "Mirror", union: "Union", cut: "Cut", intersect: "Intersect" })[s.kind] ?? s.kind;
@@ -261,15 +319,22 @@ export function createCad(host) {
     const v = (/** @type {string} */ k) => /** @type {HTMLInputElement | null} */ (els.step.querySelector(`[data-cad-f="${k}"]`));
     const name = v("name")?.value.trim() || s.name;
     let text = "";
+    const made = (/** @type {Step} */ x) => (x.kind === "extrude" || x.kind === "revolve" || x.kind === "sweep" || x.kind === "loft") && !x.how;
     if (s.kind === "sketch") text = stepText.sketch(name, v("on")?.value ?? s.on ?? "XY", v("offset")?.value);
-    else if (s.kind === "extrude" || s.kind === "revolve") {
+    else if (s.kind === "extrude" || s.kind === "revolve" || s.kind === "sweep" || s.kind === "loft") {
       const how = v("how")?.value ?? s.how ?? "";
       // A body to be made into: the one chosen, or the first there is.
-      const body = how ? v("body")?.value || s.body || p.steps.find((x) => x.index < s.index && (x.kind === "extrude" || x.kind === "revolve") && !x.how)?.name || "" : "";
+      const body = how ? v("body")?.value || s.body || p.steps.find((x) => x.index < s.index && made(x))?.name || "" : "";
+      const sketch = v("sketch")?.value ?? s.sketch ?? "";
       text = s.kind === "extrude"
-        ? stepText.extrude(name, v("sketch")?.value ?? s.sketch ?? "", v("distance")?.value ?? s.distance ?? "10", !!v("symmetric")?.checked, !!v("through")?.checked, how, body)
-        : stepText.revolve(name, v("sketch")?.value ?? s.sketch ?? "", v("axis")?.value ?? s.axis ?? "yaxis", v("angle")?.value, how, body);
-    } else text = v("line")?.value.trim().replace(/\s*\n\s*/g, " ") ?? "";
+        ? stepText.extrude(name, sketch, v("distance")?.value ?? s.distance ?? "10", !!v("symmetric")?.checked, !!v("through")?.checked, how, body)
+        : s.kind === "revolve"
+          ? stepText.revolve(name, sketch, v("axis")?.value ?? s.axis ?? "yaxis", v("angle")?.value, how, body)
+          : stepText[s.kind](name, sketch, v("path")?.value ?? s.path ?? "", how, body);
+    } else if (s.kind === "fillet") text = stepText.fillet(name, lines(v("edges")?.value ?? s.edges.join("\n")), v("value")?.value ?? s.value ?? "1");
+    else if (s.kind === "chamfer") text = stepText.chamfer(name, lines(v("edges")?.value ?? s.edges.join("\n")), v("value")?.value ?? s.value ?? "1", v("other")?.value);
+    else if (s.kind === "shell") text = stepText.shell(name, v("body")?.value ?? s.body ?? "", v("value")?.value ?? s.value ?? "2", lines(v("open")?.value ?? s.open.join("\n")));
+    else text = v("line")?.value.trim().replace(/\s*\n\s*/g, " ") ?? "";
     if (text && text !== s.text) edit([{ op: "replace", index: s.index, text }]);
     void t;
   }
@@ -317,12 +382,8 @@ export function createCad(host) {
           hover: (name) => {
             if (state.sketching == null) status(name ? `${name}  — click to choose it` : "");
           },
-          pick: (body, face, point) => {
-            const f = body == null || face == null ? null : state.part?.bodies.find((b) => b.name === body)?.faces[face];
-            const at = f?.plane && point ? onFace(f.plane, point, unitScale(state.part?.units ?? "mm")) : undefined;
-            state.face = body == null || face == null ? null : { body, face, at };
-            renderStep();
-          },
+          pick: (body, face, point) => pickFace(body, face, point),
+          pickEdge: (body, edge) => pickEdge(body, edge),
         });
         if (!view) state.noView = "This window has no WebGL, so the part cannot be drawn in 3D here. Its steps, settings and text work as ever.";
       } catch (e) {
@@ -332,6 +393,21 @@ export function createCad(host) {
       renderStage();
     })();
     await viewing;
+  }
+
+  /** A face clicked in the view, or nothing: chosen, or for a shell chosen
+   *  opened or closed again. @param {string | null} body @param {number | null} face @param {number[] | null} point */
+  function pickFace(body, face, point) {
+    const f = body == null || face == null ? null : state.part?.bodies.find((b) => b.name === body)?.faces[face];
+    const chosen = state.part?.steps.find((x) => x.index === state.step);
+    // A shell chosen: the face opened, or closed again.
+    if (chosen?.kind === "shell" && f) {
+      const text = stepText.shell(chosen.name, chosen.body ?? "", chosen.value ?? "2", toggled(chosen.open, f.name));
+      return edit([{ op: "replace", index: chosen.index, text }]);
+    }
+    const at = f?.plane && point ? onFace(f.plane, point, unitScale(state.part?.units ?? "mm")) : undefined;
+    state.face = body == null || face == null ? null : { body, face, at };
+    renderStep();
   }
 
   function renderStage() {
@@ -345,7 +421,13 @@ export function createCad(host) {
       return;
     }
     if (view) {
-      view.show(p, { sketch: p.steps.find((s) => s.index === state.step && s.kind === "sketch")?.index ?? null });
+      const chosen = p.steps.find((s) => s.index === state.step);
+      view.show(p, {
+        sketch: chosen?.kind === "sketch" ? chosen.index : null,
+        edges: markedEdges(),
+        // A round's, chamfer's or shell's faces, shown as its.
+        faces: chosen && ["fillet", "chamfer"].includes(chosen.kind) ? [chosen.name, `${chosen.name}.corner`] : [],
+      });
       if (state.fitted !== p.generation) {
         state.fitted = p.generation;
         view.fit(p.bounds);
@@ -370,6 +452,46 @@ export function createCad(host) {
     renderStage();
   }
 
+  /** The edges picked, as the view finds them in the part now: by body and
+   *  edge, from their names. @returns {[string, number][]} */
+  function markedEdges() {
+    const p = state.part;
+    if (!p) return [];
+    /** @type {[string, number][]} */
+    const out = [];
+    for (const e of state.edges) {
+      const b = p.bodies.find((x) => x.name === e.body);
+      b?.edgePicks.forEach((x, i) => {
+        if (x === e.pick) out.push([b.name, i]);
+      });
+    }
+    return out;
+  }
+
+  /** An edge clicked in the view: added to the round or chamfer chosen, or
+   *  to the edges picked for one, or taken out if it is there.
+   *  @param {string} body @param {number} edge */
+  function pickEdge(body, edge) {
+    const p = state.part;
+    const b = p?.bodies.find((x) => x.name === body);
+    const pick = b?.edgePicks[edge];
+    if (!p || !b) return;
+    if (!pick) return status(b.edgeTurns[edge] === "seam" ? "That is a seam, where a face meets itself: there is no corner to round." : "The faces meet smoothly there: there is no corner to round.");
+    const chosen = p.steps.find((x) => x.index === state.step);
+    if (chosen && (chosen.kind === "fillet" || chosen.kind === "chamfer")) {
+      const edges = toggled(chosen.edges, pick);
+      if (!edges.length) return status("A round needs an edge: delete the step to have none.");
+      const text = chosen.kind === "fillet" ? stepText.fillet(chosen.name, edges, chosen.value ?? "1") : stepText.chamfer(chosen.name, edges, chosen.value ?? "1", chosen.other ?? "");
+      return edit([{ op: "replace", index: chosen.index, text }]);
+    }
+    const had = state.edges.findIndex((e) => e.body === body && e.pick === pick);
+    if (had >= 0) state.edges.splice(had, 1);
+    else state.edges.push({ body, pick });
+    state.face = null;
+    renderStep();
+    renderStage();
+  }
+
   /** @param {number} index */
   function enterSketch(index) {
     state.sketching = index;
@@ -388,10 +510,37 @@ export function createCad(host) {
   }
 
   /** A step added, and chosen — a sketch opened — when it comes back.
-   *  @param {"sketch" | "extrude" | "revolve"} kind */
+   *  @param {"sketch" | "extrude" | "revolve" | "fillet" | "chamfer" | "shell" | "sweep" | "loft"} kind */
   function addStep(kind) {
     const p = state.part;
     if (!p) return;
+    if (kind === "fillet" || kind === "chamfer") {
+      if (!state.edges.length) return status(`Click the edges to ${kind === "fillet" ? "round" : "chamfer"} in the view first.`);
+      const name = fresh(kind === "fillet" ? "r" : "c", names());
+      const size = state.edgeSize.trim() || "1";
+      const edges = [...new Set(state.edges.map((e) => e.pick))];
+      state.edges = [];
+      state.want = { name, open: false };
+      return edit([{ op: "insert", at: null, text: kind === "fillet" ? stepText.fillet(name, edges, size) : stepText.chamfer(name, edges, size) }]);
+    }
+    if (kind === "shell") {
+      const body = p.bodies.at(-1)?.name;
+      if (!body) return status("Make a body first: a shell hollows one.");
+      const face = state.face ? p.bodies.find((b) => b.name === state.face?.body)?.faces[state.face.face] : null;
+      const name = fresh("sh", names());
+      state.want = { name, open: false };
+      return edit([{ op: "insert", at: null, text: stepText.shell(name, state.face?.body ?? body, "2", face ? [face.name] : []) }]);
+    }
+    if (kind === "sweep" || kind === "loft") {
+      const sk = p.steps.filter((s) => s.kind === "sketch");
+      if (sk.length < 2) return status(kind === "sweep" ? "Draw a path and a profile across its start first: two sketches." : "Draw two profiles first, in parallel planes.");
+      const chosen = p.steps.find((s) => s.index === state.step && s.kind === "sketch");
+      const last = chosen ?? sk[sk.length - 1];
+      const other = sk.filter((s) => s.index !== last.index).at(-1) ?? sk[0];
+      const name = fresh(kind === "sweep" ? "w" : "l", names());
+      state.want = { name, open: false };
+      return edit([{ op: "insert", at: null, text: kind === "sweep" ? stepText.sweep(name, last.name, other.name) : stepText.loft(name, other.name, last.name) }]);
+    }
     const chosen = p.steps.find((s) => s.index === state.step);
     const sketch = chosen?.kind === "sketch" ? chosen : [...p.steps].reverse().find((s) => s.kind === "sketch");
     if (kind === "sketch") {
@@ -433,10 +582,18 @@ export function createCad(host) {
       const v = step.dataset.cadStep;
       state.step = v === "part" ? null : Number(v);
       state.face = null;
+      state.edges = [];
       view?.unpick();
       if (state.sketching != null && state.step !== state.sketching) leaveSketch();
       else render();
       return;
+    }
+    if (t.closest("[data-cad-round]")) return addStep("fillet");
+    if (t.closest("[data-cad-chamfer]")) return addStep("chamfer");
+    if (t.closest("[data-cad-unpick-edges]")) {
+      state.edges = [];
+      renderStep();
+      return renderStage();
     }
     const add = /** @type {HTMLElement | null} */ (t.closest("[data-cad-add]"));
     if (add?.dataset.cadAdd === "hole") {
@@ -506,6 +663,7 @@ export function createCad(host) {
   ws.addEventListener("change", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
     if (t.matches("[data-cad-f]")) changed(t);
+    if (t.matches("[data-cad-edge-size]")) state.edgeSize = /** @type {HTMLInputElement} */ (t).value;
     if (t.matches("[data-cad-param-value]")) {
       const name = /** @type {HTMLElement} */ (t).dataset.cadParamValue ?? "";
       const value = /** @type {HTMLInputElement} */ (t).value.trim();
@@ -610,7 +768,7 @@ export function createCad(host) {
       });
     },
     debug() {
-      return { part: state.part, step: state.step, sketching: state.sketching, face: state.face, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, sketcher };
+      return { part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
     },
   };
 }

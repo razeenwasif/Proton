@@ -6,7 +6,7 @@ use super::lex::{self, Tok, Token};
 
 /// The keywords of features the later milestones build. They are kept as
 /// written until then; anything else unknown is a mistake.
-pub const FEATURES: [&str; 6] = ["fillet", "chamfer", "shell", "sweep", "loft", "thread"];
+pub const FEATURES: [&str; 1] = ["thread"];
 
 pub fn read(text: &str) -> Result<Part, Diag> {
     let lines: Vec<&str> = text.lines().collect();
@@ -183,6 +183,60 @@ pub fn read(text: &str) -> Result<Part, Diag> {
                 let body = p.ident("the body made")?;
                 p.keyword("with")?;
                 Item::Combined(Combined { how, body, with: p.ident("the body used up")? })
+            }
+            "fillet" => {
+                let name = p.ident("the fillet's name")?;
+                p.keyword("on")?;
+                let edges = p.edge_picks()?;
+                p.keyword("radius")?;
+                Item::Fillet(Fillet { name, edges, radius: p.expr()? })
+            }
+            "chamfer" => {
+                let name = p.ident("the chamfer's name")?;
+                p.keyword("on")?;
+                let edges = p.edge_picks()?;
+                p.keyword("distance")?;
+                let distance = p.expr()?;
+                let other = if p.peek_ident("and") {
+                    p.i += 1;
+                    Some(p.expr()?)
+                } else {
+                    None
+                };
+                Item::Chamfer(Chamfer { name, edges, distance, other })
+            }
+            "shell" => {
+                let name = p.ident("the shell's name")?;
+                p.keyword("of")?;
+                let body = p.ident("the body hollowed")?;
+                p.keyword("thickness")?;
+                let thickness = p.expr()?;
+                let mut open = Vec::new();
+                if p.peek_ident("open") {
+                    p.i += 1;
+                    open.push(p.path("a face to take away")?);
+                    while p.peek_sym(',') {
+                        p.i += 1;
+                        open.push(p.path("a face to take away")?);
+                    }
+                }
+                Item::Shell(Shell { name, body, thickness, open })
+            }
+            "sweep" => {
+                let name = p.ident("the sweep's name")?;
+                p.keyword("from")?;
+                let sketch = p.ident("the sketch swept")?;
+                p.keyword("along")?;
+                let path = p.ident("the sketch it is swept along")?;
+                Item::Sweep(SweepAlong { name, sketch, path, into: p.made_into()? })
+            }
+            "loft" => {
+                let name = p.ident("the loft's name")?;
+                p.keyword("from")?;
+                let from = p.ident("the first sketch")?;
+                p.keyword("to")?;
+                let to = p.ident("the second sketch")?;
+                Item::Loft(Loft { name, from, to, into: p.made_into()? })
             }
             w if FEATURES.contains(&w) => Item::Feature { keyword: w.to_string(), text: p.rest(note.as_deref()).unwrap_or_default() },
             "end" => return Err(p.err_at(1, "an `end` with no sketch open")),
@@ -437,7 +491,7 @@ impl Cursor<'_> {
                     Some(Tok::Num(n)) if n.fract() == 0.0 => s.push_str(&format!(".{}", n as u64)),
                     _ => return Err(self.err_at(1, "a name after the `.`")),
                 }
-            } else if self.peek_sym('(') && self.touching() {
+            } else if self.peek_sym('(') && self.touching() && !s.ends_with(".edges") {
                 self.i += 1;
                 let inner = self.path("a name in the brackets")?;
                 self.sym(')')?;
@@ -458,6 +512,52 @@ impl Cursor<'_> {
             _ => return false,
         };
         next.col == prev.col + len
+    }
+
+    /// Edges, a comma between: `F & G`, `B.edges`, `F.edges(parallel z)`.
+    fn edge_picks(&mut self) -> Result<Vec<EdgePick>, Diag> {
+        let mut out = vec![self.edge_pick()?];
+        while self.peek_sym(',') {
+            self.i += 1;
+            out.push(self.edge_pick()?);
+        }
+        Ok(out)
+    }
+
+    fn edge_pick(&mut self) -> Result<EdgePick, Diag> {
+        let a = self.path("a face, or a body's or face's `.edges`")?;
+        if self.peek_sym('&') {
+            self.i += 1;
+            let b = self.path("the other face")?;
+            return Ok(EdgePick::Between(a, b));
+        }
+        let Some(of) = a.strip_suffix(".edges") else {
+            return Err(self.err_here("edges are `FACE & FACE`, or `BODY.edges` or `FACE.edges` — `(parallel z)`, `(convex)` and the like after picking among them"));
+        };
+        let mut filters = Vec::new();
+        if self.peek_sym('(') && self.touching() {
+            self.i += 1;
+            loop {
+                filters.push(match self.ident("`parallel x`, `convex`, `concave`, `round` or `straight`")?.as_str() {
+                    "parallel" => match self.ident("`x`, `y` or `z`")?.as_str() {
+                        a @ ("x" | "y" | "z") => EdgeFilter::Parallel(a.to_string()),
+                        _ => return Err(self.err_at(1, "edges are parallel to `x`, `y` or `z`")),
+                    },
+                    "convex" => EdgeFilter::Convex,
+                    "concave" => EdgeFilter::Concave,
+                    "round" => EdgeFilter::Round,
+                    "straight" => EdgeFilter::Straight,
+                    _ => return Err(self.err_at(1, "edges are picked by `parallel x`, `convex`, `concave`, `round` or `straight`")),
+                });
+                if self.peek_sym(',') {
+                    self.i += 1;
+                    continue;
+                }
+                self.sym(')')?;
+                break;
+            }
+        }
+        Ok(EdgePick::Of { of: of.to_string(), filters })
     }
 
     /// `a, b, c`: names, a comma between.

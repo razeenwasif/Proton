@@ -28,10 +28,11 @@ fn the_plans_example_builds_its_plate_and_notes_the_rest() {
     let text = doc.split("```\npart").nth(1).and_then(|s| s.split("```").next()).map(|s| format!("part{s}")).unwrap();
     let m = model(&text);
     assert!(m.errors.is_empty(), "{:?}", m.errors);
-    near(volume(&m, "plate"), (80.0 * 40.0 - 2.0 * PI * 1.7 * 1.7) * 2.0);
-    let notes: Vec<&str> = m.notes.iter().map(|d| d.message.as_str()).collect();
-    // (Its hole is built since K4: tests/features.rs.)
-    assert_eq!(notes, ["`fillet` is not built yet: it comes with K5"]);
+    // Its four upright corners rounded 2: each loses a 2 × 2 square less a quarter circle.
+    near(volume(&m, "plate"), (80.0 * 40.0 - (4.0 - PI) * 4.0 - 2.0 * PI * 1.7 * 1.7) * 2.0);
+    // Its hole since K4 (tests/features.rs), its fillet since K5: nothing
+    // is left unbuilt.
+    assert!(m.notes.is_empty(), "{:?}", m.notes);
 }
 
 #[test]

@@ -333,6 +333,51 @@ impl Surface {
         }
     }
 
+    /// The surface every point of which is `d` along the normal from this
+    /// one (back from it for a negative `d`): a plane moved, a cylinder,
+    /// sphere or torus's tube grown or shrunk, a cone moved along its axis.
+    /// `None` where that turns it inside out — shrunk past its axis, its
+    /// centre or its core circle.
+    pub fn offset(&self, d: f64) -> Option<Surface> {
+        Some(match *self {
+            Surface::Plane(s) => Surface::Plane(Plane { frame: Frame { origin: s.frame.origin + s.frame.z * d, ..s.frame } }),
+            Surface::Cylinder(s) => {
+                let radius = s.radius + d;
+                if radius <= tol::LINEAR {
+                    return None;
+                }
+                Surface::Cylinder(Cylinder { radius, ..s })
+            }
+            Surface::Cone(s) => {
+                // Each point moves along out·cos a − z·sin a; the circle
+                // kept is moved along the axis until its radius is some.
+                let (sa, ca) = s.half_angle.sin_cos();
+                let mut origin = s.frame.origin - s.frame.z * (d * sa);
+                let mut radius = s.radius + d * ca;
+                if radius <= tol::LINEAR {
+                    let h = (1.0 - radius) / s.half_angle.tan();
+                    origin += s.frame.z * h;
+                    radius += h * s.half_angle.tan();
+                }
+                Surface::Cone(Cone { frame: Frame { origin, ..s.frame }, radius, half_angle: s.half_angle })
+            }
+            Surface::Sphere(s) => {
+                let radius = s.radius + d;
+                if radius <= tol::LINEAR {
+                    return None;
+                }
+                Surface::Sphere(Sphere { radius, ..s })
+            }
+            Surface::Torus(s) => {
+                let minor = s.minor + d;
+                if minor <= tol::LINEAR || minor >= s.major - tol::LINEAR {
+                    return None;
+                }
+                Surface::Torus(Torus { minor, ..s })
+            }
+        })
+    }
+
     pub fn transformed(&self, t: &Transform) -> Surface {
         let mut s = *self;
         let f = match &mut s {

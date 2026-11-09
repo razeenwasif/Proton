@@ -6,7 +6,10 @@
  * the exact normal of the face they are on, so a cylinder is smooth and an
  * edge is sharp. A face is found under the pointer by the triangle hit and
  * the face that triangle is from: named in the status line, and chosen on
- * a click — a flat one can be sketched on.
+ * a click — a flat one can be sketched on. An edge is found nearer than a
+ * face: the nearest within a few pixels of the pointer, where no face is
+ * in front of it, named by its two faces and picked on a click — to be
+ * rounded or chamfered.
  *
  * three.js is imported the first time a part is shown (lab3d.js shares
  * it); nothing is drawn but on a change. Without WebGL it says so. */
@@ -17,7 +20,19 @@ import { three } from "./lab3d.js";
 /** @typedef {import("./bindings/CadBody").CadBody} Body */
 /** @typedef {import("./bindings/CadSketchView").CadSketchView} SketchView */
 
-const BODY = 0x8b93a8, HOVER = 0xa3b4e8, PICKED = 0x7aa2f7, EDGE = 0x1b1d26, SKETCH = 0xe0af68, PICKED_SKETCH = 0xff9e64;
+const BODY = 0x8b93a8, HOVER = 0xa3b4e8, PICKED = 0x7aa2f7, EDGE = 0x1b1d26, SKETCH = 0xe0af68, PICKED_SKETCH = 0xff9e64, STEP = 0x9ece6a;
+const EDGE_HOVER = 0x7dcfff, EDGE_PICKED = 0xff9e64;
+/** How near the pointer, in pixels, an edge is found. */
+const EDGE_REACH = 6;
+
+/** The distance from `p` to the segment `a`–`b`, in the plane.
+ *  @param {number[]} p @param {number[]} a @param {number[]} b */
+export function toSegment(p, a, b) {
+  const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+  const len = dx * dx + dy * dy;
+  const t = len ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
 
 /** A sketch's shapes as runs of points in the world: lines, circles and
  *  arcs cut finely enough to look round. @param {SketchView} s @returns {number[][]} */
@@ -47,7 +62,7 @@ export function sketchRuns(s) {
   return runs;
 }
 
-/** @param {HTMLCanvasElement} canvas @param {{hover: (name: string | null) => void, pick: (body: string | null, face: number | null, point: number[] | null) => void}} host */
+/** @param {HTMLCanvasElement} canvas @param {{hover: (name: string | null) => void, pick: (body: string | null, face: number | null, point: number[] | null) => void, pickEdge?: (body: string, edge: number) => void}} host */
 export async function mountView(canvas, host) {
   const [THREE, { OrbitControls }] = await three();
   /** @type {import("./vendor/three/three.module.js").WebGLRenderer} */
@@ -73,9 +88,18 @@ export async function mountView(canvas, host) {
   /** @type {any[]} */
   let kept = [];
   const keep = (/** @type {any} */ x) => (kept.push(x), x);
-  /** Each body's mesh, its colour per point, its triangles' faces, and
-   *  the points of each face. @type {{name: string, mesh: any, colors: any, faceOf: number[], faces: Body["faces"], facePoints: number[][]}[]} */
+  /** Each body's mesh, its colour per point, its triangles' faces, the
+   *  points of each face, and its edges with their names to pick them by.
+   *  @type {{name: string, mesh: any, colors: any, faceOf: number[], faces: Body["faces"], facePoints: number[][], edges: number[][], picks: (string | null)[]}[]} */
   let bodies = [];
+  /** Edges drawn over the rest: hovered, and picked. */
+  const marks = new THREE.Group();
+  scene.add(marks);
+  let hoveredEdge = /** @type {[number, number] | null} */ (null);
+  /** Edges picked, by body name and edge. @type {[string, number][]} */
+  let pickedEdges = [];
+  /** Faces of the chosen step, by name: a fillet's own. @type {string[]} */
+  let stepFaces = [];
   let grid = /** @type {any} */ (null);
   let hovered = /** @type {[number, number] | null} */ (null);
   let picked = /** @type {[number, number] | null} */ (null);
@@ -116,15 +140,39 @@ export async function mountView(canvas, host) {
   }
 
   function repaint() {
-    for (let i = 0; i < bodies.length; i++) for (let f = 0; f < bodies[i].faces.length; f++) paint([i, f], BODY);
+    for (let i = 0; i < bodies.length; i++) {
+      for (let f = 0; f < bodies[i].faces.length; f++) paint([i, f], stepFaces.includes(bodies[i].faces[f].name) ? STEP : BODY);
+    }
     paint(hovered, HOVER);
     paint(picked, PICKED);
+    // The edges marked: rebuilt, as few as there are.
+    for (const x of /** @type {any[]} */ (marks.children)) {
+      x.geometry.dispose();
+      x.material.dispose();
+    }
+    marks.clear();
+    const mark = (/** @type {number[]} */ e, /** @type {number} */ color) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(e, 3));
+      marks.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color })));
+    };
+    for (const [name, e] of pickedEdges) {
+      const b = bodies.find((x) => x.name === name);
+      if (b?.edges[e]) mark(b.edges[e], EDGE_PICKED);
+    }
+    if (hoveredEdge) {
+      const e = bodies[hoveredEdge[0]]?.edges[hoveredEdge[1]];
+      if (e) mark(e, EDGE_HOVER);
+    }
     draw();
   }
 
-  /** @param {PartView} part @param {{sketch?: number | null}} [opts] */
+  /** @param {PartView} part @param {{sketch?: number | null, edges?: [string, number][], faces?: string[]}} [opts] */
   function show(part, opts = {}) {
     clear();
+    pickedEdges = opts.edges ?? [];
+    stepFaces = opts.faces ?? [];
+    hoveredEdge = null;
     for (const b of part.bodies) {
       const g = keep(new THREE.BufferGeometry());
       g.setAttribute("position", new THREE.Float32BufferAttribute(b.positions, 3));
@@ -140,7 +188,7 @@ export async function mountView(canvas, host) {
       b.faceOf.forEach((f, t) => {
         for (let k = 0; k < 3; k++) facePoints[f]?.add(b.indices[3 * t + k]);
       });
-      bodies.push({ name: b.name, mesh, colors, faceOf: b.faceOf, faces: b.faces, facePoints: facePoints.map((s) => [...s]) });
+      bodies.push({ name: b.name, mesh, colors, faceOf: b.faceOf, faces: b.faces, facePoints: facePoints.map((s) => [...s]), edges: b.edges, picks: b.edgePicks ?? [] });
       const lines = [];
       for (const e of b.edges) for (let i = 0; i + 5 < e.length; i += 3) lines.push(e[i], e[i + 1], e[i + 2], e[i + 3], e[i + 4], e[i + 5]);
       const eg = keep(new THREE.BufferGeometry());
@@ -212,26 +260,78 @@ export async function mountView(canvas, host) {
     return [i, bodies[i].faceOf[hit.faceIndex]];
   }
 
+  /** The edge nearest the pointer within reach and not behind a face:
+   *  body and edge. @param {MouseEvent} e @returns {[number, number] | null} */
+  function edgeUnder(e) {
+    const r = canvas.getBoundingClientRect();
+    const mouse = [e.clientX - r.left, e.clientY - r.top];
+    // How far the face under the pointer is: an edge further is hidden.
+    under(e);
+    const seen = hitPoint ? camera.position.distanceTo(new THREE.Vector3(hitPoint[0], hitPoint[1], hitPoint[2])) : Infinity;
+    const slack = 0.02 * camera.position.distanceTo(controls.target);
+    const v = new THREE.Vector3();
+    let best = /** @type {[number, number] | null} */ (null), bestD = EDGE_REACH;
+    for (let i = 0; i < bodies.length; i++) {
+      const b = bodies[i];
+      for (let k = 0; k < b.edges.length; k++) {
+        const pts = b.edges[k];
+        let prev = /** @type {number[] | null} */ (null);
+        for (let j = 0; j + 2 < pts.length; j += 3) {
+          v.set(pts[j], pts[j + 1], pts[j + 2]);
+          const far = camera.position.distanceTo(v);
+          v.project(camera);
+          const at = v.z > 1 ? null : [((v.x + 1) / 2) * r.width, ((1 - v.y) / 2) * r.height, far];
+          if (at && prev) {
+            // An edge that can be picked wins a near tie with one that cannot.
+            const d = toSegment(mouse, prev, at) + (b.picks[k] ? 0 : 1);
+            if (d < bestD && Math.min(prev[2], at[2]) <= seen + slack) {
+              bestD = d;
+              best = [i, k];
+            }
+          }
+          prev = at;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** What the pointer is over, edge first. @param {MouseEvent} e */
+  function hoverAt(e) {
+    const edge = host.pickEdge ? edgeUnder(e) : null;
+    const at = edge ? null : under(e);
+    if (JSON.stringify(at) === JSON.stringify(hovered) && JSON.stringify(edge) === JSON.stringify(hoveredEdge)) return;
+    hovered = at;
+    hoveredEdge = edge;
+    if (edge) {
+      const name = bodies[edge[0]].picks[edge[1]];
+      host.hover(name ? `edge ${name}` : "an edge where faces meet smoothly: no corner to round");
+    } else host.hover(at ? `${bodies[at[0]].faces[at[1]].name}` : null);
+    repaint();
+  }
+
   let moveFrame = 0, downAt = { x: 0, y: 0 };
   canvas.addEventListener("pointermove", (e) => {
     if (moveFrame || e.buttons) return;
     moveFrame = requestAnimationFrame(() => {
       moveFrame = 0;
-      const at = under(e);
-      if (JSON.stringify(at) === JSON.stringify(hovered)) return;
-      hovered = at;
-      host.hover(at ? `${bodies[at[0]].faces[at[1]].name}` : null);
-      repaint();
+      hoverAt(e);
     });
   });
   canvas.addEventListener("pointerleave", () => {
     hovered = null;
+    hoveredEdge = null;
     host.hover(null);
     repaint();
   });
+  // Where a press started, so a drag to turn the view is not a click: from
+  // the mouse's own event too, which the orbit controls do not take.
   canvas.addEventListener("pointerdown", (e) => (downAt = { x: e.clientX, y: e.clientY }));
+  canvas.addEventListener("mousedown", (e) => (downAt = { x: e.clientX, y: e.clientY }));
   canvas.addEventListener("click", (e) => {
     if (Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4) return;
+    const edge = host.pickEdge ? edgeUnder(e) : null;
+    if (edge && host.pickEdge) return host.pickEdge(bodies[edge[0]].name, edge[1]);
     const at = under(e);
     picked = at;
     repaint();
@@ -256,9 +356,15 @@ export async function mountView(canvas, host) {
       clear();
       renderer.dispose();
     },
+    /** A point of the world on the canvas, in its pixels: for a test to
+     *  point at an edge. @param {number[]} p */
+    screen(p) {
+      const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
+      return [((v.x + 1) / 2) * canvas.clientWidth, ((1 - v.y) / 2) * canvas.clientHeight];
+    },
     /** What a test asks: what is drawn. */
     debug() {
-      return { bodies: bodies.map((b) => ({ name: b.name, faces: b.faces.length, triangles: b.faceOf.length })), hovered, picked };
+      return { bodies: bodies.map((b) => ({ name: b.name, faces: b.faces.length, triangles: b.faceOf.length })), hovered, picked, hoveredEdge, pickedEdges, stepFaces };
     },
   };
 }

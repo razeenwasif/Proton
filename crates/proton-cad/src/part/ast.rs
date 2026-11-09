@@ -68,8 +68,13 @@ pub enum Item {
     Pattern(Pattern),
     Mirror(Mirror),
     Combined(Combined),
-    /// A feature — `fillet`, `shell` … — kept as written until the
-    /// milestone that builds it reads it.
+    Fillet(Fillet),
+    Chamfer(Chamfer),
+    Shell(Shell),
+    Sweep(SweepAlong),
+    Loft(Loft),
+    /// A feature — `thread` — kept as written until the milestone that
+    /// builds it reads it.
     Feature { keyword: String, text: String },
 }
 
@@ -195,6 +200,91 @@ pub struct Combined {
     pub how: Combine,
     pub body: String,
     pub with: String,
+}
+
+/// Edges a round or a chamfer takes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EdgePick {
+    /// `F & G`: where two faces meet.
+    Between(String, String),
+    /// `BODY.edges` or `FACE.edges`, every edge of it — those that are
+    /// corners, not seams or smooth joins — or those `(parallel z)`,
+    /// `(convex)`, `(concave)`, `(round)` or `(straight)`, filters all
+    /// holding.
+    Of { of: String, filters: Vec<EdgeFilter> },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EdgeFilter {
+    /// Straight and along `x`, `y` or `z`.
+    Parallel(String),
+    Convex,
+    Concave,
+    Round,
+    Straight,
+}
+
+impl EdgeFilter {
+    pub fn word(&self) -> String {
+        match self {
+            EdgeFilter::Parallel(a) => format!("parallel {a}"),
+            EdgeFilter::Convex => "convex".into(),
+            EdgeFilter::Concave => "concave".into(),
+            EdgeFilter::Round => "round".into(),
+            EdgeFilter::Straight => "straight".into(),
+        }
+    }
+}
+
+/// `fillet NAME on EDGES radius EXPR`: the edges rounded — a ball of the
+/// radius rolled along each, touching the faces either side.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fillet {
+    pub name: String,
+    pub edges: Vec<EdgePick>,
+    pub radius: Expr,
+}
+
+/// `chamfer NAME on EDGES distance EXPR [and EXPR]`: the edges cut flat
+/// that far along each face — the second distance along the second face
+/// of `F & G`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Chamfer {
+    pub name: String,
+    pub edges: Vec<EdgePick>,
+    pub distance: Expr,
+    pub other: Option<Expr>,
+}
+
+/// `shell NAME of BODY thickness EXPR [open FACE, FACE…]`: the body
+/// hollowed to walls that thick, the faces named taken away.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shell {
+    pub name: String,
+    pub body: String,
+    pub thickness: Expr,
+    pub open: Vec<String>,
+}
+
+/// `sweep NAME from SKETCH along PATH [join|cut|intersect BODY]`: the
+/// profile carried along the lines and arcs of the sketch `PATH`, standing
+/// square to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SweepAlong {
+    pub name: String,
+    pub sketch: String,
+    pub path: String,
+    pub into: Option<(Combine, String)>,
+}
+
+/// `loft NAME from SKETCH to SKETCH [join|cut|intersect BODY]`: a solid
+/// between two profiles of as many edges each.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Loft {
+    pub name: String,
+    pub from: String,
+    pub to: String,
+    pub into: Option<(Combine, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

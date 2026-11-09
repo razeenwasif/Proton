@@ -37,4 +37,25 @@ how: string | null, body: string | null, axis: string | null, angle: string | nu
 /**
  * A sketch's plane, and its offset.
  */
-on: string | null, offset: string | null, };
+on: string | null, offset: string | null, 
+/**
+ * A fillet's or chamfer's edges, each as written: `a.top & a.side(r.left)`,
+ * `a.edges(parallel z)`.
+ */
+edges: Array<string>, 
+/**
+ * A fillet's radius, a chamfer's distance, a shell's thickness.
+ */
+value: string | null, 
+/**
+ * A chamfer's second distance.
+ */
+other: string | null, 
+/**
+ * What a sweep runs along, or the sketch a loft goes to.
+ */
+path: string | null, 
+/**
+ * The faces a shell takes away.
+ */
+open: Array<string>, };

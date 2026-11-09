@@ -59,7 +59,13 @@ mirror twin of rib about YZ
 union plate with boss
 cut plate with rib
 intersect plate with slot
-fillet plate.edges(parallel z) radius 2
+fillet corners on plate.edges(parallel z) radius 2
+fillet lip on plate.top & plate.side(r.left), m3.side(wall1) & plate.top, plate.top.edges(convex, round) radius t / 2
+chamfer edge on plate.bottom.edges distance 0.5 and 1
+shell hollow of plate thickness 1.5 open plate.top, plate.side(r.bottom)
+sweep pipe from lid along base
+loft taper from base to lid cut plate
+thread rod M6
 "#;
 
 #[test]
@@ -74,7 +80,19 @@ fn a_part_prints_back_as_it_was_written() {
     assert_eq!(sketches[1].on.reference, "base.top");
     assert_eq!(print::expr(sketches[1].on.offset.as_ref().unwrap()), "-t * 2");
     let features: Vec<&str> = p.items.iter().filter_map(|n| if let Item::Feature { keyword, .. } = &n.item { Some(keyword.as_str()) } else { None }).collect();
-    assert_eq!(features, ["fillet"]);
+    assert_eq!(features, ["thread"]);
+    let fillets: Vec<&Fillet> = p.items.iter().filter_map(|n| if let Item::Fillet(f) = &n.item { Some(f) } else { None }).collect();
+    assert_eq!(fillets[0].edges, [EdgePick::Of { of: "plate".into(), filters: vec![EdgeFilter::Parallel("z".into())] }]);
+    assert_eq!(
+        fillets[1].edges,
+        [
+            EdgePick::Between("plate.top".into(), "plate.side(r.left)".into()),
+            EdgePick::Between("m3.side(wall1)".into(), "plate.top".into()),
+            EdgePick::Of { of: "plate.top".into(), filters: vec![EdgeFilter::Convex, EdgeFilter::Round] },
+        ]
+    );
+    let shells: Vec<&Shell> = p.items.iter().filter_map(|n| if let Item::Shell(s) = &n.item { Some(s) } else { None }).collect();
+    assert_eq!(shells[0].open, ["plate.top", "plate.side(r.bottom)"]);
     let extrudes: Vec<&Extrude> = p.items.iter().filter_map(|n| if let Item::Extrude(e) = &n.item { Some(e) } else { None }).collect();
     assert_eq!(
         extrudes,

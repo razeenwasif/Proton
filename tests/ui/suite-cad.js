@@ -80,7 +80,13 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     const steps = [...ws().querySelectorAll('.cd-history [data-cad-step]')].map((r) => r.dataset.cadStep);
     assert(steps.join() === 'part,7,8,10,11,12', `the steps are not listed in order: ${steps}`);
     assert(ws().querySelector('.cd-history [data-cad-step="11"]').classList.contains('bad') && ws().querySelector('.cd-history [data-cad-step="11"] .cd-bad')?.title.includes('post'), 'a step\'s mistake is not marked on it');
+    // A round, built: its pick and radius, as written.
+    assert(ws().querySelector('.cd-history [data-cad-step="12"] .cd-row-what')?.textContent === 'plate.edges(parallel z) · r 2', 'the round is not summed up');
+    const later = part();
+    later.part.steps[4] = {...later.part.steps[4], note: '`thread` is not built yet'};
+    await win.pushEvents([later]); await settle();
     assert(ws().querySelector('.cd-history [data-cad-step="12"]').classList.contains('later'), 'a feature for later is not marked so');
+    await win.pushEvents([p]); await settle();
     const names = [...ws().querySelectorAll('.cd-param .cd-pname')].map((x) => x.textContent);
     assert(names.join() === 't,hole', 'the parameters are not listed');
     // The extrude's settings.
@@ -105,7 +111,7 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'param', name: 't', value: '2.5'}]), 'a parameter did not change');
     // The part's own settings: its bodies, written out.
     ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
-    assert(ws().querySelector('[data-cad-settings]').textContent.includes('9.55 cm³'), 'the bodies\' volumes are not shown');
+    assert(ws().querySelector('[data-cad-settings]').textContent.includes('9.54 cm³'), 'the bodies\' volumes are not shown');
     before = win.commands.length;
     ws().querySelector('[data-cad-export="3mf"]').click(); await settle();
     assert(sent(before, 'cadExport')[0]?.format === '3mf' && sent(before, 'cadExport')[0]?.generation === 5, 'Write 3MF did not ask for one');
@@ -282,11 +288,85 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     assert(!shown(ws().querySelector('[data-cad-dirty]')), 'a saved part still has its dot');
   });
 
+  await test('Edges picked are rounded or chamfered; a round\'s edges and radius write its line; a shell opens the face clicked; sweeps and lofts are added', async () => {
+    await win.pushEvents([part()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    const plate = PART.bodies[0];
+    const [a, b] = ['plate.side(r.bottom) & plate.top', 'plate.side(r.right) & plate.top'];
+    debug().pickEdge('plate', plate.edgePicks.indexOf(a));
+    debug().pickEdge('plate', plate.edgePicks.indexOf(b)); await settle();
+    const card = ws().querySelector('[data-cad-edges]');
+    assert(card && card.textContent.includes(a) && card.textContent.includes(b), 'the picked edges are not listed');
+    const size = card.querySelector('[data-cad-edge-size]');
+    size.value = '0.5';
+    size.dispatchEvent(new win.Event('change', {bubbles: true}));
+    let before = win.commands.length;
+    card.querySelector('[data-cad-round]').click(); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'insert', at: null, text: `fillet r1 on ${a}, ${b} radius 0.5`}]), `Round did not write the line: ${JSON.stringify(ops(before))}`);
+    assert(!debug().edges.length, 'the edges stay picked after their round');
+    // Picked twice is not picked; a seam is not picked at all.
+    debug().pickEdge('plate', plate.edgePicks.indexOf(a));
+    debug().pickEdge('plate', plate.edgePicks.indexOf(a)); await settle();
+    assert(!debug().edges.length, 'an edge picked twice is still picked');
+    debug().pickEdge('plate', plate.edgeTurns.indexOf('seam')); await settle();
+    assert(!debug().edges.length && ws().querySelector('[data-cad-status]').textContent.includes('seam'), 'a seam was picked');
+    debug().pickEdge('plate', plate.edgePicks.indexOf(a));
+    before = win.commands.length;
+    ws().querySelector('[data-cad-add="chamfer"]').click(); await settle();
+    // The size typed for the round stays for the next.
+    assert(ops(before)[0]?.text === `chamfer c1 on ${a} distance 0.5`, `Chamfer did not write the line: ${JSON.stringify(ops(before))}`);
+    // The round there is: its radius, and an edge clicked added to it.
+    ws().querySelector('.cd-history [data-cad-step="12"]').click(); await settle();
+    const radius = ws().querySelector('[data-cad-settings] [data-cad-f="value"]');
+    assert(ws().querySelector('[data-cad-settings] [data-cad-f="edges"]')?.value === 'plate.edges(parallel z)' && radius?.value === '2', 'the round\'s settings are not shown');
+    before = win.commands.length;
+    radius.value = '3';
+    radius.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(ops(before)[0]?.text === 'fillet corners on plate.edges(parallel z) radius 3', `the radius did not write the line: ${JSON.stringify(ops(before))}`);
+    before = win.commands.length;
+    debug().pickEdge('plate', plate.edgePicks.indexOf(a)); await settle();
+    assert(ops(before)[0]?.text === `fillet corners on plate.edges(parallel z), ${a} radius 2`, `an edge clicked was not added to the round: ${JSON.stringify(ops(before))}`);
+    if (debug().view) assert(debug().view.stepFaces.includes('corners'), 'the round\'s faces are not shown as its');
+    // A shell: added for the last body, and a face clicked opened.
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    before = win.commands.length;
+    ws().querySelector('[data-cad-add="shell"]').click(); await settle();
+    assert(ops(before)[0]?.text === 'shell sh1 of boss thickness 2', `Shell did not write the line: ${JSON.stringify(ops(before))}`);
+    const p = part();
+    p.part.steps.push({...p.part.steps[4], index: 13, line: 22, kind: 'shell', name: 'sh1', text: 'shell sh1 of plate thickness 1', edges: [], value: '1', other: null, path: null, open: [], body: 'plate', error: null, note: null});
+    await win.pushEvents([p]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="13"]').click(); await settle();
+    before = win.commands.length;
+    debug().pickFace('plate', plate.faces.findIndex((f) => f.name === 'plate.top'), null); await settle();
+    assert(ops(before)[0]?.text === 'shell sh1 of plate thickness 1 open plate.top', `a face clicked was not opened: ${JSON.stringify(ops(before))}`);
+    // A sweep and a loft, from the sketches there are.
+    ws().querySelector('.cd-history [data-cad-step="10"]').click(); await settle();
+    before = win.commands.length;
+    ws().querySelector('[data-cad-add="sweep"]').click(); await settle();
+    ws().querySelector('[data-cad-add="loft"]').click(); await settle();
+    assert(JSON.stringify(ops(before).map((o) => o.text)) === JSON.stringify(['sweep w1 from post along base', 'loft l1 from base to post']), `Sweep and Loft did not write their lines: ${JSON.stringify(ops(before))}`);
+  });
+
   await test('The 3D view draws the bodies as the core cut them, or says why it cannot', async () => {
     for (let i = 0; i < 30 && !(debug().view || debug().noView); i++) await settle();
     const v = debug().view;
     if (v) {
-      assert(JSON.stringify(v.bodies) === JSON.stringify([{name: 'plate', faces: 8, triangles: PART.bodies[0].faceOf.length}, {name: 'boss', faces: 3, triangles: PART.bodies[1].faceOf.length}]), `the bodies are not drawn: ${JSON.stringify(v.bodies)}`);
+      assert(JSON.stringify(v.bodies) === JSON.stringify([{name: 'plate', faces: 12, triangles: PART.bodies[0].faceOf.length}, {name: 'boss', faces: 3, triangles: PART.bodies[1].faceOf.length}]), `the bodies are not drawn: ${JSON.stringify(v.bodies)}`);
+      // An edge pointed at in the view is found, named, and picked.
+      const plate = PART.bodies[0];
+      const k = plate.edgePicks.indexOf('plate.side(r.bottom) & plate.top');
+      const e = plate.edges[k], n = e.length - 3;
+      const [x, y] = debug().viewer.screen([(e[0] + e[n]) / 2, (e[1] + e[n + 1]) / 2, (e[2] + e[n + 2]) / 2]);
+      const canvas = ws().querySelector('[data-cad-canvas]'), r = canvas.getBoundingClientRect();
+      const at = {clientX: r.left + x, clientY: r.top + y + 2, bubbles: true, pointerId: 3, button: 0};
+      canvas.dispatchEvent(new win.PointerEvent('pointermove', at));
+      for (let i = 0; i < 3; i++) await settle();
+      assert(JSON.stringify(debug().view.hoveredEdge) === JSON.stringify([0, k]), `the edge under the pointer was not found: ${JSON.stringify(debug().view.hoveredEdge)}`);
+      canvas.dispatchEvent(new win.MouseEvent('mousedown', at));
+      canvas.dispatchEvent(new win.MouseEvent('click', at)); await settle();
+      assert(debug().edges.map((x) => x.pick).join() === 'plate.side(r.bottom) & plate.top', `the edge was not picked: ${JSON.stringify(debug().edges)}`);
+      assert(JSON.stringify(debug().view.pickedEdges) === JSON.stringify([['plate', k]]), 'the picked edge is not marked');
+      ws().querySelector('[data-cad-unpick-edges]').click(); await settle();
       assert(shown(ws().querySelector('[data-cad-canvas]')), 'the view is not on screen');
     } else {
       assert(debug().noView.includes('WebGL'), `without a 3D view it does not say why: ${debug().noView}`);

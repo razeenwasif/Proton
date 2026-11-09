@@ -24,6 +24,9 @@ export class Vector3 {
   multiplyScalar(s: number): this;
   length(): number;
   normalize(): this;
+  distanceTo(v: Vector3): number;
+  /** Into the camera's normalised device coordinates. */
+  project(camera: Camera): this;
 }
 
 export class Quaternion {
@@ -47,6 +50,7 @@ export class Object3D {
   rotation: Euler;
   up: Vector3;
   visible: boolean;
+  children: Object3D[];
   add(...objects: Object3D[]): this;
   remove(...objects: Object3D[]): this;
   clear(): this;

@@ -66,6 +66,23 @@ pub fn write(part: &Part) -> String {
             }
             Item::Mirror(m) => format!("mirror {} of {} about {}", m.name, m.of.join(", "), m.plane),
             Item::Combined(c) => format!("{} {} with {}", if c.how == Combine::Join { "union" } else { c.how.word() }, c.body, c.with),
+            Item::Fillet(f) => format!("fillet {} on {} radius {}", f.name, picks(&f.edges), expr(&f.radius)),
+            Item::Chamfer(c) => {
+                let mut l = format!("chamfer {} on {} distance {}", c.name, picks(&c.edges), expr(&c.distance));
+                if let Some(o) = &c.other {
+                    l.push_str(&format!(" and {}", expr(o)));
+                }
+                l
+            }
+            Item::Shell(sh) => {
+                let mut l = format!("shell {} of {} thickness {}", sh.name, sh.body, expr(&sh.thickness));
+                if !sh.open.is_empty() {
+                    l.push_str(&format!(" open {}", sh.open.join(", ")));
+                }
+                l
+            }
+            Item::Sweep(sw) => format!("sweep {} from {} along {}{}", sw.name, sw.sketch, sw.path, into(&sw.into)),
+            Item::Loft(lo) => format!("loft {} from {} to {}{}", lo.name, lo.from, lo.to, into(&lo.into)),
             Item::Feature { keyword, text } => if text.is_empty() { keyword.clone() } else { format!("{keyword} {text}") },
             Item::Sketch(s) => {
                 let mut head = format!("sketch {} on {}", s.name, s.on.reference);
@@ -89,6 +106,18 @@ pub fn write(part: &Part) -> String {
         push(&mut out, &line, &n.note);
     }
     out
+}
+
+/// Edges picked, as written: `a.top & a.side(r.left), a.edges(parallel z)`.
+fn picks(p: &[EdgePick]) -> String {
+    p.iter()
+        .map(|e| match e {
+            EdgePick::Between(a, b) => format!("{a} & {b}"),
+            EdgePick::Of { of, filters } if filters.is_empty() => format!("{of}.edges"),
+            EdgePick::Of { of, filters } => format!("{of}.edges({})", filters.iter().map(|f| f.word()).collect::<Vec<_>>().join(", ")),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// ` join BODY`, ` cut BODY`, ` intersect BODY`, or nothing.

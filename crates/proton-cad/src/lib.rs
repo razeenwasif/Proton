@@ -33,6 +33,7 @@
 //! - [`export`]: STL and 3MF.
 //! - [`model`]: a `.part` file built into bodies, each mistake at its line.
 
+pub mod blend;
 pub mod boolean;
 pub mod brep;
 pub mod bspline;
@@ -40,6 +41,7 @@ pub mod curve;
 pub mod export;
 pub mod frame;
 pub mod intersect;
+pub mod loft;
 pub mod march;
 pub mod mass;
 pub mod mesh;
@@ -47,6 +49,7 @@ pub mod model;
 pub mod part;
 pub mod poly;
 pub mod profile;
+pub mod shell;
 pub mod sketch;
 pub mod surface;
 pub mod sweep;

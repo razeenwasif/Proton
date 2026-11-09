@@ -232,12 +232,14 @@ at the cursor. Edits are held until ⌘S.
 is text: parameters, sketches of lines, arcs and circles held by constraints
 and dimensions, and features made from them — extrudes and revolves joined
 to, cut from or met with a body, holes tapped, counterbored or countersunk,
-patterns and mirrors — on booleans of Proton's own, each body checked closed
-and its volume integrated exactly. The steps are
+patterns and mirrors, edges rounded or chamfered, bodies shelled, profiles
+swept along paths and lofted — on booleans of Proton's own, each body
+checked closed and its volume integrated exactly. The steps are
 listed on the left, each with its mistake; the part is drawn in 3D; a sketch
 opens flat on its plane, where the mouse draws and holds shapes, a dimension
 is typed over in place and a point dragged with the solver holding the rest,
-and the solver says how much is still free. Every edit is a line of the file,
+and the solver says how much is still free; in 3D an edge under the pointer
+is picked to round or chamfer. Every edit is a line of the file,
 which the Text tab shows and takes typing. Bodies are written as STL or 3MF
 for a printer. Edits are held until ⌘S.
 

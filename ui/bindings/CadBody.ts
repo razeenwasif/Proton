@@ -8,6 +8,12 @@ import type { CadFace } from "./CadFace";
  */
 export type CadBody = { name: string, line: number, positions: Array<number>, normals: Array<number>, indices: Array<number>, faceOf: Array<number>, faces: Array<CadFace>, edges: Array<Array<number>>, 
 /**
+ * Each edge's name to round or chamfer it by — `a.top & a.side(r.left)`,
+ * its two faces — or none for a seam or a smooth join, which is no
+ * corner; and whether it is `convex`, `concave`, or neither.
+ */
+edgePicks: Array<string | null>, edgeTurns: Array<string>, 
+/**
  * Cubic millimetres, square millimetres, and where its centre of mass
  * is, from the exact geometry.
  */

@@ -70,7 +70,7 @@ pub fn line(text: &str, lineno: usize) -> Result<(Vec<Token>, Option<String>), D
                 }
             }
             toks.push(Token { tok: Tok::Str(s), col, at });
-        } else if "()=,.+-*/".contains(c) {
+        } else if "()=,.+-*/&".contains(c) {
             toks.push(Token { tok: Tok::Sym(c), col, at });
             i += 1;
         } else {

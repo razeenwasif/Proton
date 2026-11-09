@@ -4,7 +4,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {num, round, fresh, level, rectText, holdText, dimensionText, toggleConstruction, splinePoints, spot} from '../../ui/cad-sketch.js';
-import {stepText, placeable, volumeText, onFace, unitScale} from '../../ui/cad.js';
+import {stepText, placeable, volumeText, onFace, unitScale, lines, toggled} from '../../ui/cad.js';
 import {PART} from '../../ui/preview-cad-part.js';
 
 const base = PART.sketches.find((s) => s.name === 'base');
@@ -106,4 +106,19 @@ test('a point on a face is in the face\'s own coordinates, in the part\'s units'
   assert.deepEqual(onFace([0, 0, 0, 0, -1, 0, 1, 0, 0], [5, 0, 2], 1), [5, 2]);
   // In inches.
   assert.deepEqual(onFace([0, 0, 0, 0, 0, 1, 1, 0, 0], [25.4, 50.8, 0], unitScale('in')), [1, 2]);
+});
+
+test('rounds, chamfers, shells, sweeps and lofts are written as the language has them', () => {
+  assert.equal(stepText.fillet('r1', ['p.top & p.side(r.left)', 'p.edges(parallel z)'], '2'), 'fillet r1 on p.top & p.side(r.left), p.edges(parallel z) radius 2');
+  assert.equal(stepText.fillet('r1', ['p.edges'], ' '), 'fillet r1 on p.edges radius 1');
+  assert.equal(stepText.chamfer('c1', ['p.top & p.side(r.left)'], '1', ''), 'chamfer c1 on p.top & p.side(r.left) distance 1');
+  assert.equal(stepText.chamfer('c1', ['p.top & p.side(r.left)'], '1', '2'), 'chamfer c1 on p.top & p.side(r.left) distance 1 and 2');
+  assert.equal(stepText.shell('s', 'p', '1.5'), 'shell s of p thickness 1.5');
+  assert.equal(stepText.shell('s', 'p', '1.5', ['p.top', 'p.side(r.left)']), 'shell s of p thickness 1.5 open p.top, p.side(r.left)');
+  assert.equal(stepText.sweep('w', 'ring', 'path'), 'sweep w from ring along path');
+  assert.equal(stepText.sweep('w', 'ring', 'path', 'cut', 'p'), 'sweep w from ring along path cut p');
+  assert.equal(stepText.loft('l', 'a', 'b', 'join', 'p'), 'loft l from a to b join p');
+  assert.deepEqual(lines('  a & b\n\n c.edges(convex, round) \n'), ['a & b', 'c.edges(convex, round)']);
+  assert.deepEqual(toggled(['a', 'b'], 'a'), ['b']);
+  assert.deepEqual(toggled(['a'], 'b'), ['a', 'b']);
 });
