@@ -91,7 +91,7 @@ impl Entry {
 
 /// The headings context is appended under, after a question's words: the
 /// file open, and each mention's.
-const CONTEXT: [&str; 6] = ["The file open in the editor", "@selection", "@dataframe", "@sheet", "@circuit", "@logic"];
+const CONTEXT: [&str; 7] = ["The file open in the editor", "@selection", "@dataframe", "@sheet", "@circuit", "@logic", "@cad"];
 
 /// A question as it was typed, and the names of what was appended to it:
 /// for the bubble and the task list, which show what you wrote, while the
@@ -737,6 +737,110 @@ impl Agent {
                     }
                 }),
             },
+            // CAD's files. Writes are held until the person saves.
+            Tool {
+                name: "cad_read".into(),
+                description: "The part, assembly or drawing open in CAD mode — its lines numbered, what it builds (each \
+                              body's volume, area and size; an assembly's instances, where they are and what holds \
+                              them, its bill of materials and tubes; a drawing's views and dimensions) and its mistakes, \
+                              each at its line — and the project's .part, .assembly and .drawing files; or, with `path`, \
+                              that file the same way, the open one as typed."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": { "path": { "type": "string" } }
+                }),
+            },
+            Tool {
+                name: "cad_write".into(),
+                description: "Change a CAD file, or make one: `text` the file whole, or `old_text` (once in the file) and \
+                              `new_text`. It is opened in CAD and held until the person saves; answers with what it builds \
+                              and its mistakes. One statement a line, millimetres, `#` comments. A .part: `part \"Name\"`, \
+                              `units mm`, `material aluminium-6061`, `param t = 3`; `sketch NAME on XY|XZ|YZ|FACE [offset D]` \
+                              … `end` holding shapes — `rect r corner (x, y) size = (w, h)`, `circle c center (x, y) \
+                              radius = r` (or `diameter`), `line l (x, y) (x, y)`, `arc` — numbers where a shape is now, \
+                              `= v` a dimension held; constraints `horizontal`, `vertical`, `coincident`, `parallel`, \
+                              `perpendicular`, `tangent`, `equal`, `concentric`, `fix`, `hdistance A B = d`, `vdistance`, \
+                              `distance`, `angle`; points `r.bl`, `r.tr`, `c.center`, `l.start`, `origin`. Features: \
+                              `extrude NAME from SKETCH distance D [symmetric] [join|cut|intersect BODY]` (or `through`), \
+                              `revolve NAME from SKETCH about xaxis|yaxis|LINE [angle A]`, `hole NAME on FACE at (x, y), \
+                              P… diameter D|thread M3|clearance M3 depth D|through [counterbore D depth H|countersink D \
+                              angle A]`, `pattern NAME of F linear (x, y, z) count N` (or `circular about AXIS count N`), \
+                              `mirror NAME of F about PLANE`, `union|cut|intersect BODY with OTHER`, `fillet NAME on EDGES \
+                              radius R`, `chamfer NAME on EDGES distance D`, `shell NAME of BODY thickness T [open FACE]`, \
+                              `sweep NAME from SKETCH along PATH`, `loft NAME from A to B`. Faces: `plate.top`, \
+                              `plate.bottom`, `plate.side(r.left)` (a rect's left/right/top/bottom), `plate.side(h1)` (a \
+                              circle's wall), a hole's `NAME.side(wall1)`; edges `F & G` or `plate.edges(parallel z)`, \
+                              `boss.top.edges(convex, round)`. An .assembly: `assembly \"Name\"`, `units mm`, `clearance \
+                              1`, `part NAME from \"FILE.part\"` (or `assembly NAME from …`), `ground NAME`, `place NAME at \
+                              (x, y, z) turn (a, b, c)`, `mate NAME planar|flush|distance|angle|parallel|perpendicular|concentric| \
+                              cylindrical|revolute|slider|fastened A to B [= v | offset v]` between faces \
+                              `INSTANCE.FACE`, `explode NAME INST by (x, y, z), …`, `route NAME hard|soft 14/16 from \
+                              INST.socket to INST.socket [via (x, y, z), …] [bend R]`. A .drawing: `drawing \"T\"`, `of \
+                              \"FILE\"`, `sheet A3`, `scale 1/2`, `style paper|blueprint`, `view NAME \
+                              front|back|top|bottom|left|right|iso at (x, y) [scale S] [hidden] [exploded NAME]`, `section \
+                              NAME along x|y|z = V at (x, y)`, `detail NAME of VIEW at (x, y) radius R scale S place (x, \
+                              y)`, `dim NAME VIEW distance A to B|diameter A|radius A|angle A to B|clearance P to Q`, `note \
+                              NAME VIEW \"text\" at FACE`, `balloons VIEW`, `bom at (x, y)` — sheet millimetres from its \
+                              bottom left. The library's parts (boards, cards, fans, radiators, fittings, the FormD T1) \
+                              are in the project's library/ folder when made from CAD's home page."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "In the project, ending .part, .assembly or .drawing." },
+                        "text": { "type": "string" },
+                        "old_text": { "type": "string" },
+                        "new_text": { "type": "string" }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            Tool {
+                name: "cad_measure".into(),
+                description: "Measure the part or assembly open in CAD, or `path`: with nothing more, every body's (or \
+                              every part's, where it is) volume, area, centre and size; `of` a body, an instance or a \
+                              face — its kind, radius or diameter, axis, area; `of` and `to` two faces — flat faces' \
+                              gap or angle, axes' distance, an axis's distance from a face — or two bodies or \
+                              instances, the nearest they come, or that they overlap. Faces by name: `plate.top`, \
+                              `plate.side(h1)`; an assembly's `INSTANCE.FACE`."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" },
+                        "of": { "type": "string" },
+                        "to": { "type": "string" }
+                    }
+                }),
+            },
+            Tool {
+                name: "cad_check".into(),
+                description: "Check the file open in CAD, or `path`: a part's sketches solved and bodies closed; an \
+                              assembly's mates (what conflicts, what is still free), where its parts overlap or come \
+                              nearer than its clearance, its tubes and the loop's order — the fit shown on its page \
+                              too; a drawing's statements that cannot be drawn. With `t1`, the build against the \
+                              FormD T1's published limits: `gpu` {length, height, slots}, `cooler` (the CPU cooler's \
+                              or block's height, mm), `radiators` [{spot: top|bottom|side, size: 120|240|280, \
+                              thickness: with its fans, mm}], `psu` (sfx or sfx-l), `water` (a loop or an AIO)."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" },
+                        "t1": {
+                            "type": "object",
+                            "properties": {
+                                "gpu": { "type": "object", "properties": { "length": { "type": "number" }, "height": { "type": "number" }, "slots": { "type": "number" } } },
+                                "cooler": { "type": "number" },
+                                "radiators": { "type": "array", "items": { "type": "object", "properties": { "spot": { "type": "string", "enum": ["top", "bottom", "side"] }, "size": { "type": "number" }, "thickness": { "type": "number" } } } },
+                                "psu": { "type": "string" },
+                                "water": { "type": "boolean" }
+                            }
+                        }
+                    }
+                }),
+            },
         ]
     }
 
@@ -1359,7 +1463,7 @@ mod tests {
         // descriptions are the only thing the model has to choose between
         // `grep` and `find_files`.
         let tools = Agent::tools();
-        assert_eq!(tools.len(), 29);
+        assert_eq!(tools.len(), 33);
         // A command is asked about first, and the tool says so: a model that
         // thought it ran unasked would report work nobody approved.
         let command = tools.iter().find(|t| t.name == "run_command").unwrap();
@@ -1389,8 +1493,10 @@ mod tests {
         }
         // Logic's writes are held, and it says so: a model told only "write
         // a file" reports the file as written, and it is not, yet.
-        let writing = tools.iter().find(|t| t.name == "logic_write").unwrap();
-        assert!(writing.description.contains("held until the person saves"), "{}", writing.description);
+        for name in ["logic_write", "cad_write"] {
+            let writing = tools.iter().find(|t| t.name == name).unwrap();
+            assert!(writing.description.contains("held until the person saves"), "{}", writing.description);
+        }
         // The modes that left took their tools with them.
         let gone = ["pdf_", "latex_log", "game_", "canvas_", "flow_"];
         assert!(!tools.iter().any(|t| gone.iter().any(|g| t.name.starts_with(g))), "a tool of a mode that left is still offered");

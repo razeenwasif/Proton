@@ -1,4 +1,4 @@
-//! `@selection`, `@dataframe`, `@sheet`, `@circuit` and `@logic`: naming what the model may look at.
+//! `@selection`, `@dataframe`, `@sheet`, `@circuit`, `@logic` and `@cad`: naming what the model may look at.
 //!
 //! The design's phrasing is the specification: *what the model can see is a
 //! chip you can point at*. A question about "this" is a question the model
@@ -34,6 +34,8 @@ pub enum Mention {
     Circuit,
     /// The file on screen in Logic, the line at the cursor and its answer.
     Logic,
+    /// The part, assembly or drawing open in CAD, and what it builds.
+    Cad,
 }
 
 impl Mention {
@@ -45,11 +47,12 @@ impl Mention {
             Mention::Sheet => "@sheet",
             Mention::Circuit => "@circuit",
             Mention::Logic => "@logic",
+            Mention::Cad => "@cad",
         }
     }
 
     /// Every mention this build understands, for the composer's chips.
-    pub const ALL: [Mention; 5] = [Mention::Selection, Mention::Dataframe, Mention::Sheet, Mention::Circuit, Mention::Logic];
+    pub const ALL: [Mention; 6] = [Mention::Selection, Mention::Dataframe, Mention::Sheet, Mention::Circuit, Mention::Logic, Mention::Cad];
 }
 
 /// The mentions in a question, in the order they were written, without repeats.
@@ -164,6 +167,8 @@ mod tests {
         assert_eq!(found("sum @sheet's column"), [Mention::Sheet]);
         assert_eq!(found("why does @circuit oscillate?"), [Mention::Circuit]);
         assert_eq!(found("is @logic's line 3 valid?"), [Mention::Logic]);
+        assert_eq!(found("does @cad fit in the case?"), [Mention::Cad]);
+        assert!(found("@cadence and @cads").is_empty());
         assert!(found("@logical and @logics").is_empty());
         assert!(found("all @circuits").is_empty());
         assert_eq!(found("@sheets"), []);

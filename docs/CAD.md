@@ -756,6 +756,43 @@ sheet shown, a view dragged and moved, zoom about the pointer, the sheet's
 settings, a view, a dimension and a note added, written out, a statement
 typed and taken out, what could not be drawn marked.
 
+K11 — the agent. `cad_read` gives the file open in CAD (or `path`) with its
+lines numbered, what it builds — each body's volume, area, centre and size;
+each sketch solved and how free; an assembly's instances, where they are
+and what holds them, its mates and freedoms, its bill of materials and
+tubes; a drawing's statements — and every mistake at its line, with the
+project's .part, .assembly and .drawing files. `cad_write` writes a file
+whole or replaces one passage in it, opens it in CAD and holds it until the
+person saves, as typing in the Text tab is, and answers the same way; it
+will not change another file while one is open with unsaved changes. Its
+description teaches the three languages in brief. `cad_measure` measures
+every body, a body or instance, a face (its kind, diameter, axis, exact
+area), two faces (flat faces' gap or angle, axes' distance, an axis's
+distance from a face) or two bodies or instances (the nearest they come, or
+that they overlap); a name it cannot find is answered with the names there
+are. `cad_check` says a part's sketches solved and bodies closed; an
+assembly's mates (what conflicts, what is free), its fit — shown on its
+page too — its tubes and loop; a drawing's statements that cannot be drawn;
+and with `t1` the build against the FormD T1's published limits. `@cad`
+sends the file open and what it builds. CAD's inspector has an Agent tab,
+with the composer and the `@cad` chip; its keys are its own, not CAD's.
+`mass::face_areas` gives each face's area exactly. Measured, dev build
+(proton-cad at opt-level 2): on a plate with 64 rounded holes, `cad_write`
+0.46 s with the part's view sent, `cad_read` 0.2 s, `cad_measure` 0.2–0.44
+s, `cad_check` 0.2 s. Tested (1 + 1 + 1 + 1): in the core, through
+`run_tool` only — nothing open read, a part written (made, held, not on
+disk), changed and its volume with it, a mistake at its line and mended, a
+face's area exact, a hole's diameter, two faces' gap, an axis from a face, a
+name not found answered with the names, the part checked, another file
+refused while one is unsaved, an assembly written with its bill of
+materials, an overlap of 400 mm³ found, two parts' and two faces' distance,
+a card too long for the T1, `@cad`'s context, a drawing's statement that
+cannot be drawn said at its line, a path outside the project refused; the
+tool list's count and that `cad_write` says it holds; `@cad` found and
+`@cadence` not; in the browser, the Agent tab, the chip, and keys typed in
+the composer left alone. The status page is brought up to date once CAD is
+finished (E0–E5, K12, K13), not at each milestone.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

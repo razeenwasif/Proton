@@ -3996,6 +3996,13 @@ impl Workspace {
             if crate::logic::TOOLS.contains(&call.name.as_str()) {
                 events.extend(self.logics.take_pending());
             }
+            // And a CAD file written, or an assembly's fit checked.
+            if crate::cad::TOOLS.contains(&call.name.as_str()) {
+                events.extend(self.cads.take_pending());
+                if events.iter().any(|e| matches!(e, Event::CadHome { .. })) {
+                    events.push(self.tree_event());
+                }
+            }
             self.agent.answer(&call.id, answer);
         }
 
@@ -4218,7 +4225,7 @@ impl Workspace {
     /// would make a short question unreadable in the pane it is drawn in, and
     /// would leave the reader unable to tell which half of the sentence they
     /// wrote.
-    pub fn with_context(&self, text: &str) -> String {
+    pub fn with_context(&mut self, text: &str) -> String {
         let mentions = crate::mention::found(text);
         if mentions.is_empty() {
             return text.to_string();
@@ -4235,6 +4242,10 @@ impl Workspace {
                 crate::mention::Mention::Sheet => self.sheets.about(),
                 crate::mention::Mention::Circuit => self.circuits.about(),
                 crate::mention::Mention::Logic => self.logics.about(),
+                crate::mention::Mention::Cad => {
+                    let root = self.root().to_path_buf();
+                    self.cads.about(&root)
+                }
             });
         }
         out
@@ -5158,6 +5169,13 @@ impl Workspace {
             name if crate::logic::TOOLS.contains(&name) => {
                 let root = self.root().to_path_buf();
                 self.logics.tool(&root, name, input)
+            }
+
+            // CAD's parts, assemblies and drawings: read, measured, checked,
+            // and written — held until saved, as the window's edits are.
+            name if crate::cad::TOOLS.contains(&name) => {
+                let root = self.root().to_path_buf();
+                self.cads.tool(&root, name, input)
             }
 
             other => Err(format!("no such tool: {other}")),

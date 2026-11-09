@@ -125,6 +125,7 @@ export function createCad(host) {
     status: q("[data-cad-status]"),
     step: q("[data-cad-settings]"),
     textpane: q("[data-cad-textpane]"),
+    agentpane: q("[data-cad-agentpane]"),
     text: /** @type {HTMLTextAreaElement} */ (q("[data-cad-text]")),
     diag: q("[data-cad-diag]"),
   };
@@ -136,7 +137,7 @@ export function createCad(host) {
     /** The sketch being drawn, by its place. @type {number | null} */ sketching: null,
     /** The face chosen in the view, and where on it — in its own
      *  coordinates — for a flat one. @type {{body: string, face: number, at?: [number, number]} | null} */ face: null,
-    tab: /** @type {"step" | "text"} */ ("step"),
+    tab: /** @type {"step" | "text" | "agent"} */ ("step"),
     /** When the text was last typed: the core's copy is not put over it. */
     typedAt: 0,
     /** A step just added, chosen when it comes back; a sketch, opened. @type {{name: string, open: boolean} | null} */ want: null,
@@ -491,6 +492,7 @@ export function createCad(host) {
     ws.querySelectorAll("[data-cad-tab]").forEach((b) => b.setAttribute("aria-selected", String(/** @type {HTMLElement} */ (b).dataset.cadTab === state.tab)));
     els.step.hidden = state.tab !== "step";
     els.textpane.hidden = state.tab !== "text";
+    els.agentpane.hidden = state.tab !== "agent";
   }
 
   async function ensureView() {
@@ -672,12 +674,12 @@ export function createCad(host) {
     els.history.hidden = !p;
     els.adds.hidden = !p;
     renderList();
+    renderTabs();
     if (!p) return;
     renderHead();
     renderHistory();
     renderStep();
     renderText();
-    renderTabs();
     renderStage();
   }
 
@@ -1060,7 +1062,8 @@ export function createCad(host) {
 
   ws.addEventListener("keydown", (e) => {
     const t = /** @type {HTMLElement} */ (e.target);
-    const typing = t.closest("input, textarea, select");
+    // The agent's composer is typed in too: its keys are its own.
+    const typing = t.closest("input, textarea, select, [contenteditable]");
     const open = doc();
     if (open && e.metaKey && e.key.toLowerCase() === "s") {
       e.preventDefault();

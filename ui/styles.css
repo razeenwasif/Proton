@@ -4127,7 +4127,8 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cd-tabs button { height: 26px; padding: 0 10px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: var(--z-xs)/1 var(--zed); cursor: pointer; }
 .cd-tabs button[aria-selected="true"] { background: var(--row-hover); color: var(--text); }
 .cd-step { flex: 1 1 auto; min-height: 0; padding: 0 0 16px; }
-.cd-step[hidden], .cd-textpane[hidden] { display: none; }
+.cd-step[hidden], .cd-textpane[hidden], .cd-agentpane[hidden] { display: none; }
+.cd-agentpane { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; border-top: 1px solid var(--xl-line); }
 .cd-card { padding: 0 14px 10px; border-bottom: 1px solid var(--xl-line); }
 .cd-card .cd-head { padding-left: 0; }
 .cd-name { margin: 2px 0; color: var(--text); font: var(--z-xs)/1.4 var(--mono, ui-monospace, monospace); }

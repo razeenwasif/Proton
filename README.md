@@ -257,8 +257,11 @@ the edges behind dashed, sections hatched, details, dimensions measured on
 the model, a title block; for an assembly, its blueprint — four sides, an
 exploded view, a section, every part ballooned to the bill of materials and
 the tightest gaps measured — on paper or white on blue. Views are dragged
-where they go, and the sheet is written as PDF, SVG or DXF. Edits are held
-until ⌘S.
+where they go, and the sheet is written as PDF, SVG or DXF. The agent, on
+CAD's Agent tab or anywhere with `@cad`, reads, writes, measures and checks
+parts, assemblies and drawings — a build against the FormD T1's published
+limits too — and what it writes is held like your own. Edits are held until
+⌘S.
 
 ## The three things that hold it together
 

@@ -1091,11 +1091,32 @@
         <div class="cd-tabs" role="tablist">
           <button role="tab" data-cad-tab="step" aria-selected="true">Settings</button>
           <button role="tab" data-cad-tab="text" aria-selected="false">Text</button>
+          <button role="tab" data-cad-tab="agent" aria-selected="false" title="The agent, with CAD's tools: it reads, writes, measures and checks parts, assemblies and drawings, its writes held until ⌘S">Agent</button>
         </div>
         <div class="scroll cd-step" data-cad-settings></div>
         <div class="cd-textpane" data-cad-textpane hidden>
           <textarea class="cd-text" data-cad-text spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" wrap="off" aria-label="The part's text"></textarea>
           <div class="cd-diag" data-cad-diag aria-live="polite"></div>
+        </div>
+        <!-- The agent, with CAD's tools: what it writes is held until ⌘S. -->
+        <div class="cd-agentpane" data-cad-agentpane hidden>
+          <div class="data-agent xl-agent">
+            <div class="scroll" data-agent-thread></div>
+            <div class="composer">
+              <div class="box">
+                <div class="txt" contenteditable="plaintext-only" role="textbox"
+                     aria-label="Ask about this part" data-agent-input
+                     data-placeholder="Ask about this part, @cad to include it and what it builds"></div>
+                <div class="foot">
+                  <span class="select" data-mention="@cad" title="Send the part, assembly or drawing open, and what it builds, with the question">@cad</span>
+                  <span class="grow"></span>
+                  <span class="chip" data-agent-provider title="Which service is answering — change it in Settings &gt; AI &amp; models"></span>
+                  <span class="send" data-agent-send role="button" tabindex="0"
+                        aria-label="Send"><svg class="i"><use href="#i-send"/></svg></span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
     </section>

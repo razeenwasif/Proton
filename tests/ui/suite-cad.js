@@ -599,6 +599,27 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     await win.pushEvents([{type: 'cadDrawing', drawing: null}, part()]); await settle();
   });
 
+  await test('CAD\'s Agent tab holds the composer: @cad is a chip, and its keys are its own', async () => {
+    await win.pushEvents([part(), {type: 'cadAssembly', assembly: null}, {type: 'cadDrawing', drawing: null}]); await settle();
+    ws().querySelector('[data-cad-tab="agent"]').click(); await settle();
+    const pane = ws().querySelector('[data-cad-agentpane]');
+    assert(shown(pane) && !shown(ws().querySelector('[data-cad-settings]')) && !shown(ws().querySelector('[data-cad-textpane]')), 'the Agent tab does not show the composer alone');
+    const input = pane.querySelector('[data-agent-input]');
+    pane.querySelector('[data-mention="@cad"]').click(); await settle();
+    assert(input.textContent === '@cad', `the chip did not write @cad: ${JSON.stringify(input.textContent)}`);
+    // An F typed there is a letter, not Fit; ⌘Z is the composer's.
+    const before = win.commands.length;
+    const typed = input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'f', bubbles: true, cancelable: true}));
+    input.dispatchEvent(new win.KeyboardEvent('keydown', {key: 'z', metaKey: true, bubbles: true, cancelable: true})); await settle();
+    assert(typed && !sent(before, 'cadUndo').length, 'keys typed in the composer drove CAD');
+    // On the home page too.
+    await win.pushEvents([{type: 'cadPart', part: null}]); await settle();
+    assert(shown(pane), 'the Agent tab is gone on the home page');
+    ws().querySelector('[data-cad-tab="step"]').click(); await settle();
+    assert(!shown(pane), 'Settings did not take the composer away');
+    await win.pushEvents([part()]); await settle();
+  });
+
   await test('The 3D view draws the bodies as the core cut them, or says why it cannot', async () => {
     for (let i = 0; i < 30 && !(debug().view || debug().noView); i++) await settle();
     const v = debug().view;

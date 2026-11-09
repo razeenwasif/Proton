@@ -67,10 +67,28 @@ fn signed(x: f64) -> f64 {
 
 /// The solid's area, volume and centroid.
 pub fn mass(solid: &Solid) -> Result<Mass, String> {
+    let mut total = [0.0; 5];
+    for sum in sums(solid)? {
+        for i in 0..5 {
+            total[i] += sum[i];
+        }
+    }
+    let volume = total[1];
+    Ok(Mass { area: total[0], volume, centroid: Vec3::new(total[2], total[3], total[4]) / volume })
+}
+
+/// Each face's area, exactly, square millimetres.
+pub fn face_areas(solid: &Solid) -> Result<Vec<f64>, String> {
+    Ok(sums(solid)?.into_iter().map(|s| s[0]).collect())
+}
+
+/// Each face's share of the integrals: its area, and its part of the
+/// volume's and first moments'.
+fn sums(solid: &Solid) -> Result<Vec<[f64; 5]>, String> {
     let q = Quality { chord: f64::INFINITY, angle: 20f64.to_radians() };
     let mut pos: Vec<Vec3> = solid.vertices.iter().map(|v| v.point).collect();
     let eps = edge_points(solid, &q, &mut pos);
-    let mut total = [0.0; 5];
+    let mut out = Vec::with_capacity(solid.faces.len());
     for (f, face) in solid.faces.iter().enumerate() {
         let s = &face.surface;
         let (pu, pv) = s.periodic();
@@ -106,12 +124,9 @@ pub fn mass(solid: &Solid) -> Result<Mass, String> {
         if face.reversed {
             sum[0] = -sum[0];
         }
-        for i in 0..5 {
-            total[i] += sum[i];
-        }
+        out.push(sum);
     }
-    let volume = total[1];
-    Ok(Mass { area: total[0], volume, centroid: Vec3::new(total[2], total[3], total[4]) / volume })
+    Ok(out)
 }
 
 /// How fast `v` changes along a curve through `(u, v)` with derivative

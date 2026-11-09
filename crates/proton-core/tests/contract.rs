@@ -417,6 +417,69 @@ fn the_agents_logic_tools_ask_solve_prove_and_write_held_until_saved() {
 }
 
 #[test]
+fn the_agents_cad_tools_write_read_measure_and_check_held_until_saved() {
+    use serde_json::json;
+    let root = project("cad-agent");
+    let mut space = Workspace::rooted(root.clone());
+    space.apply(Command::SetMode { mode: ModeId::Cad });
+    let none = space.run_tool("cad_read", &json!({})).unwrap();
+    assert!(none.contains("Nothing is open in CAD") && none.contains("no .part, .assembly or .drawing files"), "{none}");
+    // A part written: built, measured, held until saved.
+    let plate = "part \"Plate\"\nunits mm\nmaterial aluminium-6061\nsketch s on XY\n  rect r corner origin size = (100, 60)\n  circle h1 center (10, 10) radius = 2.2\nend\nextrude plate from s distance 4\n";
+    let wrote = space.run_tool("cad_write", &json!({"path": "parts/plate.part", "text": plate})).unwrap();
+    assert!(wrote.contains("parts/plate.part (a part) made: 8 lines, open in CAD and held") && wrote.contains("- body plate (line 8): 23.939 cm³"), "{wrote}");
+    assert!(wrote.contains("100 × 60 × 4 mm") && wrote.contains("No mistakes."), "{wrote}");
+    assert!(space.is_modified() && !root.join("parts/plate.part").exists());
+    let thicker = space.run_tool("cad_write", &json!({"path": "parts/plate.part", "old_text": "distance 4", "new_text": "distance 5"})).unwrap();
+    assert!(thicker.contains("parts/plate.part (a part) changed") && thicker.contains("29.924 cm³"), "{thicker}");
+    let wrong = space.run_tool("cad_write", &json!({"path": "parts/plate.part", "old_text": "from s distance", "new_text": "from nothing distance"})).unwrap();
+    assert!(wrong.contains("Mistakes:\n- line 8:"), "{wrong}");
+    space.run_tool("cad_write", &json!({"path": "parts/plate.part", "old_text": "from nothing distance", "new_text": "from s distance"})).unwrap();
+    let top = space.run_tool("cad_measure", &json!({"of": "plate.top"})).unwrap();
+    assert!(top.contains("flat, facing (0, 0, 1)") && top.contains("5984.795 mm²"), "{top}");
+    let hole = space.run_tool("cad_measure", &json!({"of": "plate.side(h1)"})).unwrap();
+    assert!(hole.contains("a cylinder of diameter 4.4 (radius 2.2)"), "{hole}");
+    let thick = space.run_tool("cad_measure", &json!({"of": "plate.top", "to": "plate.bottom"})).unwrap();
+    assert!(thick.contains("parallel, 5 mm apart"), "{thick}");
+    let from_edge = space.run_tool("cad_measure", &json!({"of": "plate.side(r.left)", "to": "plate.side(h1)"})).unwrap();
+    assert!(from_edge.contains("the axis parallel to the face, 10 mm from it"), "{from_edge}");
+    let lost = space.run_tool("cad_measure", &json!({"of": "plate.lid"})).unwrap_err();
+    assert!(lost.contains("`plate.lid` is no body or face here") && lost.contains("plate.top"), "{lost}");
+    let checked = space.run_tool("cad_check", &json!({})).unwrap();
+    assert!(checked.contains("- sketch s (line 4): solved") && checked.contains("- body plate: closed and whole"), "{checked}");
+    // Another file, while this one is unsaved: refused.
+    assert!(space.run_tool("cad_write", &json!({"path": "parts/block.part", "text": "part \"Block\"\n"})).unwrap_err().contains("unsaved changes"));
+    assert!(space.save_unsaved().is_empty() && std::fs::read_to_string(root.join("parts/plate.part")).unwrap().contains("distance 5"));
+    space.run_tool("cad_write", &json!({"path": "parts/block.part", "text": "part \"Block\"\nsketch s on XY\n  rect r corner origin size = (20, 10)\nend\nextrude b from s distance 8\n"})).unwrap();
+    assert!(space.save_unsaved().is_empty());
+    // An assembly: its parts placed, measured between, and checked for fit.
+    let bench = "assembly \"Bench\"\nunits mm\nclearance 1\npart plate from \"parts/plate.part\"\npart block from \"parts/block.part\"\nground plate\nplace block at (30, 20, 3)\n";
+    let wrote = space.run_tool("cad_write", &json!({"path": "bench.assembly", "text": bench})).unwrap();
+    assert!(wrote.contains("- block from parts/block.part (line 5): at (30, 20, 3)") && wrote.contains("1. 1 × Plate (parts/plate.part), aluminium-6061"), "{wrote}");
+    let fit = space.run_tool("cad_check", &json!({})).unwrap();
+    assert!(fit.contains("- plate and block overlap, by 400 mm³") || fit.contains("- block and plate overlap, by 400 mm³"), "{fit}");
+    space.run_tool("cad_write", &json!({"path": "bench.assembly", "old_text": "(30, 20, 3)", "new_text": "(30, 20, 11)"})).unwrap();
+    let apart = space.run_tool("cad_measure", &json!({"of": "plate", "to": "block"})).unwrap();
+    assert!(apart.contains("plate and block come within 6 mm of each other"), "{apart}");
+    let faces = space.run_tool("cad_measure", &json!({"of": "block.b.bottom", "to": "plate.plate.top"})).unwrap();
+    assert!(faces.contains("parallel, 6 mm apart"), "{faces}");
+    let t1 = space.run_tool("cad_check", &json!({"t1": {"gpu": {"length": 330, "slots": 3}, "radiators": [{"spot": "bottom", "size": 280, "thickness": 50}]}})).unwrap();
+    assert!(t1.contains("Everything fits") && t1.contains("does not fit: the card is 330 mm long") && t1.contains("Against the FormD T1's published limits"), "{t1}");
+    let context = space.with_context("does @cad fit?");
+    assert!(context.contains("# @cad\nCAD file bench.assembly (an assembly), with unsaved changes\n   1  assembly \"Bench\""), "{context}");
+    assert!(space.save_unsaved().is_empty());
+    // A drawing: its statements, and what cannot be drawn, at its line.
+    let sheet = "drawing \"Plate\"\nof \"parts/plate.part\"\nsheet A3\nview f front at (120, 150)\nview t top at (120, 60)\ndim w t distance plate.side(r.left) to plate.side(r.right)\ndim z t diameter plate.lid\n";
+    let drew = space.run_tool("cad_write", &json!({"path": "plate.drawing", "text": sheet})).unwrap();
+    assert!(drew.contains("A A3 sheet, of parts/plate.part.") && drew.contains("- line 6: dim w t distance") && drew.contains("- line 7: dim z t diameter plate.lid — `z`: `plate.lid` names no face or hole"), "{drew}");
+    let read = space.run_tool("cad_read", &json!({"path": "bench.assembly"})).unwrap();
+    assert!(read.contains("bench.assembly (an assembly)\n   1  assembly \"Bench\"") && read.contains("at (30, 20, 11)"), "{read}");
+    assert!(space.run_tool("cad_read", &json!({"path": "../x.part"})).is_err());
+    assert!(space.run_tool("cad_measure", &json!({})).unwrap_err().contains("a drawing has nothing to measure"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn a_truth_table_from_logic_is_built_in_circuit_with_its_table_as_a_test() {
     let root = project("logic-circuit");
     let mut space = Workspace::rooted(root.clone());

@@ -39,6 +39,9 @@ use ts_rs::TS;
 use crate::bus::{Command, Event, NoticeLevel};
 use crate::workspace::notice;
 
+mod agent;
+pub use agent::TOOLS;
+
 /// A part's file ends so.
 pub const EXTENSION: &str = "part";
 
@@ -336,6 +339,8 @@ pub struct Cads {
     open: Option<Open>,
     generations: u32,
     parts: crate::cad_assembly::PartCache,
+    /// What the agent's calls changed on screen, for the next poll.
+    pending: Vec<Event>,
 }
 
 const START: &str = "units mm\n";
@@ -1521,8 +1526,8 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
     if rel.is_empty() || !named.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
         return Err(format!("{rel} is not in the project"));
     }
-    if !matches!(named.extension().and_then(|e| e.to_str()), Some(EXTENSION | crate::cad_assembly::EXTENSION)) {
-        return Err(format!("{rel} is not a .part or .assembly file"));
+    if !matches!(named.extension().and_then(|e| e.to_str()), Some(EXTENSION | crate::cad_assembly::EXTENSION | crate::cad_drawing::EXTENSION)) {
+        return Err(format!("{rel} is not a .part, .assembly or .drawing file"));
     }
     let base = std::fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let path = base.join(named);
@@ -1793,6 +1798,11 @@ mod tests {
         }
         assert!(std::fs::read(root.join("plate.pdf")).unwrap().starts_with(b"%PDF-1.4"));
         assert!(proton_cad::drawing::out::read_dxf(&std::fs::read_to_string(root.join("plate.dxf")).unwrap()).unwrap().iter().any(|e| e.0 == "CIRCLE"));
+        // Opened from the home page, as any CAD file is.
+        c.apply(&root, Command::CadClose { discard: false });
+        let reopened = drawing(&c.apply(&root, Command::CadOpen { path: "plate.drawing".into() }));
+        assert_eq!((reopened.path.as_str(), reopened.dirty), ("plate.drawing", false));
+        assert!(reopened.items.iter().any(|i| i.name == "w"));
         // Drawn again, the one there is opened, not written over.
         c.apply(&root, Command::CadOpen { path: "plate.part".into() });
         let g = view(&c.apply(&root, Command::CadOpen { path: "plate.part".into() })).generation;
