@@ -86,17 +86,17 @@ pub struct Schematic {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Tok {
+pub(crate) enum Tok {
     Word(String),
     Str(String),
     Sym(char),
 }
 
 /// A line's tokens, each with its column, and the comment after them.
-type Lexed = (Vec<(Tok, usize)>, Option<String>);
+pub(crate) type Lexed = (Vec<(Tok, usize)>, Option<String>);
 
 /// A line's words, strings and `(`, `)`, `,`; and its comment.
-fn lex(line: &str, no: usize) -> Result<Lexed, Diag> {
+pub(crate) fn lex(line: &str, no: usize) -> Result<Lexed, Diag> {
     let mut out = Vec::new();
     let cs: Vec<char> = line.chars().collect();
     let mut i = 0;
@@ -143,21 +143,21 @@ fn lex(line: &str, no: usize) -> Result<Lexed, Diag> {
     Ok((out, None))
 }
 
-struct Cur<'a> {
-    toks: &'a [(Tok, usize)],
-    i: usize,
-    line: usize,
-    end: usize,
+pub(crate) struct Cur<'a> {
+    pub(crate) toks: &'a [(Tok, usize)],
+    pub(crate) i: usize,
+    pub(crate) line: usize,
+    pub(crate) end: usize,
 }
 
 impl Cur<'_> {
-    fn col(&self) -> usize {
+    pub(crate) fn col(&self) -> usize {
         self.toks.get(self.i).map_or(self.end, |t| t.1)
     }
-    fn err(&self, m: impl Into<String>) -> Diag {
+    pub(crate) fn err(&self, m: impl Into<String>) -> Diag {
         Diag::new(self.line, self.col(), m)
     }
-    fn word(&mut self, what: &str) -> Result<String, Diag> {
+    pub(crate) fn word(&mut self, what: &str) -> Result<String, Diag> {
         match self.toks.get(self.i) {
             Some((Tok::Word(w), _)) => {
                 self.i += 1;
@@ -166,7 +166,7 @@ impl Cur<'_> {
             _ => Err(self.err(format!("expected {what}"))),
         }
     }
-    fn string(&mut self, what: &str) -> Result<String, Diag> {
+    pub(crate) fn string(&mut self, what: &str) -> Result<String, Diag> {
         match self.toks.get(self.i) {
             Some((Tok::Str(s), _)) => {
                 self.i += 1;
@@ -175,7 +175,7 @@ impl Cur<'_> {
             _ => Err(self.err(format!("expected {what} in quotes"))),
         }
     }
-    fn sym(&mut self, c: char) -> Result<(), Diag> {
+    pub(crate) fn sym(&mut self, c: char) -> Result<(), Diag> {
         match self.toks.get(self.i) {
             Some((Tok::Sym(x), _)) if *x == c => {
                 self.i += 1;
@@ -184,15 +184,15 @@ impl Cur<'_> {
             _ => Err(self.err(format!("expected `{c}`"))),
         }
     }
-    fn peek_sym(&self, c: char) -> bool {
+    pub(crate) fn peek_sym(&self, c: char) -> bool {
         matches!(self.toks.get(self.i), Some((Tok::Sym(x), _)) if *x == c)
     }
-    fn number(&mut self, what: &str) -> Result<f64, Diag> {
+    pub(crate) fn number(&mut self, what: &str) -> Result<f64, Diag> {
         let at = self.col();
         let w = self.word(what)?;
         w.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(|| Diag::new(self.line, at, format!("`{w}` is not a number")))
     }
-    fn done(&self) -> bool {
+    pub(crate) fn done(&self) -> bool {
         self.i >= self.toks.len()
     }
     /// A word or a string: a value.
@@ -207,11 +207,11 @@ impl Cur<'_> {
     }
 }
 
-fn name_ok(s: &str) -> bool {
+pub(crate) fn name_ok(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || "_+-./#~".contains(c))
 }
 
-fn reference_ok(s: &str) -> bool {
+pub(crate) fn reference_ok(s: &str) -> bool {
     !s.is_empty() && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -366,7 +366,7 @@ pub fn num(x: f64) -> String {
     if s == "-0" { "0".into() } else { s.into() }
 }
 
-fn quoted(s: &str) -> String {
+pub(crate) fn quoted(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\\\""))
 }
 

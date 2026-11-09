@@ -13,6 +13,7 @@ import { createSketcher, fresh } from "./cad-sketch.js";
 import { asmText, historyHtml, libraryHtml, libraryParams, lineIndex, offsets, points, portOf, relPath, settingsHtml } from "./cad-assembly.js";
 import { boxAt, drawText, drawingHistoryHtml, drawingSettingsHtml, freshName, itemOfBox, moved, scaleOf } from "./cad-drawing.js";
 import { netLine, partLine, referenceFor, schematicHistoryHtml, schematicItemOfBox, schematicMoved, schematicSettingsHtml } from "./cad-schematic.js";
+import { boardHistoryHtml, boardItemOfBox, boardMoved, boardSettingsHtml, layersOf, snap, trackLine, viaLine } from "./cad-board.js";
 
 /** @typedef {import("./bindings/CadFound").CadFound} Found */
 /** @typedef {import("./bindings/CadPartView").CadPartView} PartView */
@@ -22,6 +23,7 @@ import { netLine, partLine, referenceFor, schematicHistoryHtml, schematicItemOfB
 /** @typedef {import("./bindings/CadAssemblyView").CadAssemblyView} AssemblyView */
 /** @typedef {import("./bindings/CadDrawingView").CadDrawingView} DrawingView */
 /** @typedef {import("./bindings/CadSchematicView").CadSchematicView} SchematicView */
+/** @typedef {import("./bindings/CadBoardView").CadBoardView} BoardView */
 
 /** How long typing must stop before the text is sent. */
 const TEXT_WAIT = 300;
@@ -158,6 +160,11 @@ export function createCad(host) {
     /** The drawing open, if one is. @type {DrawingView | null} */ drw: null,
     /** The schematic open, if one is. @type {SchematicView | null} */ sch: null,
     /** The kind of part chosen to add to a schematic. */ schKind: "resistor",
+    /** The board open, if one is. @type {BoardView | null} */ brd: null,
+    /** What a click on the board draws, and with what. @type {"track" | "via" | null} */ tool: null,
+    /** The track being drawn: its points on the board, mm. @type {number[][]} */ route: [],
+    brdNet: "", brdLayer: "F.Cu", brdWidth: "",
+    /** Where the pointer is, snapped, while a track is drawn. @type {number[] | null} */ hover: null,
     /** The sheet's zoom, and where its corner is in the stage, in pixels. */
     sheet: { zoom: 1, x: 0, y: 0, fitted: 0, shown: "" },
     /** A view being dragged on the sheet, or the sheet panned.
@@ -169,13 +176,13 @@ export function createCad(host) {
   let viewing = null;
   let textTimer = 0;
 
-  const generation = () => state.part?.generation ?? state.asm?.generation ?? state.drw?.generation ?? state.sch?.generation ?? 0;
-  /** What is open: a part, an assembly, a drawing or a schematic. */
-  const doc = () => state.part ?? state.asm ?? state.drw ?? state.sch;
-  /** What is shown as a sheet: a drawing or a schematic. */
-  const sheetDoc = () => state.drw ?? state.sch;
+  const generation = () => state.part?.generation ?? state.asm?.generation ?? state.drw?.generation ?? state.sch?.generation ?? state.brd?.generation ?? 0;
+  /** What is open: a part, an assembly, a drawing, a schematic or a board. */
+  const doc = () => state.part ?? state.asm ?? state.drw ?? state.sch ?? state.brd;
+  /** What is shown flat, as a sheet: a drawing, a schematic, a board. */
+  const sheetDoc = () => state.drw ?? state.sch ?? state.brd;
   /** The statement a box on the sheet is. @param {string} name */
-  const boxItem = (name) => (state.drw ? itemOfBox(state.drw, name) : state.sch ? schematicItemOfBox(state.sch, name) : null);
+  const boxItem = (name) => (state.drw ? itemOfBox(state.drw, name) : state.sch ? schematicItemOfBox(state.sch, name) : state.brd ? boardItemOfBox(state.brd, name) : null);
   /** @param {Op[]} ops */
   const edit = (ops) => {
     if (doc()) host.dispatch({ type: "cadEdit", generation: generation(), ops });
@@ -199,7 +206,7 @@ export function createCad(host) {
 
   function renderList() {
     const rows = state.parts
-      .map((f) => `<button class="xl-row${f.path === doc()?.path ? " on" : ""}" data-cad-open="${esc(f.path)}" title="${esc(f.path)}">${icon(f.kind === "assembly" ? "pattern" : f.kind === "drawing" ? "frame" : f.kind === "schematic" ? "node" : "cad")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">${esc(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")}</span></button>`)
+      .map((f) => `<button class="xl-row${f.path === doc()?.path ? " on" : ""}" data-cad-open="${esc(f.path)}" title="${esc(f.path)}">${icon(f.kind === "assembly" ? "pattern" : f.kind === "drawing" ? "frame" : f.kind === "schematic" ? "node" : f.kind === "board" ? "layers" : "cad")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">${esc(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")}</span></button>`)
       .join("");
     els.list.innerHTML = rows || `<p class="xl-empty">No .part files in this folder yet.</p>`;
     els.found.innerHTML = rows;
@@ -218,8 +225,17 @@ export function createCad(host) {
     ...(state.drw?.items ?? []).map((i) => i.name),
     ...(state.sch?.items ?? []).map((i) => i.name),
   ];
+  /** A point on screen as a point on the board, mm. @param {number} cx @param {number} cy */
+  const toBoard = (cx, cy) => {
+    const at = toSheet(cx, cy), o = state.brd?.origin ?? [0, 0];
+    return [at[0] - o[0], at[1] - o[1]];
+  };
 
   function renderHistory() {
+    if (state.brd) {
+      els.history.innerHTML = boardHistoryHtml(state.brd, state.step);
+      return;
+    }
     if (state.sch) {
       els.history.innerHTML = schematicHistoryHtml(state.sch, state.step);
       return;
@@ -257,6 +273,10 @@ export function createCad(host) {
   const options = (/** @type {string[]} */ xs, /** @type {string | null | undefined} */ on) => xs.map((x) => `<option${x === on ? " selected" : ""}>${esc(x)}</option>`).join("");
 
   function renderStep() {
+    if (state.brd) {
+      els.step.innerHTML = boardSettingsHtml(state.brd, { step: state.step, tool: state.tool, net: state.brdNet, layer: state.brdLayer, width: state.brdWidth });
+      return;
+    }
     if (state.sch) {
       els.step.innerHTML = schematicSettingsHtml(state.sch, { step: state.step, kind: state.schKind });
       return;
@@ -446,6 +466,23 @@ export function createCad(host) {
   }
 
   function renderHead() {
+    if (state.brd) {
+      const d = state.brd;
+      els.title.textContent = d.title ?? d.name;
+      els.title.title = d.path;
+      els.dirty.hidden = !d.dirty;
+      els.undo.disabled = !d.canUndo;
+      els.redo.disabled = !d.canRedo;
+      els.tools.hidden = true;
+      const errors = d.findings.filter((f) => f.error);
+      const left = d.nets.reduce((s, n) => s + n.unrouted, 0);
+      els.crumb.textContent = `${d.schematic ?? "no schematic"} · ${d.layers} layers · ${d.parts.length} parts · ${left ? `${left} to route` : "all routed"} · ${errors.length ? `${errors.length} error${errors.length === 1 ? "" : "s"}` : "no errors"}${state.tool ? ` · drawing ${state.tool === "track" ? `a track on ${state.brdLayer}` : "vias"}` : ""}`;
+      els.crumb.classList.toggle("bad", !!errors.length);
+      const problems = d.error ? [`Line ${d.error.line} does not read: ${d.error.message} — what is shown is what it was saved as.`] : errors.map((x) => `Line ${x.line}: ${x.message}`);
+      els.banner.hidden = !problems.length;
+      els.banner.innerHTML = problems.slice(0, 3).map((x) => `<div>${esc(x)}</div>`).join("") + (problems.length > 3 ? `<div>…and ${problems.length - 3} more</div>` : "");
+      return;
+    }
     if (state.sch) {
       const d = state.sch;
       els.title.textContent = d.title ?? d.name;
@@ -613,6 +650,7 @@ export function createCad(host) {
     svg.style.width = `${d.width * ppm}px`;
     svg.style.height = `${d.height * ppm}px`;
     svg.style.transform = `translate(${state.sheet.x}px, ${state.sheet.y}px)`;
+    drawRoute(svg);
     const it = d.items.find((i) => i.index === state.step);
     const drag = state.dragging && "box" in state.dragging ? state.dragging : null;
     const box = drag?.box ?? (it ? d.boxes.find((b) => (it.kind === "bom" ? b.name === "bom" : b.name === it.name)) : null);
@@ -626,6 +664,37 @@ export function createCad(host) {
         height: `${(box.y1 - box.y0) * ppm}px`,
       });
     }
+  }
+
+  /** The track being drawn, over the board: its points, and the pointer's. @param {Element} svg */
+  function drawRoute(svg) {
+    let line = svg.querySelector("[data-cad-route]");
+    const b = state.brd;
+    if (!b || state.tool !== "track" || !state.route.length) return void line?.remove();
+    if (!line) {
+      line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+      line.setAttribute("data-cad-route", "");
+      line.setAttribute("fill", "none");
+      line.setAttribute("stroke-linecap", "round");
+      line.setAttribute("stroke-linejoin", "round");
+      line.setAttribute("stroke-opacity", "0.7");
+      svg.appendChild(line);
+    }
+    const w = Number(state.brdWidth) || b.track;
+    line.setAttribute("stroke", state.brdLayer === "B.Cu" ? "#4d7fc4" : state.brdLayer === "F.Cu" ? "#c83434" : "#c2c200");
+    line.setAttribute("stroke-width", String(w));
+    line.setAttribute("points", [...state.route, ...(state.hover ? [state.hover] : [])].map((p) => `${p[0] + b.origin[0]},${b.height - (p[1] + b.origin[1])}`).join(" "));
+  }
+
+  /** The track drawn so far written as a line of the board, and let go. */
+  function finishRoute() {
+    const b = state.brd;
+    const pts = state.route.filter((p, i, a) => i === 0 || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]);
+    state.route = [];
+    state.hover = null;
+    if (!b || pts.length < 2 || !state.brdNet) return void placeSheet();
+    const w = Number(state.brdWidth);
+    edit([{ op: "insert", at: null, text: trackLine(state.brdNet, state.brdLayer, w > 0 ? w : null, pts) }]);
   }
 
   function renderStage() {
@@ -707,6 +776,7 @@ export function createCad(host) {
     ws.querySelectorAll("[data-cad-asm-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.asm));
     ws.querySelectorAll("[data-cad-drw-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.drw));
     ws.querySelectorAll("[data-cad-sch-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.sch));
+    ws.querySelectorAll("[data-cad-brd-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.brd));
     els.home.hidden = !!p;
     els.part.hidden = !p;
     els.list.hidden = !!p;
@@ -966,6 +1036,20 @@ export function createCad(host) {
     }
     const exp = /** @type {HTMLElement | null} */ (t.closest("[data-cad-export]"));
     if (exp) return void host.dispatch({ type: "cadExport", generation: generation(), format: exp.dataset.cadExport });
+    const toolBtn = /** @type {HTMLElement | null} */ (t.closest("[data-cad-brd-tool]"));
+    if (toolBtn && state.brd) {
+      const want = /** @type {"track" | "via" | ""} */ (toolBtn.dataset.cadBrdTool ?? "");
+      state.tool = want && state.tool !== want ? want : null;
+      state.route = [];
+      state.hover = null;
+      if (state.tool && !state.brdNet) state.brdNet = state.brd.nets[0]?.name ?? "";
+      if (!layersOf(state.brd).includes(state.brdLayer)) state.brdLayer = "F.Cu";
+      state.step = null;
+      state.tab = "step";
+      els.sheet.style.cursor = state.tool ? "crosshair" : "grab";
+      return render();
+    }
+    if (t.closest("[data-cad-make-board]")) return void host.dispatch({ type: "cadMakeBoard", generation: generation() });
     const making = /** @type {HTMLElement | null} */ (t.closest("[data-cad-make-drawing]"));
     if (making) return void host.dispatch({ type: "cadDraw", generation: generation(), blueprint: making.dataset.cadMakeDrawing === "blueprint" });
     if (t.closest("[data-cad-drw-section]") && state.drw) {
@@ -1041,6 +1125,12 @@ export function createCad(host) {
       const text = /** @type {HTMLInputElement} */ (t).value.trim();
       if (text) edit([{ op: "replace", index: Number(/** @type {HTMLElement} */ (t).dataset.cadDrwLine), text }]);
     }
+    if (t.matches("[data-cad-brd-net]")) state.brdNet = /** @type {HTMLSelectElement} */ (t).value;
+    if (t.matches("[data-cad-brd-layer]")) {
+      state.brdLayer = /** @type {HTMLSelectElement} */ (t).value;
+      renderHead();
+    }
+    if (t.matches("[data-cad-brd-width]")) state.brdWidth = /** @type {HTMLInputElement} */ (t).value.trim();
     if (t.matches("[data-cad-sch-kind]")) {
       state.schKind = /** @type {HTMLSelectElement} */ (t).value;
       renderStep();
@@ -1145,6 +1235,19 @@ export function createCad(host) {
       return;
     }
     if (typing || !open) return;
+    if (state.brd && state.tool && e.key === "Escape") {
+      e.preventDefault();
+      if (state.route.length) {
+        state.route = [];
+        state.hover = null;
+        placeSheet();
+      } else {
+        state.tool = null;
+        els.sheet.style.cursor = "grab";
+        render();
+      }
+      return;
+    }
     if (state.sketching != null && sketcher.key(e)) {
       e.preventDefault();
       e.stopPropagation();
@@ -1186,6 +1289,24 @@ export function createCad(host) {
   els.sheet.addEventListener("pointerdown", (e) => {
     const d = sheetDoc();
     if (!d || e.button !== 0) return;
+    // Drawing copper on a board: a click is a point, not a drag.
+    if (state.brd && state.tool) {
+      const [bx, by] = toBoard(e.clientX, e.clientY);
+      const at = snap(state.brd, bx, by);
+      if (state.tool === "via") {
+        if (!state.brdNet) return status("Choose the via's net first.");
+        return edit([{ op: "insert", at: null, text: viaLine(state.brdNet, at.x, at.y) }]);
+      }
+      // A track starts on a pad's net; it ends on a pad.
+      if (!state.route.length && at.pad?.net) {
+        state.brdNet = at.pad.net;
+        renderStep();
+      }
+      state.route.push([at.x, at.y]);
+      if (at.pad && state.route.length >= 2) return finishRoute();
+      placeSheet();
+      return;
+    }
     const at = toSheet(e.clientX, e.clientY);
     const box = boxAt(d, at[0], at[1]);
     try {
@@ -1199,6 +1320,13 @@ export function createCad(host) {
   els.sheet.addEventListener("pointermove", (e) => {
     const g = state.dragging;
     const sd = sheetDoc();
+    if (state.brd && state.tool === "track" && state.route.length) {
+      const [bx, by] = toBoard(e.clientX, e.clientY);
+      const at = snap(state.brd, bx, by);
+      state.hover = [at.x, at.y];
+      placeSheet();
+      return;
+    }
     if (!g || !sd) {
       const at = sd && toSheet(e.clientX, e.clientY);
       const box = at && sd && boxAt(sd, at[0], at[1]);
@@ -1222,7 +1350,7 @@ export function createCad(host) {
     if ("box" in g) {
       const it = boxItem(g.box.name);
       if (it && Math.hypot(g.by[0], g.by[1]) > 0.5) {
-        const line = state.sch ? schematicMoved(state.sch, it, g.by[0], g.by[1]) : moved(it, g.by[0], g.by[1]);
+        const line = state.brd ? boardMoved(state.brd, it, g.by[0], g.by[1]) : state.sch ? schematicMoved(state.sch, it, g.by[0], g.by[1]) : moved(it, g.by[0], g.by[1]);
         state.step = it.index;
         if (line) return edit([{ op: "replace", index: it.index, text: line }]);
       } else if (it) {
@@ -1238,7 +1366,10 @@ export function createCad(host) {
     placeSheet();
   });
 
-  els.sheet.addEventListener("dblclick", () => fitSheet());
+  els.sheet.addEventListener("dblclick", () => {
+    if (state.brd && state.tool === "track" && state.route.length >= 2) return finishRoute();
+    if (!state.tool) fitSheet();
+  });
 
   render();
 
@@ -1254,6 +1385,34 @@ export function createCad(host) {
       renderList();
       if (state.asm) renderStep();
     },
+    /** @param {{board: BoardView | null}} e */
+    board(e) {
+      const was = state.brd?.generation;
+      state.brd = e.board;
+      if (!e.board) {
+        if (was != null) {
+          state.step = null;
+          state.tool = null;
+          state.route = [];
+        }
+      } else {
+        state.part = null;
+        state.asm = null;
+        state.drw = null;
+        state.sch = null;
+        if (was !== e.board.generation) {
+          state.step = null;
+          state.tool = null;
+          state.route = [];
+          state.brdNet = e.board.nets[0]?.name ?? "";
+          state.sketching = null;
+          sketcher.leave();
+        }
+        if (!e.board.nets.some((n) => n.name === state.brdNet)) state.brdNet = e.board.nets[0]?.name ?? "";
+        if (state.step != null && !e.board.items.some((x) => x.index === state.step)) state.step = null;
+      }
+      render();
+    },
     /** @param {{schematic: SchematicView | null}} e */
     schematic(e) {
       const was = state.sch?.generation;
@@ -1264,6 +1423,7 @@ export function createCad(host) {
         state.part = null;
         state.asm = null;
         state.drw = null;
+        state.brd = null;
         if (was !== e.schematic.generation) {
           state.step = null;
           state.sketching = null;
@@ -1290,6 +1450,7 @@ export function createCad(host) {
         state.part = null;
         state.asm = null;
         state.sch = null;
+        state.brd = null;
         if (was !== e.drawing.generation) {
           state.step = null;
           state.sketching = null;
@@ -1320,6 +1481,7 @@ export function createCad(host) {
         state.part = null;
         state.drw = null;
         state.sch = null;
+        state.brd = null;
         if (was !== e.assembly.generation) {
           state.step = null;
           state.picks = [];
@@ -1356,6 +1518,7 @@ export function createCad(host) {
         state.asm = null;
         state.drw = null;
         state.sch = null;
+        state.brd = null;
         if (was !== e.part.generation) {
           state.step = null;
           state.sketching = null;
@@ -1384,7 +1547,7 @@ export function createCad(host) {
       });
     },
     debug() {
-      return { drw: state.drw, sch: state.sch, sheet: state.sheet, toSheet, family: state.family, libValues: state.libValues, asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
+      return { drw: state.drw, sch: state.sch, brd: state.brd, tool: state.tool, route: state.route, brdNet: state.brdNet, toBoard, sheet: state.sheet, toSheet, family: state.family, libValues: state.libValues, asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
     },
   };
 }

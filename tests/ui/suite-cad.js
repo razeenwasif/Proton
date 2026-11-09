@@ -9,6 +9,7 @@ import {PART} from '../../ui/preview-cad-part.js';
 import {ASSEMBLY} from '../../ui/preview-cad-assembly.js';
 import {DRAWING} from '../../ui/preview-cad-drawing.js';
 import {SCHEMATIC} from '../../ui/preview-cad-schematic.js';
+import {BOARD} from '../../ui/preview-cad-board.js';
 
 /** @param {{test: Function, assert: Function, win: any, doc: Document, $: (s: string) => any, settle: () => Promise<void>, key: Function, shown: (el: any) => boolean}} t */
 export async function cadChecks({test, assert, win, doc, $, settle, key, shown}) {
@@ -678,6 +679,74 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     home.requestSubmit(); await settle();
     assert(sent(before, 'cadNewSchematic')[0]?.name === 'GPU adapter', 'the form did not make a schematic');
     await win.pushEvents([part()]); await settle();
+  });
+
+  /** The fan hub's board, as the core sends it. @param {Partial<any>} more */
+  const brd = (more = {}) => ({type: 'cadBoard', board: {...structuredClone(BOARD), generation: 41, dirty: false, ...more}});
+  /** A point of the board, mm, on the page. @param {number} x @param {number} y */
+  const onBoard = (x, y) => {
+    const el = ws().querySelector('[data-cad-sheet]'), r = el.getBoundingClientRect();
+    const ppm = el.querySelector('svg').getBoundingClientRect().width / BOARD.width, sv = debug().sheet;
+    return {clientX: r.left + sv.x + (x + BOARD.origin[0]) * ppm, clientY: r.top + sv.y + (BOARD.height - (y + BOARD.origin[1])) * ppm};
+  };
+  const tap = async (/** @type {{clientX: number, clientY: number}} */ at) => {
+    const sheet = ws().querySelector('[data-cad-sheet]');
+    sheet.dispatchEvent(new win.PointerEvent('pointerdown', {...at, bubbles: true, pointerId: 6, button: 0}));
+    sheet.dispatchEvent(new win.PointerEvent('pointerup', {...at, bubbles: true, pointerId: 6})); await settle();
+  };
+
+  await test('A board shows its copper and what is left to route; a part dragged moves; a schematic lays out its board', async () => {
+    await win.pushEvents([{type: 'cadPart', part: null}, {type: 'cadSchematic', schematic: null}, brd()]); await settle();
+    assert(shown(ws().querySelector('[data-cad-sheet]')) && ws().querySelector('[data-cad-sheet] svg.cd-sheet-svg'), 'the board is not drawn');
+    assert(ws().querySelector('[data-cad-crumb]').textContent === 'hub.schematic · 2 layers · 4 parts · 3 to route · no errors', ws().querySelector('[data-cad-crumb]').textContent);
+    const nets = [...ws().querySelectorAll('.cd-history .cd-net')].map((r) => r.textContent);
+    assert(nets.length === 4 && nets[0].includes('+12V') && nets[0].includes('routed') && nets[2].includes('2 to route'), `the nets: ${nets}`);
+    assert(shown(ws().querySelector('[data-cad-brd-tool="track"]')) && !shown(ws().querySelector('[data-cad-sch-add="part"]')), 'the board\'s buttons are not the ones shown');
+    // J1 dragged 2 mm right.
+    const from = onBoard(25, 22), to = onBoard(27, 22);
+    const sheet = ws().querySelector('[data-cad-sheet]');
+    const before = win.commands.length;
+    sheet.dispatchEvent(new win.PointerEvent('pointerdown', {...from, bubbles: true, pointerId: 6, button: 0}));
+    sheet.dispatchEvent(new win.PointerEvent('pointermove', {...to, bubbles: true, pointerId: 6}));
+    sheet.dispatchEvent(new win.PointerEvent('pointerup', {...to, bubbles: true, pointerId: 6})); await settle();
+    const op = ops(before)[0];
+    assert(op?.op === 'replace' && op.index === 8 && /^place J1 at \(2[67](\.\d+)?, 22\)$/.test(op.text), `J1 was not moved: ${JSON.stringify(ops(before))}`);
+    // A schematic lays out its board.
+    await win.pushEvents([{type: 'cadBoard', board: null}, sch()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    const b2 = win.commands.length;
+    ws().querySelector('[data-cad-make-board]').click(); await settle();
+    assert(sent(b2, 'cadMakeBoard')[0]?.generation === 31, 'Lay out its board did not ask');
+  });
+
+  await test('The track tool draws from pad to pad on the pad\'s net; a via goes where it is put; ⎋ lets go', async () => {
+    await win.pushEvents([{type: 'cadSchematic', schematic: null}, brd()]); await settle();
+    ws().querySelector('[data-cad-brd-tool="track"]').click(); await settle();
+    assert(debug().tool === 'track' && ws().querySelector('[data-cad-crumb]').textContent.includes('drawing a track on F.Cu'), 'the track tool is not on');
+    let before = win.commands.length;
+    // From J1.4, through a corner, to J2.4: the track is PWM's.
+    await tap(onBoard(28.85, 21.95));
+    assert(debug().brdNet === 'PWM' && debug().route.length === 1, `the track did not start on J1.4's net: ${debug().brdNet}`);
+    await tap(onBoard(31.1, 15.1));
+    assert(ws().querySelector('[data-cad-sheet] [data-cad-route]'), 'the track being drawn is not shown');
+    await tap(onBoard(28.8, 8.05));
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'insert', at: null, text: 'track PWM F.Cu (28.81, 22) (31, 15) (28.81, 8)'}]), `the track: ${JSON.stringify(ops(before))}`);
+    assert(!debug().route.length, 'the track was not let go');
+    // ⎋ lets a track go; again, the tool.
+    await tap(onBoard(28.81, 22));
+    ws().querySelector('[data-cad-sheet]').dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+    assert(!debug().route.length && debug().tool === 'track', '⎋ did not let the track go');
+    // A via, on the net chosen, on the layer and with the width given.
+    ws().querySelector('[data-cad-brd-tool="via"]').click(); await settle();
+    const net = ws().querySelector('[data-cad-brd-net]');
+    net.value = 'GND';
+    net.dispatchEvent(new win.Event('change', {bubbles: true}));
+    before = win.commands.length;
+    await tap(onBoard(20.1, 15.1));
+    assert(ops(before)[0]?.text === 'via GND at (20, 15)', `the via: ${JSON.stringify(ops(before))}`);
+    ws().querySelector('[data-cad-sheet]').dispatchEvent(new win.KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); await settle();
+    assert(debug().tool === null, '⎋ did not put the tool down');
+    await win.pushEvents([{type: 'cadBoard', board: null}, part()]); await settle();
   });
 
   await test('CAD\'s Agent tab holds the composer: @cad is a chip, and its keys are its own', async () => {

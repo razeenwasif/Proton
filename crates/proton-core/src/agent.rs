@@ -740,11 +740,11 @@ impl Agent {
             // CAD's files. Writes are held until the person saves.
             Tool {
                 name: "cad_read".into(),
-                description: "The part, assembly, drawing or schematic open in CAD mode — its lines numbered, what it builds (each \
+                description: "The part, assembly, drawing, schematic or board open in CAD mode — its lines numbered, what it builds (each \
                               body's volume, area and size; an assembly's instances, where they are and what holds \
                               them, its bill of materials and tubes; a drawing's views and dimensions; a schematic's parts, nets and \
-                              rules check) and its mistakes, each at its line — and the project's .part, .assembly, \
-                              .drawing and .schematic files; or, with `path`, \
+                              rules check; a board's parts, pads, nets and design rules) and its mistakes, each at its \
+                              line — and the project's .part, .assembly, .drawing, .schematic and .board files; or, with `path`, \
                               that file the same way, the open one as typed."
                     .into(),
                 input_schema: json!({
@@ -793,13 +793,20 @@ impl Agent {
                               its only name; `power` when a cable brings it), `nc REF.PIN, …`; footprints (IPC-7351B) \
                               0201–2512, SOT-23(-5, -6), SOIC-N, TSSOP-N, LQFP-N, QFN-N, header-RxN(-2.0), \
                               mini-fit-jr-2xN, kk-254-N, the PC's connectors taking theirs; its rules check, pins \
-                              against pads too, comes back with it. The library's parts (boards, cards, fans, radiators, fittings, the FormD \
+                              against pads too, comes back with it. A .board (made from a schematic): `board \"T\"`, \
+                              `of \"x.schematic\"`, `layers 2|4`, `copper 1` (oz), `rules clearance 0.2 track 0.25 via \
+                              0.6/0.3 edge 0.3 rise 10`, `outline rect (0, 0) size (60, 40) [corner 2]` (or `points (x, \
+                              y) …`, or `from \"case.part\" sketch NAME`), `hole at (x, y) drill 3.2`, `place REF at \
+                              (x, y) [turn 90] [back]`, `track NET F.Cu|In1.Cu|In2.Cu|B.Cu [width W] (x, y) (x, y) …`, \
+                              `via NET at (x, y) [size 0.6/0.3]`, `zone NET LAYER (x, y) … [clearance C] [thermal T]` — \
+                              mm, y up; cad_read gives every pad's place and net; its design rules (clearance, shorts, \
+                              edge, IPC-2221 width for each net's current, what is left to route) come back with it. The library's parts (boards, cards, fans, radiators, fittings, the FormD \
                               T1) are in the project's library/ folder when made from CAD's home page."
                     .into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "In the project, ending .part, .assembly, .drawing or .schematic." },
+                        "path": { "type": "string", "description": "In the project, ending .part, .assembly, .drawing, .schematic or .board." },
                         "text": { "type": "string" },
                         "old_text": { "type": "string" },
                         "new_text": { "type": "string" }

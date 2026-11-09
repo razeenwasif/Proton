@@ -311,7 +311,7 @@ fn mtime(p: &Path) -> Option<SystemTime> {
 }
 
 /// A file the assembly names, read if it is in the project.
-fn load_inside(root: &Path) -> impl Fn(&Path) -> Result<String, String> {
+pub(crate) fn load_inside(root: &Path) -> impl Fn(&Path) -> Result<String, String> {
     let base = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     move |p: &Path| {
         let real = std::fs::canonicalize(p).map_err(|e| format!("{}: {e}", p.display()))?;
@@ -773,6 +773,24 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let out = format!("/* A fan hub's schematic the browser preview shows, as the core draws it —\n * written by `cargo test -p proton-core --lib dump_schematic_for_the_preview -- --ignored`;\n * not edited by hand. */\n\n/** @type {{any}} */\nexport const SCHEMATIC = {json};\n");
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/preview-cad-schematic.js");
+        std::fs::write(&path, out).unwrap();
+        println!("wrote {} ({} bytes)", path.display(), std::fs::metadata(&path).unwrap().len());
+    }
+
+    /// `cargo test -p proton-core --lib dump_board_for_the_preview -- --ignored`
+    /// writes `ui/preview-cad-board.js`: the fan hub's board, half routed.
+    #[test]
+    #[ignore]
+    fn dump_board_for_the_preview() {
+        let root = scratch("preview-board");
+        std::fs::write(root.join("hub.schematic"), "schematic \"Hub\"\npart P1 header 2 footprint header-1x2\npart J1 fan-4pin\npart J2 fan-4pin\npart R1 resistor value 10k footprint 0805\nnet +12V power P1.1, J1.2, J2.2 current 2\nnet GND power P1.2, J1.1, J2.1\nnet PWM J1.4, J2.4, R1.1\nnet PU R1.2, J1.3\nnc J2.3\n").unwrap();
+        std::fs::write(root.join("hub.board"), "board \"Hub\"\nof \"hub.schematic\"\nlayers 2\ncopper 1\nrules clearance 0.2 track 0.25 via 0.6/0.3 edge 0.3 rise 10\noutline rect (0, 0) size (40, 30) corner 2\nhole at (3, 27) drill 3.2\nplace P1 at (5, 15) turn 90\nplace J1 at (25, 22)\nplace J2 at (25, 8)\nplace R1 at (33, 15) turn 90\ntrack +12V F.Cu width 1 (5, 13.73) (12, 13.73) (12, 19) (23.73, 19) (23.73, 22)\ntrack +12V F.Cu width 1 (12, 13.73) (12, 11) (23.73, 11) (23.73, 8)\nzone GND B.Cu (1, 1) (39, 1) (39, 25) (1, 25) clearance 0.3 thermal 0.5\n").unwrap();
+        let mut c = Cads::default();
+        let mut b = c.apply(&root, Command::CadOpen { path: "hub.board".into() }).into_iter().rev().find_map(|e| if let Event::CadBoard { board: Some(b) } = e { Some(*b) } else { None }).expect("the board");
+        b.generation = 0;
+        let json = serde_json::to_string(&b).unwrap();
+        let out = format!("/* A fan hub's board the browser preview shows, as the core draws it —\n * written by `cargo test -p proton-core --lib dump_board_for_the_preview -- --ignored`;\n * not edited by hand. */\n\n/** @type {{any}} */\nexport const BOARD = {json};\n");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/preview-cad-board.js");
         std::fs::write(&path, out).unwrap();
         println!("wrote {} ({} bytes)", path.display(), std::fs::metadata(&path).unwrap().len());
     }

@@ -3400,6 +3400,9 @@ function renderEvent(event) {
     case "cadSchematic":
       cad?.schematic(event);
       break;
+    case "cadBoard":
+      cad?.board(event);
+      break;
     case "cadFamilies":
       cad?.families(event);
       break;

@@ -770,6 +770,11 @@ pub enum Command {
     CadNewSchematic {
         name: String,
     },
+    /// A first board for the schematic open: `NAME.board` beside it, its
+    /// parts set out; one there already is opened.
+    CadMakeBoard {
+        generation: u32,
+    },
     /// The open assembly's parts checked for overlaps and for gaps nearer
     /// than its clearance.
     CadFit {
@@ -1411,6 +1416,10 @@ pub enum Event {
     /// The schematic open, checked and drawn — or none.
     CadSchematic {
         schematic: Option<Box<crate::cad_schematic::CadSchematicView>>,
+    },
+    /// The board open, built, checked and drawn — or none.
+    CadBoard {
+        board: Option<Box<crate::cad_board::CadBoardView>>,
     },
     /// The project's `.logic`, `.proof` and `.l4f` files, for Logic's home page.
     LogicHome {

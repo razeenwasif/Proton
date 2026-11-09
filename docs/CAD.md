@@ -870,6 +870,50 @@ a footprint unknown; the KiCad file and the drawing; in the core, a fan's
 footprint sent and the library written; in the browser, a part's footprint
 drawn.
 
+E2 — the board. A `.board` is made from a schematic — `board "T"`, `of
+"hub.schematic"`, `layers 2|4`, `copper OZ`, `rules clearance C track W via
+PAD/DRILL edge E rise °C`, `outline rect (x, y) size (w, h) [corner r]`,
+`outline points …` or `outline from "case.part" sketch NAME` (the board cut
+to a part's sketch, its holes too, so it fits where it goes), `hole at (x,
+y) drill D`, `place REF at (x, y) [turn 90] [back]`, `track NET LAYER [width
+W] (x, y) …`, `via NET at (x, y) [size P/D]`, `zone NET LAYER (x, y) …
+[clearance C] [thermal T]` — mm, y up, KiCad's layer names. Built, each
+part's footprint is set where it is placed (turned, mirrored to the back),
+its pads take their nets from the schematic, and every piece of copper is a
+point, a segment or a polygon with how far it reaches. Copper of one net
+that touches is joined; of two, a short; nearer than the clearance, said
+with how near; a zone joins its own net's copper that touches it, poured
+round others' by its clearance with spokes to its pads. Each net's pads
+still apart are joined by the shortest connections (the ratsnest), said to
+be routed or not. Copper off the board or nearer its edge than the edge
+rule, a track narrower than the rule or than IPC-2221's width for its
+net's current (I = k·ΔT^0.44·A^0.725, k 0.048 outside and 0.024 inside, the
+inside at 0.5 oz; IPC-2152 has only charts, and 2221's is the more
+cautious inside), a via's drill under the rule, a layer the board has not,
+a net or part the schematic has not, a part with no footprint, not placed
+(set out under the board till it is), past the edge, or over another — each
+said at its line. A first board is laid out from the schematic open: its
+parts in rows on a board sized to them, two layers, the usual rules, and
+it breaks none. Drawn from the front: the edge, each layer's copper (the
+back's under), zones with spokes, holes, courtyards, names, the ratsnest
+dashed. In the window parts are dragged where they go, and the track tool
+draws from a pad, on its net, through corners snapped to a quarter
+millimetre, to a pad (or a double-click), on the layer and at the width
+chosen, ⎋ letting go; the via tool puts vias. The agent writes boards too,
+and is told every pad's place and net. Tested (6 + 1 + 1 + 2): the language
+read and written back, nine mistakes; IPC-2221's width worked by hand (1 A
+0.30 mm, 4 A 2.03 mm on 1 oz outside at 10 °C); a fan hub's board routed
+clean, its ground joined by a zone, three connections left as the ratsnest,
++12V's width for 2 A; a short, a clearance of 0.115, the edge, a small
+drill, a missing layer, an unknown net, a thin track and a track too thin
+for its current, a part with no footprint, one not placed, two over each
+other; an outline cut from a part's sketch with its hole, a via in the hole
+off the board; the drawing; in the core, a first board made from a
+schematic breaking no rule, a track routing a connection, a part moved,
+written as SVG, made again and opened; through the agent's tools; in the
+browser, its lists and crumb, a part dragged, a board laid out from a
+schematic, a track drawn pad to pad on the pad's net, ⎋, a via.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

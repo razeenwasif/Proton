@@ -10,8 +10,12 @@
 //! - [`footprint`]: land patterns by IPC-7351B, holes for headers and
 //!   connectors, written for KiCad.
 //! - [`sheet`]: the schematic drawn on a sheet.
+//! - [`board_lang`]: the `.board` language; [`board`]: a board built, its
+//!   copper joined, its rules checked, and drawn.
 //! - [`netlist`]: its netlist for KiCad, and its bill of materials.
 
+pub mod board;
+pub mod board_lang;
 pub mod build;
 pub mod footprint;
 pub mod lang;
@@ -24,3 +28,5 @@ pub use lang::{read, write, Schematic};
 
 /// A schematic's file ends so.
 pub const EXTENSION: &str = "schematic";
+/// And a board's.
+pub const BOARD: &str = "board";
