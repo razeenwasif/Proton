@@ -116,7 +116,10 @@ fn the_pc_connectors_are_their_standards_pin_for_pin() {
 #[test]
 fn a_fan_hub_is_built_its_nets_found_and_nothing_wrong() {
     let b = build(&read(HUB).unwrap());
-    assert!(b.findings.is_empty(), "{:?}", b.findings);
+    // Nothing wrong; only the fan headers' holes to check against their
+    // maker's drawing.
+    assert_eq!(b.errors(), 0, "{:?}", b.findings);
+    assert!(b.findings.iter().all(|f| f.message.contains("check the holes")) && b.findings.len() == 5, "{:?}", b.findings);
     assert_eq!(b.parts.len(), 9);
     let net = |n: &str| b.nets.iter().find(|x| x.name == n).unwrap();
     assert_eq!(net("+12V").pins.len(), 8);
@@ -210,6 +213,6 @@ fn the_netlist_and_bill_of_materials_are_written() {
     assert_eq!(depth, 0);
     let csv = bom(&b);
     assert!(csv.starts_with("Item,Quantity,References,Part,Value,Footprint\n"));
-    assert!(csv.contains(",5,J1 J2 J3 J4 J5,4-pin PWM fan,,\n"), "{csv}");
+    assert!(csv.contains(",5,J1 J2 J3 J4 J5,4-pin PWM fan,,kk-254-4\n"), "{csv}");
     assert!(csv.contains(",1,R1,Resistor,10k,0603\n"), "{csv}");
 }

@@ -609,10 +609,10 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     assert(shown(sheet) && sheet.querySelector('svg.cd-sheet-svg'), 'the schematic\'s sheet is not shown');
     const rows = [...ws().querySelectorAll('.cd-history [data-cad-step]')].map((b) => b.querySelector('.cd-row-name').textContent);
     assert(rows.join() === 'Fan hub,P1,J1,J2,J3,C1,+12V,GND,PWM,TACH,unconnected', `the statements: ${rows}`);
-    assert(ws().querySelector('[data-cad-crumb]').textContent === '5 parts · 4 nets · no errors, 3 warnings', ws().querySelector('[data-cad-crumb]').textContent);
+    assert(ws().querySelector('[data-cad-crumb]').textContent === '5 parts · 4 nets · no errors, 6 warnings', ws().querySelector('[data-cad-crumb]').textContent);
     const p1 = ws().querySelector('.cd-history [data-cad-step="2"]');
     assert(p1.classList.contains('later') && !p1.classList.contains('bad'), 'a warning is marked as an error');
-    assert(ws().querySelectorAll('[data-cad-settings] .cd-findings li').length === 3, 'the rules check is not listed');
+    assert(ws().querySelectorAll('[data-cad-settings] .cd-findings li').length === 6, 'the rules check is not listed');
     assert(shown(ws().querySelector('[data-cad-sch-add="part"]')) && !shown(ws().querySelector('[data-cad-drw-add="view"]')), 'the schematic\'s buttons are not the ones shown');
     // J1 dragged 30 px right.
     const j1 = SCHEMATIC.parts.find((p) => p.reference === 'J1');
@@ -630,6 +630,10 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     const pins = [...ws().querySelectorAll('[data-cad-settings] .cd-pins tr')].slice(1).map((tr) => tr.lastElementChild.textContent);
     assert(pins.length === 15 && pins[12] === '+12V' && pins[3] === 'GND' && pins[0] === '—' && pins[6] === 'none', `P1's pins: ${pins}`);
     assert(ws().querySelector('[data-cad-settings]').textContent.includes('Serial ATA'), 'the pinout\'s source is not said');
+    // A fan's footprint, drawn.
+    ws().querySelector('.cd-history [data-cad-step="3"]').click(); await settle();
+    const land = ws().querySelector('[data-cad-settings] [data-cad-land] svg');
+    assert(land && ws().querySelector('[data-cad-settings]').textContent.includes('4 pads, from KK 254'), 'the fan\'s footprint is not shown');
   });
 
   await test('A schematic\'s settings add a part and a net, set its sheet, and write it out', async () => {
@@ -660,7 +664,7 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     size.value = 'A3';
     size.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
     assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'replace', index: 1, text: 'sheet A3'}]), `the sheet: ${JSON.stringify(ops(before))}`);
-    for (const f of ['net', 'csv', 'pdf']) {
+    for (const f of ['net', 'csv', 'pdf', 'kicad']) {
       before = win.commands.length;
       ws().querySelector(`[data-cad-settings] [data-cad-export="${f}"]`).click(); await settle();
       assert(sent(before, 'cadExport')[0]?.format === f && sent(before, 'cadExport')[0]?.generation === 31, `Write ${f} did not ask`);

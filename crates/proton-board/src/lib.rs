@@ -7,10 +7,13 @@
 //! - [`lang`]: the `.schematic` language.
 //! - [`build`]: a schematic's parts placed, its nets found, its rules
 //!   checked.
+//! - [`footprint`]: land patterns by IPC-7351B, holes for headers and
+//!   connectors, written for KiCad.
 //! - [`sheet`]: the schematic drawn on a sheet.
 //! - [`netlist`]: its netlist for KiCad, and its bill of materials.
 
 pub mod build;
+pub mod footprint;
 pub mod lang;
 pub mod netlist;
 pub mod sheet;

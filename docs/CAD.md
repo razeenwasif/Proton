@@ -841,6 +841,35 @@ agent's tools; in the browser, its lists and rules, a part dragged and
 moved, its pins, a part and a net added, a bad name refused, the sheet's
 size, written out, made from the home page.
 
+E1 — footprints. `proton_board::footprint`: surface-mount lands by
+IPC-7351B's equations — Z = Lmin + 2Jt + √(CL² + F² + P²), G = Smax −
+2Jh − √(CS² + F² + P²), X = Wmin + 2Js + √(CW² + F² + P²), S's tolerance
+the root of its parts' squares, F 0.10 and P 0.05 as KiCad's generator
+takes them, Z and X rounded up and G down to 0.05, a 0.25 courtyard — at
+the nominal density: chips 0603 and up toe 0.35, heel 0, side 0, and
+gull-wing leads 0.35, 0.35, 0.03, as published second hand (the standard is
+sold); chips smaller than 0603 and QFNs from goals remembered, and said to
+be by a caution the rules check repeats. Chips 0201–2512 from typical
+thick-film dimensions; SOT-23 (and -5, -6), SOIC-8–16, TSSOP-8–28,
+LQFP-32/44/48/64/100 and QFN-16/20/24/32/48 from JEDEC's outlines, numbered
+as their packages are (QFNs with their exposed pad); pin headers of one or
+two rows at 2.54, 2.0 or 1.27; Mini-Fit Jr. at 4.2 mm and KK 254 at 2.54,
+cautioned until checked against the makers' drawings. A part takes its
+line's `footprint`, or its kind's own — ATX and EPS and PCIe a Mini-Fit
+Jr.'s, a fan a KK 254's, the USB headers pin headers — and the rules check
+says which pins have no pad and which pads no pin (a key needs none). A
+footprint is written as KiCad's `.kicad_mod` (its y down), every part's
+together as `NAME.pretty` beside the schematic, and drawn for the window:
+a part chosen shows its footprint, its pads and where its lands are from.
+Tested (5 + 1 + 1): a 0603's lands against the equations worked by hand
+(pads 0.90 × 0.95 at ±0.775) and an SOIC-8's (2.0 × 0.6 at ±2.475, where
+KiCad puts them), every chip and package sound — pads apart, inside the
+courtyard — and numbered as its outline, SOT-23-5's missing pin, QFN's
+exposed pad; headers' holes and pitches, Mini-Fit Jr.'s; pins against pads,
+a footprint unknown; the KiCad file and the drawing; in the core, a fan's
+footprint sent and the library written; in the browser, a part's footprint
+drawn.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

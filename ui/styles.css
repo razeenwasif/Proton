@@ -4090,6 +4090,9 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cd-findings li.bad { color: var(--text); }
 .cd-findings li.bad span { color: var(--cd-bad); }
 .cd-pins td:first-child { width: 34px; }
+/* A part's footprint, drawn to fit its card. */
+.cd-land { margin: 4px 0 6px; padding: 8px; border-radius: 6px; background: #fff; }
+.cd-land svg { display: block; width: 100%; height: auto; max-height: 180px; }
 .cd-check { display: flex; align-items: center; gap: 6px; margin: 2px 0 8px; color: var(--muted); font: var(--z-xs)/1.3 var(--zed); }
 .cd-banner { position: absolute; top: 10px; left: 12px; right: 12px; padding: 7px 10px; border-radius: 6px;
   background: color-mix(in srgb, var(--cd-bad) 16%, var(--bg)); color: var(--text); font: var(--z-xs)/1.45 var(--zed); pointer-events: none; }

@@ -24,6 +24,8 @@ pub struct Placed {
     pub symbol: Symbol,
     pub value: Option<String>,
     pub footprint: Option<String>,
+    /// The footprint it is soldered to: the line's, or its kind's own.
+    pub land: Option<crate::footprint::Footprint>,
     /// Its middle on the sheet, mm; placed for it if the file does not say.
     pub at: [f64; 2],
     pub placed: bool,
@@ -121,8 +123,30 @@ pub fn build(s: &Schematic) -> Built {
         if numbers.windows(2).any(|x| x[0] == x[1]) {
             findings.push(err(l.line, format!("{}: two pins have one number", p.reference)));
         }
+        // Its footprint: the line's, or its kind's own; its pads its pins.
+        let named = p.footprint.clone().or_else(|| crate::footprint::default_for(&symbol).map(str::to_string));
+        let land = match named.as_deref().map(crate::footprint::footprint) {
+            Some(Ok(f)) => {
+                let (no_pad, no_pin) = crate::footprint::mismatch(&symbol, &f);
+                if !no_pad.is_empty() {
+                    findings.push(err(l.line, format!("{}: its footprint {} has no pad for pin{} {}", p.reference, f.name, if no_pad.len() == 1 { "" } else { "s" }, no_pad.join(", "))));
+                }
+                if !no_pin.is_empty() {
+                    findings.push(err(l.line, format!("{}: its footprint {}'s pad{} {} {} no pin", p.reference, f.name, if no_pin.len() == 1 { "" } else { "s" }, no_pin.join(", "), if no_pin.len() == 1 { "has" } else { "have" })));
+                }
+                if let Some(c) = &f.caution {
+                    findings.push(warn(l.line, format!("{}: {c}", p.reference)));
+                }
+                Some(f)
+            }
+            Some(Err(e)) => {
+                findings.push(err(l.line, format!("{}: {e}", p.reference)));
+                None
+            }
+            None => None,
+        };
         by_ref.insert(p.reference.clone(), parts.len());
-        parts.push(Placed { reference: p.reference.clone(), line: l.line, index, symbol, value: p.value.clone(), footprint: p.footprint.clone(), at: p.at.unwrap_or([0.0, 0.0]), placed: p.at.is_none(), turn: p.turn, mirror: p.mirror });
+        parts.push(Placed { reference: p.reference.clone(), line: l.line, index, symbol, value: p.value.clone(), footprint: named, land, at: p.at.unwrap_or([0.0, 0.0]), placed: p.at.is_none(), turn: p.turn, mirror: p.mirror });
     }
     // Those the file does not place, set out in rows from the top left.
     let (mut x, mut y) = (35.0, h - 45.0);

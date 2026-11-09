@@ -48,6 +48,12 @@ pub struct CadSchematicPart {
     pub pins: Vec<CadPinRow>,
     pub source: String,
     pub caution: Option<String>,
+    /// Its footprint drawn, millimetres, as SVG; how many pads; and where
+    /// its lands are from, and any caution on them.
+    pub land_svg: Option<String>,
+    pub pads: u32,
+    pub land_source: Option<String>,
+    pub land_caution: Option<String>,
 }
 
 /// A net: its pins, what drives it, what it carries.
@@ -154,6 +160,10 @@ pub fn view(s: &Schematic, b: &Built, path: &str, name: &str, generation: u32) -
                 .collect(),
             source: p.symbol.source.into(),
             caution: p.symbol.caution.map(str::to_string),
+            land_svg: p.land.as_ref().map(|f| out::svg(&proton_board::footprint::draw(f))),
+            pads: p.land.as_ref().map_or(0, |f| f.pads.len() as u32),
+            land_source: p.land.as_ref().map(|f| f.source.clone()),
+            land_caution: p.land.as_ref().and_then(|f| f.caution.clone()),
         })
         .collect();
     let nets = b
@@ -192,14 +202,33 @@ pub fn view(s: &Schematic, b: &Built, path: &str, name: &str, generation: u32) -
 }
 
 /// The schematic written beside its file: `svg` or `pdf` its sheet, `net`
-/// its netlist for KiCad, `csv` its bill of materials.
+/// its netlist for KiCad, `csv` its bill of materials, `kicad` its parts'
+/// footprints as a KiCad library, `NAME.pretty`.
 pub fn export(b: &Built, file: &Path, shown: &str, format: &str) -> Result<String, String> {
+    if format == "kicad" {
+        let dir = file.with_extension("pretty");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let mut written: Vec<String> = Vec::new();
+        for f in b.parts.iter().filter_map(|p| p.land.as_ref()) {
+            if written.contains(&f.name) {
+                continue;
+            }
+            let to = dir.join(format!("{}.kicad_mod", f.name));
+            std::fs::write(&to, proton_board::footprint::kicad_mod(f)).map_err(|e| format!("{}: {e}", to.display()))?;
+            written.push(f.name.clone());
+        }
+        if written.is_empty() {
+            return Err("no part has a footprint yet: give one, `footprint 0603`".into());
+        }
+        let shown = Path::new(shown).with_extension("pretty").to_string_lossy().replace('\\', "/");
+        return Ok(format!("{shown} ({} footprint{})", written.len(), if written.len() == 1 { "" } else { "s" }));
+    }
     let (bytes, ext): (Vec<u8>, &str) = match format {
         "svg" => (out::svg(&proton_board::sheet::draw(b, shown)).into_bytes(), "svg"),
         "pdf" => (out::pdf(&proton_board::sheet::draw(b, shown)), "pdf"),
         "net" => (proton_board::netlist::kicad(b, shown).into_bytes(), "net"),
         "csv" => (proton_board::netlist::bom(b).into_bytes(), "csv"),
-        other => return Err(format!("a schematic is written as SVG, PDF, a netlist (net) or a bill of materials (csv), not `{other}`")),
+        other => return Err(format!("a schematic is written as SVG, PDF, a netlist (net), a bill of materials (csv) or KiCad footprints (kicad), not `{other}`")),
     };
     let to = file.with_extension(ext);
     std::fs::write(&to, bytes).map_err(|e| format!("{}: {e}", to.display()))?;

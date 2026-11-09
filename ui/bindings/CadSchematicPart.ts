@@ -8,4 +8,9 @@ export type CadSchematicPart = { index: number, line: number, reference: string,
 /**
  * Where it is on the sheet, and whether the file says so.
  */
-at: Array<number>, placed: boolean, pins: Array<CadPinRow>, source: string, caution: string | null, };
+at: Array<number>, placed: boolean, pins: Array<CadPinRow>, source: string, caution: string | null, 
+/**
+ * Its footprint drawn, millimetres, as SVG; how many pads; and where
+ * its lands are from, and any caution on them.
+ */
+landSvg: string | null, pads: number, landSource: string | null, landCaution: string | null, };

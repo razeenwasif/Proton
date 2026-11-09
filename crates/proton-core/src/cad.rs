@@ -1898,6 +1898,12 @@ mod tests {
             let said = c.apply(&root, Command::CadExport { generation: g, format: f.into() });
             assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == &format!("wrote fan-hub.{f}"))), "{said:?}");
         }
+        // The fan's footprint, its family's, as a KiCad library.
+        assert_eq!((s.parts[1].pads, s.parts[1].land_source.as_deref()), (4, Some("KK 254's 2.54 mm pitch")));
+        assert!(s.parts[1].land_svg.as_ref().is_some_and(|x| x.starts_with("<svg")) && s.parts[1].land_caution.is_some());
+        let said = c.apply(&root, Command::CadExport { generation: g, format: "kicad".into() });
+        assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "wrote fan-hub.pretty (1 footprint)")), "{said:?}");
+        assert!(std::fs::read_to_string(root.join("fan-hub.pretty/kk-254-4.kicad_mod")).unwrap().starts_with("(footprint \"kk-254-4\""));
         assert!(std::fs::read_to_string(root.join("fan-hub.net")).unwrap().contains("(name \"+12V\")"));
         assert!(std::fs::read_to_string(root.join("fan-hub.csv")).unwrap().contains("4-pin PWM fan"));
         // Not drawn as a part is: it is its own sheet.

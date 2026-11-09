@@ -790,8 +790,10 @@ impl Agent {
                               power-in, power-out, open-collector, open-emitter, nc, and the PC's connectors atx-24, \
                               eps-8, pcie-6, pcie-8, 12v-2x6, sata-power, fan-4pin, argb-5v, usb2-header, usb3-header, \
                               usb-c-header; `net NAME [power] REF.PIN, REF.PIN … [current A]` (a pin by number or by \
-                              its only name; `power` when a cable brings it), `nc REF.PIN, …`; its rules check comes \
-                              back with it. The library's parts (boards, cards, fans, radiators, fittings, the FormD \
+                              its only name; `power` when a cable brings it), `nc REF.PIN, …`; footprints (IPC-7351B) \
+                              0201–2512, SOT-23(-5, -6), SOIC-N, TSSOP-N, LQFP-N, QFN-N, header-RxN(-2.0), \
+                              mini-fit-jr-2xN, kk-254-N, the PC's connectors taking theirs; its rules check, pins \
+                              against pads too, comes back with it. The library's parts (boards, cards, fans, radiators, fittings, the FormD \
                               T1) are in the project's library/ folder when made from CAD's home page."
                     .into(),
                 input_schema: json!({

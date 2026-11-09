@@ -94,7 +94,10 @@ export function schematicSettingsHtml(s, st) {
     const part = it.kind === "part" ? s.parts.find((p) => p.reference === it.name) : null;
     if (part) {
       more = `<table class="cd-bom cd-pins"><tr><th>Pin</th><th>Name</th><th>Does</th><th>Net</th></tr>${part.pins.map((x) => `<tr><td>${esc(x.number)}</td><td>${esc(x.name)}</td><td>${esc(x.kind)}</td><td>${x.net ? esc(x.net) : x.nc || x.kind === "nc" ? "—" : `<span class="cd-bad-text">none</span>`}</td></tr>`).join("")}</table>` +
-        `<p class="cd-muted">${esc(part.title)} — its pinout from ${esc(part.source)}.</p>` + (part.caution ? `<p class="cd-bad-text">${esc(part.caution)}</p>` : "");
+        `<p class="cd-muted">${esc(part.title)} — its pinout from ${esc(part.source)}.</p>` + (part.caution ? `<p class="cd-bad-text">${esc(part.caution)}</p>` : "") +
+        (part.landSvg
+          ? `<div class="cd-head">Footprint ${esc(part.footprint ?? "")}</div><div class="cd-land" data-cad-land>${part.landSvg}</div><p class="cd-muted">${part.pads} pad${part.pads === 1 ? "" : "s"}, from ${esc(part.landSource ?? "")}.</p>` + (part.landCaution ? `<p class="cd-bad-text">${esc(part.landCaution)}</p>` : "")
+          : `<p class="cd-muted">No footprint yet: say one, \`footprint 0603\`, \`SOIC-8\`, \`header-1x4\`.</p>`);
     }
     const net = it.kind === "net" ? s.nets.find((n) => n.name === it.name) : null;
     if (net) more = `<p class="cd-muted">Joins ${net.pins.map(esc).join(", ") || "nothing"}${net.power ? ", powered from off the board" : ""}${net.current != null ? `; carries ${net.current} A` : ""}.</p>`;
@@ -121,6 +124,6 @@ export function schematicSettingsHtml(s, st) {
     field("Current, A", `<input name="current" placeholder="for its tracks' width" aria-label="The current it carries">`) +
     `<label class="cd-check"><input type="checkbox" name="power"> Powered from off the board — a supply's cable</label>` +
     `<div class="cd-row-btns"><button class="cd-btn" type="submit">Add net</button></div></form>` +
-    `<section class="cd-card"><div class="cd-head">Write it</div><p class="cd-muted">Beside the schematic: the sheet as PDF or SVG, the netlist for KiCad, the bill of materials as CSV.</p>` +
-    `<div class="cd-row-btns"><button class="cd-btn" data-cad-export="pdf">Write PDF</button><button class="cd-btn" data-cad-export="svg">Write SVG</button><button class="cd-btn" data-cad-export="net">Netlist</button><button class="cd-btn" data-cad-export="csv">Bill of materials</button></div></section>` + pinList;
+    `<section class="cd-card"><div class="cd-head">Write it</div><p class="cd-muted">Beside the schematic: the sheet as PDF or SVG, the netlist for KiCad, the bill of materials as CSV, and the parts' footprints as a KiCad library.</p>` +
+    `<div class="cd-row-btns"><button class="cd-btn" data-cad-export="pdf">Write PDF</button><button class="cd-btn" data-cad-export="svg">Write SVG</button><button class="cd-btn" data-cad-export="net">Netlist</button><button class="cd-btn" data-cad-export="csv">Bill of materials</button><button class="cd-btn" data-cad-export="kicad" title="Each part's footprint, as a KiCad library beside the schematic">KiCad footprints</button></div></section>` + pinList;
 }
