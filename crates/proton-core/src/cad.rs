@@ -270,6 +270,20 @@ pub struct CadPartView {
     pub can_redo: bool,
     /// Everything built and drawn, as a box: low corner, then high.
     pub bounds: Vec<f64>,
+    /// Each sheet-metal body's flat: its name, length, width and bends.
+    pub flats: Vec<CadFlat>,
+}
+
+/// A sheet-metal body flat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CadFlat {
+    pub name: String,
+    pub length: f64,
+    pub width: f64,
+    pub thickness: f64,
+    pub bends: u32,
 }
 
 /// An edit the window makes: lines of the language added, replaced or
@@ -974,6 +988,7 @@ fn item_name(i: &Item) -> Option<&str> {
         Item::Shell(sh) => Some(&sh.name),
         Item::Sweep(sw) => Some(&sw.name),
         Item::Loft(l) => Some(&l.name),
+        Item::Sheet(s) => Some(&s.name),
         _ => None,
     }
 }
@@ -1057,6 +1072,7 @@ fn rename(p: &mut Part, old: &str, new: &str) {
                 }
                 body(&mut l.into);
             }
+            Item::Sheet(s) if s.sketch == old => s.sketch = new.to_string(),
             _ => {}
         }
     }
@@ -1305,6 +1321,16 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
                 body: sw.into.as_ref().map(|(_, b)| b.clone()),
                 ..blank
             },
+            Item::Sheet(s) => CadStep {
+                kind: "sheet".into(),
+                name: s.name.clone(),
+                text: line_of(&n.item),
+                sketch: Some(s.sketch.clone()),
+                value: Some(print::expr(&s.thickness)),
+                other: Some(print::expr(&s.bend)),
+                distance: Some(print::expr(&s.width)),
+                ..blank
+            },
             Item::Loft(l) => CadStep {
                 kind: "loft".into(),
                 name: l.name.clone(),
@@ -1350,6 +1376,7 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
         can_undo: false,
         can_redo: false,
         bounds: if bounds.is_empty() { vec![-50.0, -50.0, -50.0, 50.0, 50.0, 50.0] } else { vec![bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z] },
+        flats: m.flats.iter().map(|f| CadFlat { name: f.name.clone(), length: f.length, width: f.width, thickness: f.thickness, bends: f.bends.len() as u32 }).collect(),
     }
 }
 
@@ -1548,6 +1575,20 @@ fn export(open: &Open, format: &str) -> Result<String, String> {
     let m = model::build(&p);
     if m.bodies.is_empty() {
         return Err("there is nothing built to write: extrude or revolve a sketch first".into());
+    }
+    if format == "flat" {
+        // Each sheet's flat pattern, as DXF beside the part.
+        if m.flats.is_empty() {
+            return Err("there is no sheet metal to lay flat: `sheet NAME from SKETCH thickness T bend R width W`".into());
+        }
+        let stem = open.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut wrote = Vec::new();
+        for f in &m.flats {
+            let file = open.path.with_file_name(format!("{stem}-{}-flat.dxf", f.name));
+            std::fs::write(&file, proton_cad::drawing::out::dxf(&proton_cad::sheetmetal::flat_sheet(f))).map_err(|e| format!("{}: {e}", file.display()))?;
+            wrote.push(Path::new(&open.shown).with_file_name(format!("{stem}-{}-flat.dxf", f.name)).to_string_lossy().replace('\\', "/"));
+        }
+        return Ok(wrote.join(", "));
     }
     if format == "step" {
         let bodies: Vec<(&str, &proton_cad::brep::Solid)> = m.bodies.iter().map(|b| (b.name.as_str(), &b.solid)).collect();
@@ -2078,6 +2119,24 @@ mod tests {
     }
 
     #[test]
+    fn a_sheet_metal_bracket_is_listed_and_laid_flat_as_dxf() {
+        let root = scratch("sheet");
+        let mut c = Cads::default();
+        let g = view(&c.apply(&root, Command::CadNew { name: "Pump bracket".into() })).generation;
+        let v = edit(&mut c, &root, g, vec![CadOp::Insert { at: None, text: "sketch s on XY\n  line a (0, 0) (30, 0)\n  line b a.end (30, 20)\nend\nsheet bracket from s thickness 1.5 bend 1.5 width 40".into() }]);
+        assert!(v.errors.is_empty(), "{:?}", v.errors);
+        let step = v.steps.iter().find(|s| s.kind == "sheet").unwrap();
+        assert_eq!((step.sketch.as_deref(), step.value.as_deref(), step.other.as_deref(), step.distance.as_deref()), (Some("s"), Some("1.5"), Some("1.5"), Some("40")));
+        assert_eq!(v.flats.len(), 1);
+        assert!((v.flats[0].length - 47.3929).abs() < 1e-3 && v.flats[0].bends == 1, "{:?}", v.flats);
+        c.apply(&root, Command::CadSave);
+        let said = c.apply(&root, Command::CadExport { generation: g, format: "flat".into() });
+        assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "wrote pump-bracket-bracket-flat.dxf")), "{said:?}");
+        let dxf = std::fs::read_to_string(root.join("pump-bracket-bracket-flat.dxf")).unwrap();
+        assert!(proton_cad::drawing::out::read_dxf(&dxf).unwrap().iter().any(|e| e.1 == "CENTER"));
+    }
+
+    #[test]
     fn an_assemblys_blueprint_is_drawn_on_blue() {
         let root = scratch("blueprint");
         std::fs::write(root.join("plate.part"), "part \"Plate\"\nsketch s on XY\n  rect r corner origin size = (100, 60)\nend\nextrude plate from s distance 4\n").unwrap();
@@ -2112,7 +2171,7 @@ mod preview {
         std::fs::write(root.join("pump-bracket.part"), SAMPLE).unwrap();
         let mut c = Cads::default();
         let events = c.apply(&root, Command::CadOpen { path: "pump-bracket.part".into() });
-        let Some(Event::CadPart { part: Some(p) }) = events.into_iter().last() else { panic!("no part") };
+        let Some(p) = events.into_iter().find_map(|e| if let Event::CadPart { part: Some(p) } = e { Some(p) } else { None }) else { panic!("no part") };
         // Points to a hundredth of a micrometre are plenty for a picture.
         let mut p = *p;
         for b in &mut p.bodies {

@@ -233,7 +233,8 @@ is text: parameters, sketches of lines, arcs and circles held by constraints
 and dimensions, and features made from them — extrudes and revolves joined
 to, cut from or met with a body, holes tapped, counterbored or countersunk,
 patterns and mirrors, edges rounded or chamfered, bodies shelled, profiles
-swept along paths and lofted — on booleans of Proton's own, each body
+swept along paths and lofted, sheet metal bent along a sketch's lines and
+laid flat for a laser — on booleans of Proton's own, each body
 checked closed and its volume integrated exactly. The steps are
 listed on the left, each with its mistake; the part is drawn in 3D; a sketch
 opens flat on its plane, where the mouse draws and holds shapes, a dimension

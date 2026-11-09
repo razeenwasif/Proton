@@ -769,7 +769,9 @@ impl Agent {
                               angle A]`, `pattern NAME of F linear (x, y, z) count N` (or `circular about AXIS count N`), \
                               `mirror NAME of F about PLANE`, `union|cut|intersect BODY with OTHER`, `fillet NAME on EDGES \
                               radius R`, `chamfer NAME on EDGES distance D`, `shell NAME of BODY thickness T [open FACE]`, \
-                              `sweep NAME from SKETCH along PATH`, `loft NAME from A to B`. Faces: `plate.top`, \
+                              `sweep NAME from SKETCH along PATH`, `loft NAME from A to B`, `sheet NAME from \
+                              SKETCH thickness T bend R width W [k 0.44] [side right]` (sheet metal bent along the \
+                              sketch's lines, its flat pattern written as DXF). Faces: `plate.top`, \
                               `plate.bottom`, `plate.side(r.left)` (a rect's left/right/top/bottom), `plate.side(h1)` (a \
                               circle's wall), a hole's `NAME.side(wall1)`; edges `F & G` or `plate.edges(parallel z)`, \
                               `boss.top.edges(convex, round)`. An .assembly: `assembly \"Name\"`, `units mm`, `clearance \

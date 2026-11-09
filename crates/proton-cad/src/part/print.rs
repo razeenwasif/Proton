@@ -83,6 +83,16 @@ pub fn write(part: &Part) -> String {
             }
             Item::Sweep(sw) => format!("sweep {} from {} along {}{}", sw.name, sw.sketch, sw.path, into(&sw.into)),
             Item::Loft(lo) => format!("loft {} from {} to {}{}", lo.name, lo.from, lo.to, into(&lo.into)),
+            Item::Sheet(sm) => format!(
+                "sheet {} from {} thickness {} bend {} width {}{}{}",
+                sm.name,
+                sm.sketch,
+                expr(&sm.thickness),
+                expr(&sm.bend),
+                expr(&sm.width),
+                sm.k.as_ref().map_or(String::new(), |k| format!(" k {}", expr(k))),
+                if sm.right { " side right" } else { "" }
+            ),
             Item::Feature { keyword, text } => if text.is_empty() { keyword.clone() } else { format!("{keyword} {text}") },
             Item::Sketch(s) => {
                 let mut head = format!("sketch {} on {}", s.name, s.on.reference);

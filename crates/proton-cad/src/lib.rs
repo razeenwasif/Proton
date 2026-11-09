@@ -52,6 +52,7 @@ pub mod model;
 pub mod part;
 pub mod poly;
 pub mod profile;
+pub mod sheetmetal;
 pub mod shell;
 pub mod sketch;
 pub mod step;

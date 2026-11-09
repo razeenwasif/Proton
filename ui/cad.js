@@ -259,7 +259,7 @@ export function createCad(host) {
     const steps = p.steps
       .map((s) => {
         const mark = s.error ? `<i class="cd-bad" title="${esc(s.error)}">!</i>` : s.note ? `<i class="cd-later" title="${esc(s.note)}">·</i>` : "";
-        const kind = /** @type {Record<string, string>} */ ({ sketch: "sketch", revolve: "revolve", extrude: "extrude", hole: "hole", pattern: "pattern", mirror: "mirror", union: "extrude", cut: "extrude", intersect: "extrude", fillet: "fillet", chamfer: "chamfer", shell: "shell", sweep: "sweep", loft: "loft" })[s.kind] ?? "file";
+        const kind = /** @type {Record<string, string>} */ ({ sketch: "sketch", revolve: "revolve", extrude: "extrude", hole: "hole", pattern: "pattern", mirror: "mirror", union: "extrude", cut: "extrude", intersect: "extrude", fillet: "fillet", chamfer: "chamfer", shell: "shell", sweep: "sweep", loft: "loft", sheet: "layers" })[s.kind] ?? "file";
         return `<button class="cd-row${s.index === state.step ? " on" : ""}${s.error ? " bad" : ""}${s.note ? " later" : ""}${s.index === state.sketching ? " drawing" : ""}" data-cad-step="${s.index}" title="${esc(s.error ?? s.note ?? s.text)}">${icon(kind)}<span class="cd-row-name">${esc(s.name || s.kind)}</span><span class="cd-row-what">${esc(summary(s))}</span>${mark}</button>`;
       })
       .join("");
@@ -321,7 +321,8 @@ export function createCad(host) {
         `<p class="cd-muted">The name, units and material are the file's first lines: change them in Text.</p></section>` +
         `<section class="cd-card"><div class="cd-head">A parameter</div><form class="cd-inline" data-cad-param-form><input name="name" placeholder="name" aria-label="Parameter name" required><input name="value" placeholder="value" aria-label="Parameter value" required><button class="cd-btn">Add</button></form></section>` +
         `<section class="cd-card"><div class="cd-head">Bodies</div>${bodies ? `<ul class="cd-bodies">${bodies}</ul>` : `<p class="cd-muted">None built yet.</p>`}` +
-        `<div class="cd-row-btns"><button class="cd-btn" data-cad-export="stl"${p.bodies.length ? "" : " disabled"}>Write STL</button><button class="cd-btn" data-cad-export="3mf"${p.bodies.length ? "" : " disabled"}>Write 3MF</button><button class="cd-btn" data-cad-export="step"${p.bodies.length ? "" : " disabled"} title="Exact, for machining and other CAD programs">Write STEP</button></div></section>` +
+        `<div class="cd-row-btns"><button class="cd-btn" data-cad-export="stl"${p.bodies.length ? "" : " disabled"}>Write STL</button><button class="cd-btn" data-cad-export="3mf"${p.bodies.length ? "" : " disabled"}>Write 3MF</button><button class="cd-btn" data-cad-export="step"${p.bodies.length ? "" : " disabled"} title="Exact, for machining and other CAD programs">Write STEP</button></div>` +
+        (p.flats.length ? `<div class="cd-head">Flat</div><ul class="cd-bodies">${p.flats.map((f) => `<li><span>${esc(f.name)}</span><span class="cd-muted">${+f.length.toFixed(2)} × ${+f.width.toFixed(2)} × ${+f.thickness.toFixed(2)} mm, ${f.bends} bend${f.bends === 1 ? "" : "s"}</span></li>`).join("")}</ul><div class="cd-row-btns"><button class="cd-btn" data-cad-export="flat" title="Each sheet's flat pattern, its bend lines marked: for a laser or a brake">Flat patterns (DXF)</button></div>` : "") + `</section>` +
         `<section class="cd-card"><div class="cd-head">Drawing</div><p class="cd-muted">Its views on a sheet — front, top, right and isometric, hidden edges dashed — to dimension, print or send to a shop. Written beside it as <code>${esc(p.name)}.drawing</code>, or opened if it is there.</p><div class="cd-row-btns"><button class="cd-btn" data-cad-make-drawing="paper"${p.bodies.length ? "" : " disabled"}>Draw it</button><button class="cd-btn" data-cad-make-drawing="blueprint"${p.bodies.length ? "" : " disabled"}>As a blueprint</button></div></section>`;
       els.step.innerHTML = html;
       return;
@@ -850,7 +851,7 @@ export function createCad(host) {
   }
 
   /** A step added, and chosen — a sketch opened — when it comes back.
-   *  @param {"sketch" | "extrude" | "revolve" | "fillet" | "chamfer" | "shell" | "sweep" | "loft"} kind */
+   *  @param {"sketch" | "extrude" | "revolve" | "fillet" | "chamfer" | "shell" | "sweep" | "loft" | "sheet"} kind */
   function addStep(kind) {
     const p = state.part;
     if (!p) return;
@@ -870,6 +871,13 @@ export function createCad(host) {
       const name = fresh("sh", names());
       state.want = { name, open: false };
       return edit([{ op: "insert", at: null, text: stepText.shell(name, state.face?.body ?? body, "2", face ? [face.name] : []) }]);
+    }
+    if (kind === "sheet") {
+      const chosen = p.steps.find((s) => s.index === state.step && s.kind === "sketch") ?? [...p.steps].reverse().find((s) => s.kind === "sketch");
+      if (!chosen) return status("Draw the sheet's side first: a sketch of lines, its corners where it bends.");
+      const name = fresh("sm", names());
+      state.want = { name, open: false };
+      return edit([{ op: "insert", at: null, text: `sheet ${name} from ${chosen.name} thickness 1.5 bend 1.5 width 20` }]);
     }
     if (kind === "sweep" || kind === "loft") {
       const sk = p.steps.filter((s) => s.kind === "sketch");

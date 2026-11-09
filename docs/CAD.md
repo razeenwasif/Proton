@@ -975,6 +975,32 @@ written and read back pad for pad; a project's libraries found and a
 timer's schematic of KiCad's parts built clean, and said to want them
 without; in the core, a project's own library's fuse and footprint used.
 
+K12 — sheet metal. `sheet NAME from SKETCH thickness T bend R width W [k
+K] [side left|right]`: a sheet bent along the sketch's run of lines — a
+bracket's L, a channel's U, a Z — its material to their left (or right),
+each corner bent to the inside radius R. The face on a bend's inside turns
+on R, the other on R + T, about one centre, so a sketched corner that is
+the bend's outside is rounded to R + T and one on its inside to R; lines
+too short for their bends, lines running straight on, a fold back on
+itself, an arc in the run and a K-factor past 0–1 are refused, a short line
+with how much its bends need. Extruded W across, it is a solid like any,
+its faces named for its lines (`NAME.side(bend1)`, `bend1b` the other
+face). Flat, a bend takes its neutral line: its allowance θ·(R + K·T), K
+0.44 unless given; the flat length is the straights between the bends and
+the allowances — from outside dimensions, their sum less each bend's
+deduction 2·(R + T)·tan(θ/2) − BA, as bend tables give it. The flat pattern
+is written as DXF — the outline on VISIBLE to cut, each bend's line on
+CENTER, each bend's angle and radius said — beside the part, and listed in
+its settings; a Sheet button bends the sketch chosen. Not yet: a flange
+added on an edge of a sheet already made, holes in the flat. Tested (5 + 1
++ 1): an L checked whole, its volume its section (straights and a quarter
+ring) across its width, its flat 30 + 20 less the deduction, its straights
+and bend; a table's 90° bend at T 1, R 1, K 0.33 (BD 1.9108); at K 0.5 the
+flat length the volume over the thickness; a U with its material outside,
+a Z bending both ways, a 30° bend; four refusals; the flat as DXF and the
+language read back; in the core, a bracket's step and flat listed and its
+DXF written; in the browser, a sketch bent and a flat written.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

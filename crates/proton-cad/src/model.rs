@@ -87,6 +87,8 @@ pub struct Model {
     /// The threads holes are tapped for, by hole: `(hole, M3)`, for
     /// drawings and STEP; the solid has the tap drill.
     pub threads: Vec<(String, String)>,
+    /// Each sheet-metal body flat, for its pattern.
+    pub flats: Vec<crate::sheetmetal::Flat>,
     /// What each feature was made of, for patterns and mirrors.
     recipes: HashMap<String, Vec<Recipe>>,
     /// The sketch each feature was made from, to say why a face is gone.
@@ -385,6 +387,7 @@ pub fn build(part: &Part) -> Model {
         errors: Vec::new(),
         notes: Vec::new(),
         threads: Vec::new(),
+        flats: Vec::new(),
         recipes: HashMap::new(),
         made_from: HashMap::new(),
         unrepeatable: HashMap::new(),
@@ -673,6 +676,41 @@ pub fn build(part: &Part) -> Model {
                     Ok(Tool { profile: p.clone(), frame: s.frame, sweep: Sweep::Along { path }, name: sw.name.clone() })
                 })();
                 make(&mut m, &sw.name, line, Some(&sw.sketch), made.map(|t| vec![t]), sw.into.clone());
+            }
+            Item::Sheet(sm) => {
+                let made = (|| -> Result<(Solid, crate::sheetmetal::Flat), String> {
+                    if m.taken(&sm.name) {
+                        return Err(format!("`{}` is a name already", sm.name));
+                    }
+                    let s = sketch_for(&m, &sm.sketch)?;
+                    let segs = profile::path_from_sketch(&s.drawn, &s.x, &sm.sketch, s.line).map_err(|d| d.message)?;
+                    // Its lines' corners, in order.
+                    let mut pts: Vec<Vec2> = Vec::new();
+                    for &(seg, fwd) in &segs {
+                        let Seg::Line { a, b } = seg else { return Err(format!("`{}` is bent along lines: `{}` has an arc or a circle", sm.name, sm.sketch)) };
+                        let (a, b) = if fwd { (a, b) } else { (b, a) };
+                        if pts.is_empty() {
+                            pts.push(a * k);
+                        }
+                        pts.push(b * k);
+                    }
+                    let t = eval(&sm.thickness, &env)? * k;
+                    let r = eval(&sm.bend, &env)? * k;
+                    let w = eval(&sm.width, &env)? * k;
+                    let kf = match &sm.k {
+                        Some(e) => eval(e, &env)?,
+                        None => 0.44,
+                    };
+                    crate::sheetmetal::bent(&pts, t, r, kf, w, sm.right, &s.frame, &sm.name)
+                })();
+                match made {
+                    Ok((solid, flat)) => {
+                        m.bodies.push(Body { name: sm.name.clone(), line, solid });
+                        m.flats.push(flat);
+                        m.unrepeatable.insert(sm.name.clone(), "sheet");
+                    }
+                    Err(e) => m.errors.push(Diag::new(line, 1, e)),
+                }
             }
             Item::Loft(lo) => {
                 let made = (|| {

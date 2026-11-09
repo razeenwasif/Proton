@@ -230,6 +230,32 @@ pub fn read(text: &str) -> Result<Part, Diag> {
                 let path = p.ident("the sketch it is swept along")?;
                 Item::Sweep(SweepAlong { name, sketch, path, into: p.made_into()? })
             }
+            "sheet" => {
+                let name = p.ident("the sheet's name")?;
+                p.keyword("from")?;
+                let sketch = p.ident("the sketch it is bent along")?;
+                p.keyword("thickness")?;
+                let thickness = p.expr()?;
+                p.keyword("bend")?;
+                let bend = p.expr()?;
+                p.keyword("width")?;
+                let width = p.expr()?;
+                let mut k = None;
+                if p.peek_ident("k") {
+                    p.i += 1;
+                    k = Some(p.expr()?);
+                }
+                let mut right = false;
+                if p.peek_ident("side") {
+                    p.i += 1;
+                    match p.ident("`left` or `right`")?.as_str() {
+                        "left" => {}
+                        "right" => right = true,
+                        _ => return Err(p.err_at(1, "a sheet's material is to its lines' `left` or `right`")),
+                    }
+                }
+                Item::Sheet(SheetMetal { name, sketch, thickness, bend, width, k, right })
+            }
             "loft" => {
                 let name = p.ident("the loft's name")?;
                 p.keyword("from")?;

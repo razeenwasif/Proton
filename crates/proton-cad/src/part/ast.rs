@@ -73,6 +73,7 @@ pub enum Item {
     Shell(Shell),
     Sweep(SweepAlong),
     Loft(Loft),
+    Sheet(SheetMetal),
     /// A feature — `thread` — kept as written until the milestone that
     /// builds it reads it.
     Feature { keyword: String, text: String },
@@ -275,6 +276,20 @@ pub struct SweepAlong {
     pub sketch: String,
     pub path: String,
     pub into: Option<(Combine, String)>,
+}
+
+/// `sheet NAME from SKETCH thickness T bend R width W [k K] [side right]`:
+/// sheet metal bent along the sketch's run of lines, its material to their
+/// left (or right), each corner bent to the inside radius `R`, `W` wide.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetMetal {
+    pub name: String,
+    pub sketch: String,
+    pub thickness: Expr,
+    pub bend: Expr,
+    pub width: Expr,
+    pub k: Option<Expr>,
+    pub right: bool,
 }
 
 /// `loft NAME from SKETCH to SKETCH [join|cut|intersect BODY]`: a solid

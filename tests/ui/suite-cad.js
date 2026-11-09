@@ -758,6 +758,22 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     await win.pushEvents([{type: 'cadBoard', board: null}, part()]); await settle();
   });
 
+  await test('Sheet metal: the chosen sketch is bent, and a sheet\'s flat pattern is written as DXF', async () => {
+    await win.pushEvents([{type: 'cadBoard', board: null}, part()]); await settle();
+    const base = PART.steps.find((x) => x.kind === 'sketch');
+    ws().querySelector(`.cd-history [data-cad-step="${base.index}"]`).click(); await settle();
+    let before = win.commands.length;
+    ws().querySelector('[data-cad-add="sheet"]').click(); await settle();
+    assert(JSON.stringify(ops(before)) === JSON.stringify([{op: 'insert', at: null, text: `sheet sm1 from ${base.name} thickness 1.5 bend 1.5 width 20`}]), `the sheet: ${JSON.stringify(ops(before))}`);
+    await win.pushEvents([part({flats: [{name: 'bracket', length: 47.3929, width: 40, thickness: 1.5, bends: 1}]})]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    assert(ws().querySelector('[data-cad-settings]').textContent.includes('47.39 × 40 × 1.5 mm, 1 bend'), 'the flat is not listed');
+    before = win.commands.length;
+    ws().querySelector('[data-cad-settings] [data-cad-export="flat"]').click(); await settle();
+    assert(sent(before, 'cadExport')[0]?.format === 'flat', 'Flat patterns did not ask');
+    await win.pushEvents([part()]); await settle();
+  });
+
   await test('CAD\'s Agent tab holds the composer: @cad is a chip, and its keys are its own', async () => {
     await win.pushEvents([part(), {type: 'cadAssembly', assembly: null}, {type: 'cadDrawing', drawing: null}]); await settle();
     ws().querySelector('[data-cad-tab="agent"]').click(); await settle();
