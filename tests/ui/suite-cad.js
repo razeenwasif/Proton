@@ -774,6 +774,24 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     await win.pushEvents([part()]); await settle();
   });
 
+  await test('A maker\'s STEP or STL is shown, not edited; a DXF is drawn into a part', async () => {
+    await win.pushEvents([{type: 'cadHome', parts: [{path: 'pump.stl', name: 'pump', kind: 'import'}, {path: 'plate.dxf', name: 'plate', kind: 'dxf'}, {path: 'pump-bracket.part', name: 'pump-bracket', kind: 'part'}]}, part({imported: true, steps: []})]); await settle();
+    assert(!shown(ws().querySelector('[data-cad-add="sketch"]')), 'an import offers steps to add');
+    await win.pushEvents([part()]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    const form = ws().querySelector('[data-cad-dxf-form]');
+    assert(form && form.querySelector('select').value === 'plate.dxf', 'the DXFs are not offered');
+    const before = win.commands.length;
+    form.requestSubmit(); await settle();
+    assert(JSON.stringify(sent(before, 'cadImportDxf')[0]) === JSON.stringify({type: 'cadImportDxf', generation: 5, path: 'plate.dxf'}), `Draw it in: ${JSON.stringify(sent(before, 'cadImportDxf'))}`);
+    // An assembly places parts and imports, not DXFs.
+    await win.pushEvents([{type: 'cadPart', part: null}, {type: 'cadAssembly', assembly: {...structuredClone(ASSEMBLY), generation: 9, dirty: false}}]); await settle();
+    ws().querySelector('.cd-history [data-cad-step="part"]').click(); await settle();
+    const opts = [...ws().querySelectorAll('[data-cad-add-instance] option')].map((o) => o.value);
+    assert(opts.includes('pump.stl') && !opts.includes('plate.dxf'), `the Add list: ${opts}`);
+    await win.pushEvents([{type: 'cadAssembly', assembly: null}, part()]); await settle();
+  });
+
   await test('CAD\'s Agent tab holds the composer: @cad is a chip, and its keys are its own', async () => {
     await win.pushEvents([part(), {type: 'cadAssembly', assembly: null}, {type: 'cadDrawing', drawing: null}]); await settle();
     ws().querySelector('[data-cad-tab="agent"]').click(); await settle();

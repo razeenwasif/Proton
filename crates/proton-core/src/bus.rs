@@ -775,6 +775,11 @@ pub enum Command {
     CadMakeBoard {
         generation: u32,
     },
+    /// A DXF of the project drawn into the part open as a new sketch.
+    CadImportDxf {
+        generation: u32,
+        path: String,
+    },
     /// The open assembly's parts checked for overlaps and for gaps nearer
     /// than its clearance.
     CadFit {

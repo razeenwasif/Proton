@@ -53,7 +53,8 @@ pub struct CadFound {
     /// As the project names it.
     pub path: String,
     pub name: String,
-    /// `part`, `assembly`, `drawing`, `schematic` or `board`.
+    /// `part`, `assembly`, `drawing`, `schematic`, `board`; `import`, a
+    /// STEP or STL; `dxf`, a drawing to draw into a sketch.
     pub kind: String,
 }
 
@@ -272,6 +273,8 @@ pub struct CadPartView {
     pub bounds: Vec<f64>,
     /// Each sheet-metal body's flat: its name, length, width and bends.
     pub flats: Vec<CadFlat>,
+    /// Another program's STEP or STL, read: shown, not edited.
+    pub imported: bool,
 }
 
 /// A sheet-metal body flat.
@@ -322,6 +325,8 @@ enum Doc {
     Drawing,
     Schematic,
     Board,
+    /// Another program's STEP or STL: shown and measured, not edited.
+    Import,
 }
 
 #[derive(Debug)]
@@ -432,15 +437,20 @@ impl Cads {
                 if self.dirty() {
                     return vec![notice("save or discard the open part's changes before opening another".into(), NoticeLevel::Warn)];
                 }
-                match std::fs::read_to_string(&file) {
+                let kind = match file.extension().and_then(|e| e.to_str()) {
+                    Some(crate::cad_assembly::EXTENSION) => Doc::Assembly,
+                    Some(crate::cad_drawing::EXTENSION) => Doc::Drawing,
+                    Some(crate::cad_schematic::EXTENSION) => Doc::Schematic,
+                    Some(crate::cad_board::EXTENSION) => Doc::Board,
+                    Some("step" | "stp" | "stl") => Doc::Import,
+                    Some("dxf") => return vec![notice(format!("{path} is drawn into a part: open a part, then Import a DXF in its settings"), NoticeLevel::Info)],
+                    _ => Doc::Part,
+                };
+                // Another program's file is read when it is shown: it may be
+                // binary, and it is not edited.
+                let text = if kind == Doc::Import { Ok(String::new()) } else { std::fs::read_to_string(&file) };
+                match text {
                     Ok(text) => {
-                        let kind = match file.extension().and_then(|e| e.to_str()) {
-                            Some(crate::cad_assembly::EXTENSION) => Doc::Assembly,
-                            Some(crate::cad_drawing::EXTENSION) => Doc::Drawing,
-                            Some(crate::cad_schematic::EXTENSION) => Doc::Schematic,
-                            Some(crate::cad_board::EXTENSION) => Doc::Board,
-                            _ => Doc::Part,
-                        };
                         self.show(root, file, text, kind);
                         self.doc_events()
                     }
@@ -460,6 +470,10 @@ impl Cads {
                 }
                 self.events(root)
             }
+            Command::CadText { .. } | Command::CadEdit { .. } if self.open.as_ref().is_some_and(|o| o.kind == Doc::Import) => {
+                vec![notice("another program's file is read, not edited here: place it in an assembly, or draw a part beside it".into(), NoticeLevel::Warn)]
+            }
+            Command::CadImportDxf { generation, path } => self.import_dxf(root, generation, &path),
             Command::CadText { generation, text } => {
                 let Some(open) = self.open.as_mut().filter(|o| o.generation == generation) else { return Vec::new() };
                 if open.text == text {
@@ -645,6 +659,7 @@ impl Cads {
                         Err(e) => Err(format!("line {} does not read — mend it first: {}", e.line, e.message)),
                     },
                     Doc::Part => export(open, &format),
+                    Doc::Import => Err("another program's file is written by that program: place it in an assembly to write it with others as STEP".into()),
                 };
                 match done {
                     Ok(written) => vec![notice(format!("wrote {written}"), NoticeLevel::Info), Event::CadHome { parts: find(root) }],
@@ -663,6 +678,7 @@ impl Cads {
             Doc::Schematic => "schematic",
             Doc::Drawing => "drawing",
             Doc::Board => "board",
+            Doc::Import => "import",
         };
         if name.is_empty() {
             return vec![notice(format!("a new {what} needs a name"), NoticeLevel::Warn)];
@@ -676,6 +692,7 @@ impl Cads {
             Doc::Schematic => crate::cad_schematic::EXTENSION,
             Doc::Drawing => crate::cad_drawing::EXTENSION,
             Doc::Board => crate::cad_board::EXTENSION,
+            Doc::Import => "step",
         };
         let rel = format!("{}.{}", slug(name), ext);
         let file = match inside(root, &rel) {
@@ -822,6 +839,27 @@ impl Cads {
         Event::CadSchematic { schematic: Some(Box::new(v)) }
     }
 
+    /// A DXF of the project drawn into the part open as a new sketch on
+    /// XY: its lines, arcs and circles, its own numbers.
+    fn import_dxf(&mut self, root: &Path, generation: u32, path: &str) -> Vec<Event> {
+        let Some(open) = self.open.as_ref().filter(|o| o.generation == generation && o.kind == Doc::Part) else { return Vec::new() };
+        let file = match inside(root, path) {
+            Ok(f) => f,
+            Err(why) => return vec![notice(why, NoticeLevel::Warn)],
+        };
+        let shapes = match crate::cad_assembly::load_inside(root)(&file).and_then(|t| proton_cad::import::read_dxf(&t)) {
+            Ok(s) => s,
+            Err(e) => return vec![notice(format!("{path}: {e}"), NoticeLevel::Warn)],
+        };
+        let p = part::read(&open.text).unwrap_or_default();
+        let taken: Vec<String> = p.items.iter().filter_map(|n| item_name(&n.item).map(str::to_string)).collect();
+        let name = (1..).map(|i| format!("dxf{i}")).find(|n| !taken.contains(n)).expect("a name");
+        let text = proton_cad::import::sketch_text(&shapes, &name, "XY");
+        let mut out = vec![notice(format!("drew {} shape{} of {path} into sketch {name}", shapes.len(), if shapes.len() == 1 { "" } else { "s" }), NoticeLevel::Info)];
+        out.extend(self.apply(root, Command::CadEdit { generation, ops: vec![CadOp::Insert { at: None, text: text.trim_end().to_string() }] }));
+        out
+    }
+
     /// The drawing on screen, laid out on its sheet.
     pub fn drawing_event(&mut self) -> Event {
         let Some(open) = self.open.as_mut().filter(|o| o.kind == Doc::Drawing) else { return Event::CadDrawing { drawing: None } };
@@ -924,8 +962,11 @@ impl Cads {
         Event::CadAssembly { assembly: Some(Box::new(v)) }
     }
 
-    /// The part on screen, built and drawn.
+    /// The part on screen, built and drawn — or a STEP or STL read.
     pub fn part_event(&mut self) -> Event {
+        if let Some(open) = self.open.as_ref().filter(|o| o.kind == Doc::Import) {
+            return Event::CadPart { part: Some(Box::new(import_view(open))) };
+        }
         let Some(open) = self.open.as_mut().filter(|o| o.kind == Doc::Part) else { return Event::CadPart { part: None } };
         let view = match part::read(&open.text) {
             Ok(p) => {
@@ -942,6 +983,43 @@ impl Cads {
         };
         let view = CadPartView { text: open.text.clone(), dirty: open.text != open.saved, can_undo: !open.undo.is_empty(), can_redo: !open.redo.is_empty(), ..view };
         Event::CadPart { part: Some(Box::new(view)) }
+    }
+}
+
+/// Another program's STEP or STL, as the part page shows it: its solids,
+/// measured, and no steps — it is read, not built.
+fn import_view(open: &Open) -> CadPartView {
+    let (bodies, error): (Vec<(String, proton_cad::brep::Solid)>, Option<String>) = match read_import(&open.path, &open.root) {
+        Ok(b) => (b, None),
+        Err(e) => (Vec::new(), Some(e)),
+    };
+    let mut bounds = Aabb::empty();
+    let views: Vec<CadBody> = bodies.iter().enumerate().map(|(i, (name, solid))| body_view(&model::Body { name: name.clone(), line: i + 1, solid: solid.clone() }, &mut bounds)).collect();
+    let mut v = view_of(open, &Part::default());
+    v.title = Some(open.name.clone());
+    v.imported = true;
+    v.bodies = views;
+    v.steps = Vec::new();
+    v.text = String::new();
+    v.notes = vec![CadDiag { line: 1, col: 1, message: format!("{} is another program's file, read as it is: place it in an assembly to mate parts to it", open.shown) }];
+    v.errors = error.map(|e| vec![CadDiag { line: 1, col: 1, message: e }]).unwrap_or_default();
+    if !bounds.is_empty() {
+        v.bounds = vec![bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z];
+    }
+    v
+}
+
+/// A STEP's or STL's solids.
+pub(crate) fn read_import(path: &Path, root: &Path) -> Result<Vec<(String, proton_cad::brep::Solid)>, String> {
+    let text = crate::cad_assembly::load_inside(root)(path)?;
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        Some("stl") => {
+            let bytes: Vec<u8> = if text.trim_start().starts_with("solid") && text.is_ascii() { text.into_bytes() } else { text.chars().map(|c| c as u32 as u8).collect() };
+            let tris = proton_cad::import::read_stl(&bytes)?;
+            Ok(vec![(stem, proton_cad::import::solid_from_triangles(&tris)?)])
+        }
+        _ => proton_cad::import::read_step(&text),
     }
 }
 
@@ -1377,6 +1455,7 @@ fn view_of(open: &Open, p: &Part) -> CadPartView {
         can_redo: false,
         bounds: if bounds.is_empty() { vec![-50.0, -50.0, -50.0, 50.0, 50.0, 50.0] } else { vec![bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z] },
         flats: m.flats.iter().map(|f| CadFlat { name: f.name.clone(), length: f.length, width: f.width, thickness: f.thickness, bends: f.bends.len() as u32 }).collect(),
+        imported: false,
     }
 }
 
@@ -1693,6 +1772,8 @@ fn find(root: &Path) -> Vec<CadFound> {
                 Some(crate::cad_drawing::EXTENSION) => "drawing",
                 Some(crate::cad_schematic::EXTENSION) => "schematic",
                 Some(crate::cad_board::EXTENSION) => "board",
+                Some("step" | "stp" | "stl") => "import",
+                Some("dxf") => "dxf",
                 _ => continue,
             };
             let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
@@ -1710,8 +1791,8 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
     if rel.is_empty() || !named.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
         return Err(format!("{rel} is not in the project"));
     }
-    if !matches!(named.extension().and_then(|e| e.to_str()), Some(EXTENSION | crate::cad_assembly::EXTENSION | crate::cad_drawing::EXTENSION | crate::cad_schematic::EXTENSION | crate::cad_board::EXTENSION)) {
-        return Err(format!("{rel} is not a .part, .assembly, .drawing, .schematic or .board file"));
+    if !matches!(named.extension().and_then(|e| e.to_str()), Some(EXTENSION | crate::cad_assembly::EXTENSION | crate::cad_drawing::EXTENSION | crate::cad_schematic::EXTENSION | crate::cad_board::EXTENSION | "step" | "stp" | "stl" | "dxf")) {
+        return Err(format!("{rel} is not a CAD file: .part, .assembly, .drawing, .schematic, .board, .step, .stl or .dxf"));
     }
     let base = std::fs::canonicalize(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let path = base.join(named);
@@ -2134,6 +2215,35 @@ mod tests {
         assert!(said.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "wrote pump-bracket-bracket-flat.dxf")), "{said:?}");
         let dxf = std::fs::read_to_string(root.join("pump-bracket-bracket-flat.dxf")).unwrap();
         assert!(proton_cad::drawing::out::read_dxf(&dxf).unwrap().iter().any(|e| e.1 == "CENTER"));
+    }
+
+    #[test]
+    fn a_makers_step_and_stl_are_read_and_a_dxf_drawn_into_a_part() {
+        let root = scratch("imports");
+        let m = model::build(&part::read("sketch s on XY\n  rect r corner origin size = (40, 20)\nend\nextrude b from s distance 10\n").unwrap());
+        std::fs::write(root.join("pump.stl"), stl::binary(&tessellate(&m.bodies[0].solid, &Quality::print()).unwrap(), "pump")).unwrap();
+        std::fs::write(root.join("fan.step"), proton_cad::step::write("fan", &[("b", &m.bodies[0].solid)], "2026-11-09T00:00:00")).unwrap();
+        let sheet = proton_cad::drawing::Sheet { width: 50.0, height: 50.0, style: proton_cad::drawing::Style::Paper, prims: vec![proton_cad::drawing::Prim::Poly { pts: vec![proton_cad::drawing::P2::new(0.0, 0.0), proton_cad::drawing::P2::new(30.0, 0.0), proton_cad::drawing::P2::new(30.0, 10.0), proton_cad::drawing::P2::new(0.0, 10.0)], closed: true, pen: proton_cad::drawing::Pen::Visible }], boxes: Vec::new() };
+        std::fs::write(root.join("plate.dxf"), proton_cad::drawing::out::dxf(&sheet)).unwrap();
+        let mut c = Cads::default();
+        let home = c.events(&root);
+        let found = home.iter().find_map(|e| if let Event::CadHome { parts } = e { Some(parts.clone()) } else { None }).unwrap();
+        assert_eq!(found.iter().map(|f| (f.path.as_str(), f.kind.as_str())).collect::<Vec<_>>(), [("fan.step", "import"), ("plate.dxf", "dxf"), ("pump.stl", "import")]);
+        // The STL, read: one body, six faces, its volume; not edited.
+        let v = view(&c.apply(&root, Command::CadOpen { path: "pump.stl".into() }));
+        assert!(v.imported && v.steps.is_empty() && v.errors.is_empty(), "{:?}", v.errors);
+        assert_eq!((v.bodies.len(), v.bodies[0].faces.len()), (1, 6));
+        assert!((v.bodies[0].volume - 8000.0).abs() < 1e-6);
+        let refused = c.apply(&root, Command::CadText { generation: v.generation, text: "x".into() });
+        assert!(refused.iter().any(|e| matches!(e, Event::Notice { text, .. } if text.contains("read, not edited"))));
+        let fan = view(&c.apply(&root, Command::CadOpen { path: "fan.step".into() }));
+        assert!(fan.bodies[0].faces.iter().any(|f| f.name == "b.top"));
+        // A DXF drawn into a new part, and extruded.
+        let g = view(&c.apply(&root, Command::CadNew { name: "Plate".into() })).generation;
+        let out = c.apply(&root, Command::CadImportDxf { generation: g, path: "plate.dxf".into() });
+        assert!(out.iter().any(|e| matches!(e, Event::Notice { text, .. } if text == "drew 4 shapes of plate.dxf into sketch dxf1")), "{out:?}");
+        let v = edit(&mut c, &root, g, vec![CadOp::Insert { at: None, text: "extrude p from dxf1 distance 2".into() }]);
+        assert!(v.errors.is_empty() && (v.bodies[0].volume - 600.0).abs() < 1e-6, "{:?}", v.errors);
     }
 
     #[test]

@@ -318,7 +318,12 @@ pub(crate) fn load_inside(root: &Path) -> impl Fn(&Path) -> Result<String, Strin
         if !real.starts_with(&base) {
             return Err(format!("{} is outside the project", p.display()));
         }
-        std::fs::read_to_string(&real).map_err(|e| format!("{}: {e}", p.display()))
+        // Text as it is; a binary file — an STL — a character a byte.
+        let bytes = std::fs::read(&real).map_err(|e| format!("{}: {e}", p.display()))?;
+        Ok(match String::from_utf8(bytes) {
+            Ok(t) => t,
+            Err(e) => e.into_bytes().iter().map(|&b| b as char).collect(),
+        })
     }
 }
 
@@ -698,7 +703,8 @@ mod tests {
         assert!(c.unsaved().is_empty());
         let home = c.events(&root);
         let Some(Event::CadHome { parts }) = home.first() else { panic!() };
-        assert_eq!(parts.iter().map(|p| (p.path.as_str(), p.kind.as_str())).collect::<Vec<_>>(), [("parts/block.part", "part"), ("parts/plate.part", "part"), ("test-rig.assembly", "assembly")]);
+        // The STEP it wrote, too: a file another program's could be.
+        assert_eq!(parts.iter().map(|p| (p.path.as_str(), p.kind.as_str())).collect::<Vec<_>>(), [("parts/block.part", "part"), ("parts/plate.part", "part"), ("test-rig.assembly", "assembly"), ("test-rig.step", "import")]);
         // Opened again, it is as saved.
         c.apply(&root, Command::CadClose { discard: false });
         let v = view(&c.apply(&root, Command::CadOpen { path: "test-rig.assembly".into() }));

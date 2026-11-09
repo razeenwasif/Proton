@@ -41,6 +41,7 @@ fn kind_of(path: &Path) -> Option<Doc> {
         Some(crate::cad_drawing::EXTENSION) => Some(Doc::Drawing),
         Some(crate::cad_schematic::EXTENSION) => Some(Doc::Schematic),
         Some(crate::cad_board::EXTENSION) => Some(Doc::Board),
+        Some("step" | "stp" | "stl") => Some(Doc::Import),
         _ => None,
     }
 }
@@ -52,6 +53,7 @@ fn kind_said(k: Doc) -> &'static str {
         Doc::Drawing => "a drawing",
         Doc::Schematic => "a schematic",
         Doc::Board => "a board",
+        Doc::Import => "another program's STEP or STL",
     }
 }
 
@@ -285,6 +287,10 @@ impl Cads {
                 Ok(s) => crate::cad_schematic::said(&proton_board::build::build_with(&s, &proton_board::kicad::Libraries::find(root))),
                 Err(e) => format!("It does not read: line {}: {}", e.line, e.message),
             },
+            Doc::Import => match super::read_import(&src.file, root) {
+                Ok(bodies) => bodies.iter().map(|(n, s)| format!("- body {n}: {}\n", solid_said(s))).collect::<String>(),
+                Err(e) => format!("It does not read: {e}"),
+            },
             Doc::Board => match proton_board::board_lang::read(&src.text) {
                 Ok(b) => crate::cad_board::said(&proton_board::board::build_with(&b, &src.file, &crate::cad_assembly::load_inside(root), &proton_board::kicad::Libraries::find(root))),
                 Err(e) => format!("It does not read: line {}: {}", e.line, e.message),
@@ -376,6 +382,7 @@ impl Cads {
                 let m = self.parts.build(&a, &src.file, root);
                 (crate::cad_assembly::placed_solids(&m), true)
             }
+            Doc::Import => (super::read_import(&src.file, root)?, false),
             Doc::Drawing => return Err("a drawing has nothing to measure: measure the part or assembly it is of".into()),
             Doc::Schematic => return Err("a schematic has no solids to measure: cad_check reads its nets and rules".into()),
             Doc::Board => return Err("a board is measured by its design rules: cad_check, or cad_read for its pads".into()),
@@ -526,6 +533,12 @@ impl Cads {
                 }
             }
             Doc::Drawing | Doc::Schematic | Doc::Board => out.push_str(&self.said(root, &src)),
+            Doc::Import => {
+                for (n, s) in super::read_import(&src.file, root)? {
+                    let problems = proton_cad::brep::check::check(&s);
+                    out.push_str(&if problems.is_empty() { format!("- body {n}: closed and whole\n") } else { format!("- body {n}: {}\n", problems.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("; ")) });
+                }
+            }
         }
         if let Some(t) = input.get("t1") {
             out.push_str(&t1_said(t)?);

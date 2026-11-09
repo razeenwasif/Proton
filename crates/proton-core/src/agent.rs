@@ -775,7 +775,8 @@ impl Agent {
                               `plate.bottom`, `plate.side(r.left)` (a rect's left/right/top/bottom), `plate.side(h1)` (a \
                               circle's wall), a hole's `NAME.side(wall1)`; edges `F & G` or `plate.edges(parallel z)`, \
                               `boss.top.edges(convex, round)`. An .assembly: `assembly \"Name\"`, `units mm`, `clearance \
-                              1`, `part NAME from \"FILE.part\"` (or `assembly NAME from …`), `ground NAME`, `place NAME at \
+                              1`, `part NAME from \"FILE.part\"` — or a maker's `\"pump.step\"` or `\"fan.stl\"`, its \
+                              faces named face1, face2 … where it gives none — (or `assembly NAME from …`), `ground NAME`, `place NAME at \
                               (x, y, z) turn (a, b, c)`, `mate NAME planar|flush|distance|angle|parallel|perpendicular|concentric| \
                               cylindrical|revolute|slider|fastened A to B [= v | offset v]` between faces \
                               `INSTANCE.FACE`, `explode NAME INST by (x, y, z), …`, `route NAME hard|soft 14/16 from \
@@ -824,7 +825,7 @@ impl Agent {
                               face — its kind, radius or diameter, axis, area; `of` and `to` two faces — flat faces' \
                               gap or angle, axes' distance, an axis's distance from a face — or two bodies or \
                               instances, the nearest they come, or that they overlap. Faces by name: `plate.top`, \
-                              `plate.side(h1)`; an assembly's `INSTANCE.FACE`."
+                              `plate.side(h1)`; an assembly's `INSTANCE.FACE`. A maker's .step or .stl is measured too."
                     .into(),
                 input_schema: json!({
                     "type": "object",

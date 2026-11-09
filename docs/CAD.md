@@ -1001,6 +1001,32 @@ a Z bending both ways, a 30° bend; four refusals; the flat as DXF and the
 language read back; in the core, a bracket's step and flat listed and its
 DXF written; in the browser, a sketch bent and a flat written.
 
+K13 — other programs' files. `proton_cad::import`: an STL, binary (known by
+its size, whatever its header says) or text, welded at a ten-millionth of
+its size, every edge two triangles' or refused with how many are open,
+each flat run of triangles — joined at an edge, on one plane — made one
+face bounded by its loops, so a box is six faces to mate to and a curve the
+triangles it was cut into; a STEP's unnamed faces named `face1` … in order.
+A maker's `.step` or `.stl` is a part of an assembly like any — `part pump
+from "d5.step"` — measured, checked for fit and mated to; read through the
+assembly's loader, a binary file a character a byte. A DXF's lines, arcs,
+circles and polylines — R12's and later's, their bulges as arcs, in inches
+if `$INSUNITS` says — are drawn into a part as a new sketch, its own
+numbers, so its outline closes where its ends meet. In CAD the home page
+lists STEP, STL and DXF files; a STEP or STL opens read-only — its bodies
+shown and measured, edits refused with why — and a part's settings draw a
+DXF in. The agent's tools read and measure them. Tested (5 + 1 + 1): a
+box's STL six faces, whole, its volume; a peg's ends one face each, its
+volume its mesh's; a text STL; a mesh with a hole refused; a STEP's names
+kept, and another's named; a STEP and a binary STL placed in an assembly
+and mated flat on a plate; a DXF's outline and hole extruded to their
+volume, a bulged polyline in inches; in the core, imports listed, an STL
+opened read-only and refused an edit, a STEP's names, a DXF drawn into a
+part and extruded; in the browser, an import's steps hidden, a DXF drawn
+in, and an assembly offered imports but not DXFs. No maker's file is kept
+in the repository: they are tested as Proton writes them and as other
+programs' style has them.
+
 | | What | Tested by |
 |---|---|---|
 | **K0** | `proton-cad`: vectors, placements, tolerance; curves and surfaces with their evaluation, projection and intersections (every analytic pair; marching to a B-spline otherwise) | intersections against closed forms; random points on, off and near |

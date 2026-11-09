@@ -250,7 +250,9 @@ near, lists the parts in a bill of materials, and takes itself apart for an
 exploded view. A library makes parts from published standards — a Mini-ITX
 board on ATX's holes, SFX supplies, graphics cards, fans, radiators, pumps,
 G1/4 fittings, ISO screws, the FormD T1 and its limits — each written into
-the folder as a part file like any other. Routes run hard or soft tube
+the folder as a part file like any other — and a maker's own STEP or STL of
+a pump or a fan is placed and mated to just the same; a DXF is drawn into
+a sketch. Routes run hard or soft tube
 between fittings' sockets, bent to the tube's radius, with the length to
 cut and where to bend it, and draw the loop in the order the coolant goes.
 A `.drawing` lays a part or an assembly out on a sheet: views projected with

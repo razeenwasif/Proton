@@ -173,7 +173,8 @@ export function settingsHtml(a, st) {
     html += `<section class="cd-card"><div class="cd-head">Exploded view</div><textarea class="cd-line" data-cad-a-f="line" rows="3" spellcheck="false" aria-label="The view's line">${esc(e.text)}</textarea>` +
       `<div class="cd-row-btns"><button class="cd-btn" data-cad-explode="${esc(e.name)}">${st.exploded === e.name ? "Put back together" : "Show it apart"}</button><button class="cd-btn quiet" data-cad-remove="${e.index}">Delete</button></div></section>`;
   } else {
-    const opts = st.found.filter((f) => f.path !== a.path).map((f) => `<option value="${esc(f.path)}" data-kind="${f.kind}">${esc(f.path)}</option>`).join("");
+    // Parts, assemblies, and makers' STEP and STL files: what can be placed.
+    const opts = st.found.filter((f) => f.path !== a.path && ["part", "assembly", "import"].includes(f.kind)).map((f) => `<option value="${esc(f.path)}" data-kind="${f.kind}">${esc(f.path)}</option>`).join("");
     const free = a.instances.filter((i) => i.free).map((i) => i.name);
     const status = !a.solved
       ? `<p class="cd-error">The mates cannot all hold: ${esc(a.conflicting.join(", "))}.</p>`

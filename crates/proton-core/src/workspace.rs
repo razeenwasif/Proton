@@ -1461,6 +1461,7 @@ impl Workspace {
             | Command::CadNewAssembly { .. }
             | Command::CadNewSchematic { .. }
             | Command::CadMakeBoard { .. }
+            | Command::CadImportDxf { .. }
             | Command::CadLibrary { .. }
             | Command::CadFit { .. }
             | Command::CadDraw { .. }

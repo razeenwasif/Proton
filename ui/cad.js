@@ -206,7 +206,7 @@ export function createCad(host) {
 
   function renderList() {
     const rows = state.parts
-      .map((f) => `<button class="xl-row${f.path === doc()?.path ? " on" : ""}" data-cad-open="${esc(f.path)}" title="${esc(f.path)}">${icon(f.kind === "assembly" ? "pattern" : f.kind === "drawing" ? "frame" : f.kind === "schematic" ? "node" : f.kind === "board" ? "layers" : "cad")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">${esc(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")}</span></button>`)
+      .map((f) => `<button class="xl-row${f.path === doc()?.path ? " on" : ""}" data-cad-open="${esc(f.path)}" title="${esc(f.path)}">${icon(f.kind === "assembly" ? "pattern" : f.kind === "drawing" ? "frame" : f.kind === "schematic" ? "node" : f.kind === "board" ? "layers" : f.kind === "import" ? "cube" : f.kind === "dxf" ? "file" : "cad")}<span class="xl-row-name">${esc(f.name)}</span><span class="xl-kind">${esc(f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "")}</span></button>`)
       .join("");
     els.list.innerHTML = rows || `<p class="xl-empty">No .part files in this folder yet.</p>`;
     els.found.innerHTML = rows;
@@ -322,6 +322,7 @@ export function createCad(host) {
         `<section class="cd-card"><div class="cd-head">A parameter</div><form class="cd-inline" data-cad-param-form><input name="name" placeholder="name" aria-label="Parameter name" required><input name="value" placeholder="value" aria-label="Parameter value" required><button class="cd-btn">Add</button></form></section>` +
         `<section class="cd-card"><div class="cd-head">Bodies</div>${bodies ? `<ul class="cd-bodies">${bodies}</ul>` : `<p class="cd-muted">None built yet.</p>`}` +
         `<div class="cd-row-btns"><button class="cd-btn" data-cad-export="stl"${p.bodies.length ? "" : " disabled"}>Write STL</button><button class="cd-btn" data-cad-export="3mf"${p.bodies.length ? "" : " disabled"}>Write 3MF</button><button class="cd-btn" data-cad-export="step"${p.bodies.length ? "" : " disabled"} title="Exact, for machining and other CAD programs">Write STEP</button></div>` +
+        (!p.imported && state.parts.some((f) => f.kind === "dxf") ? `<div class="cd-head">From a DXF</div><form class="cd-inline" data-cad-dxf-form><select name="path" aria-label="A DXF of the folder">${state.parts.filter((f) => f.kind === "dxf").map((f) => `<option value="${esc(f.path)}">${esc(f.path)}</option>`).join("")}</select><button class="cd-btn">Draw it in</button></form><p class="cd-muted">Its lines, arcs and circles as a new sketch on XY, to extrude.</p>` : "") +
         (p.flats.length ? `<div class="cd-head">Flat</div><ul class="cd-bodies">${p.flats.map((f) => `<li><span>${esc(f.name)}</span><span class="cd-muted">${+f.length.toFixed(2)} × ${+f.width.toFixed(2)} × ${+f.thickness.toFixed(2)} mm, ${f.bends} bend${f.bends === 1 ? "" : "s"}</span></li>`).join("")}</ul><div class="cd-row-btns"><button class="cd-btn" data-cad-export="flat" title="Each sheet's flat pattern, its bend lines marked: for a laser or a brake">Flat patterns (DXF)</button></div>` : "") + `</section>` +
         `<section class="cd-card"><div class="cd-head">Drawing</div><p class="cd-muted">Its views on a sheet — front, top, right and isometric, hidden edges dashed — to dimension, print or send to a shop. Written beside it as <code>${esc(p.name)}.drawing</code>, or opened if it is there.</p><div class="cd-row-btns"><button class="cd-btn" data-cad-make-drawing="paper"${p.bodies.length ? "" : " disabled"}>Draw it</button><button class="cd-btn" data-cad-make-drawing="blueprint"${p.bodies.length ? "" : " disabled"}>As a blueprint</button></div></section>`;
       els.step.innerHTML = html;
@@ -773,7 +774,7 @@ export function createCad(host) {
 
   function render() {
     const p = doc();
-    ws.querySelectorAll("[data-cad-part-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.part));
+    ws.querySelectorAll("[data-cad-part-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.part || state.part.imported));
     ws.querySelectorAll("[data-cad-asm-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.asm));
     ws.querySelectorAll("[data-cad-drw-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.drw));
     ws.querySelectorAll("[data-cad-sch-only]").forEach((b) => ((/** @type {HTMLElement} */ (b)).hidden = !state.sch));
@@ -1212,6 +1213,9 @@ export function createCad(host) {
       const name = freshName("n", names());
       state.want = { name, open: false };
       edit([{ op: "insert", at: null, text: drawText.note(name, view.name, val("text"), val("at")) }]);
+    } else if (form.matches("[data-cad-dxf-form]") && state.part) {
+      const path = /** @type {HTMLSelectElement} */ (form.elements.namedItem("path")).value;
+      if (path) host.dispatch({ type: "cadImportDxf", generation: generation(), path });
     } else if (form.matches("[data-cad-param-form]")) {
       const name = /** @type {HTMLInputElement} */ (form.elements.namedItem("name")).value.trim();
       const value = /** @type {HTMLInputElement} */ (form.elements.namedItem("value")).value.trim();

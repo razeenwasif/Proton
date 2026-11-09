@@ -26,4 +26,8 @@ bounds: Array<number>,
 /**
  * Each sheet-metal body's flat: its name, length, width and bends.
  */
-flats: Array<CadFlat>, };
+flats: Array<CadFlat>, 
+/**
+ * Another program's STEP or STL, read: shown, not edited.
+ */
+imported: boolean, };

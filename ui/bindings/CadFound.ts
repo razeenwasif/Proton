@@ -9,6 +9,7 @@ export type CadFound = {
  */
 path: string, name: string, 
 /**
- * `part`, `assembly`, `drawing`, `schematic` or `board`.
+ * `part`, `assembly`, `drawing`, `schematic`, `board`; `import`, a
+ * STEP or STL; `dxf`, a drawing to draw into a sketch.
  */
 kind: string, };
