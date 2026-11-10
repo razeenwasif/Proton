@@ -8,8 +8,9 @@ mod pasteboard;
 mod transport;
 mod window;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use backdrop::Backdrop;
@@ -19,8 +20,64 @@ use tauri::{Emitter, Manager, State};
 
 /// The channel language servers arrive on. Distinct from the `dispatch` reply
 /// path because nothing asked for these: a diagnostic shows up because a
-/// server finished thinking, not because the user pressed a key.
+/// server finished thinking, not because the user pressed a key. Each window
+/// has its own, `proton://events/<label>`: a page's `listen` hears every
+/// window's events whatever they are sent to, so they are told apart by name.
 const PUSHED: &str = "proton://events";
+
+/// The channel a window's pushed events go on.
+fn channel(label: &str) -> String {
+    format!("{PUSHED}/{label}")
+}
+
+/// Each window's own core, by the window's label. A window is a Proton of
+/// its own — its projects, its modes, its agents and terminals — sharing
+/// with the others only what the machine has one of: the Lab, Lean. The
+/// first window's session is the one written down and reopened next launch.
+#[derive(Default)]
+struct Windows {
+    sessions: Mutex<Vec<(String, Arc<Mutex<BridgeSession>>)>>,
+    /// How many have been opened after the first, for the next one's name.
+    opened: AtomicUsize,
+    /// What each window's question about unsaved changes was asked for.
+    asked: Mutex<HashMap<String, Ending>>,
+    /// The windows whose unsaved changes have been answered for, this quit.
+    settled: Mutex<HashSet<String>>,
+}
+
+/// Why a window asked about its unsaved changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ending {
+    /// Proton is quitting: every window is asked in turn.
+    Quit,
+    /// Only this window is closing; the others go on.
+    Close,
+}
+
+/// A lock that outlives a panic: the previous command's, already reported.
+fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl Windows {
+    fn of(&self, label: &str) -> Option<Arc<Mutex<BridgeSession>>> {
+        held(&self.sessions).iter().find(|(l, _)| l == label).map(|(_, s)| Arc::clone(s))
+    }
+
+    fn all(&self) -> Vec<(String, Arc<Mutex<BridgeSession>>)> {
+        held(&self.sessions).clone()
+    }
+
+    fn add(&self, label: &str, session: BridgeSession) {
+        held(&self.sessions).push((label.to_string(), Arc::new(Mutex::new(session))));
+    }
+
+    fn remove(&self, label: &str) -> Option<Arc<Mutex<BridgeSession>>> {
+        let mut sessions = held(&self.sessions);
+        let at = sessions.iter().position(|(l, _)| l == label)?;
+        Some(sessions.remove(at).1)
+    }
+}
 
 /// How often to ask the core whether anything has happened on a thread it
 /// cannot see — a server, a shell, the agent.
@@ -108,14 +165,15 @@ type Surface = Mutex<Backdrop>;
 /// not be moved, resized or redrawn in. The page sends one command at a time
 /// and waits for each reply, so running them elsewhere cannot reorder them.
 #[tauri::command(async)]
-fn dispatch(command: Command, session: State<'_, Mutex<BridgeSession>>) -> EventBatch {
-    let events = match session.lock() {
-        Ok(mut it) => it.apply(command.clone()),
-        // A poisoned lock means a previous command panicked. Recover rather
-        // than propagating: the front end should keep working, and the panic
-        // has already been reported on stderr.
-        Err(poisoned) => poisoned.into_inner().apply(command.clone()),
+fn dispatch(command: Command, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> EventBatch {
+    // A window being let go of has no session left to ask.
+    let Some(session) = windows.of(window.label()) else {
+        return EventBatch { sequence: 0, events: Vec::new() };
     };
+    // A poisoned lock means a previous command panicked. Recover rather than
+    // propagating: the front end should keep working, and the panic has
+    // already been reported on stderr.
+    let events = held(&session).apply(command.clone());
     // Whatever was just asked for may answer on another thread — a shell
     // echoing the key, a server replying — so the heartbeat looks sooner.
     HEARTBEAT.wake();
@@ -226,13 +284,10 @@ fn could_be_a_project(cwd: &std::path::Path, exe_folder: Option<&std::path::Path
 /// than a document could reasonably be. Off the main thread, which a 40 MB
 /// read would otherwise hold, and the window with it.
 #[tauri::command(async)]
-fn read_document(path: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
+fn read_document(path: String, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> Result<tauri::ipc::Response, String> {
     /// The largest file read for the page: the library reads none larger.
     const LARGEST: u64 = 128 * 1024 * 1024;
-    let file = match session.lock() {
-        Ok(it) => it.session.document_file(&path),
-        Err(poisoned) => poisoned.into_inner().session.document_file(&path),
-    };
+    let file = windows.of(window.label()).and_then(|s| held(&s).session.document_file(&path));
     let file = file.ok_or_else(|| format!("{path}: not a document Proton opened"))?;
     let size = std::fs::metadata(&file).map_err(|err| format!("{path}: {err}"))?.len();
     if size > LARGEST {
@@ -248,11 +303,8 @@ fn read_document(path: String, session: State<'_, Mutex<BridgeSession>>) -> Resu
 /// gives a file inside that run's folder of a kind the Lab shows; it is read
 /// after the lock is let go, so a large picture never holds the core.
 #[tauri::command(async)]
-fn read_lab(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tauri::ipc::Response, String> {
-    let path = match session.lock() {
-        Ok(it) => it.session.lab_file(&key),
-        Err(poisoned) => poisoned.into_inner().session.lab_file(&key),
-    };
+fn read_lab(key: String, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> Result<tauri::ipc::Response, String> {
+    let path = windows.of(window.label()).and_then(|s| held(&s).session.lab_file(&key));
     let path = path.ok_or_else(|| format!("{key}: not a file a run left"))?;
     std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
 }
@@ -261,11 +313,8 @@ fn read_lab(key: String, session: State<'_, Mutex<BridgeSession>>) -> Result<tau
 /// the system's save panel — only a file the viewer was let read, so the page
 /// cannot have the shell copy anything else. `None` when they cancel.
 #[tauri::command(async)]
-fn save_document_as(app: tauri::AppHandle, path: String, session: State<'_, Mutex<BridgeSession>>) -> Result<Option<String>, String> {
-    let file = match session.lock() {
-        Ok(it) => it.session.document_file(&path),
-        Err(poisoned) => poisoned.into_inner().session.document_file(&path),
-    };
+fn save_document_as(app: tauri::AppHandle, path: String, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> Result<Option<String>, String> {
+    let file = windows.of(window.label()).and_then(|s| held(&s).session.document_file(&path));
     let file = file.ok_or_else(|| format!("{path}: not a document Proton opened"))?;
     let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("document.pdf").to_string();
     // The panel is AppKit's, so it is shown on the main thread; this waits.
@@ -375,33 +424,33 @@ fn spawn_poll(app: tauri::AppHandle) {
                     std::thread::sleep(FAST - since);
                 }
                 last = Instant::now();
-                if let Some(events) = poll_once(&app) {
+                let Some(polled) = poll_once(&app) else {
+                    // The app is shutting down and the state is gone.
+                    return;
+                };
+                for (label, events) in polled {
                     if events.events.is_empty() {
                         continue;
                     }
                     stirred = Instant::now();
                     #[cfg(debug_assertions)]
-                    eprintln!("[poll] {} event(s): {events:?}", events.events.len());
-                    if app.emit(PUSHED, events).is_err() {
+                    eprintln!("[poll] {label}: {} event(s): {events:?}", events.events.len());
+                    if app.emit(&channel(&label), events).is_err() {
                         return;
                     }
-                } else {
-                    // The app is shutting down and the state is gone.
-                    return;
                 }
             }
         })
         .expect("the poll thread is not optional: without it no server is ever heard from");
 }
 
-/// One poll of the core, or `None` once the app is going away.
-fn poll_once(app: &tauri::AppHandle) -> Option<EventBatch> {
-    let session = app.try_state::<Mutex<BridgeSession>>()?;
-    let events = match session.lock() {
-        Ok(mut it) => it.apply(Command::Poll),
-        Err(poisoned) => poisoned.into_inner().apply(Command::Poll),
-    };
-    Some(events)
+/// One poll of every window's core, or `None` once the app is going away.
+fn poll_once(app: &tauri::AppHandle) -> Option<Vec<(String, EventBatch)>> {
+    let windows = app.try_state::<Windows>()?;
+    Some(windows.all().into_iter().map(|(label, session)| {
+        let events = held(&session).apply(Command::Poll);
+        (label, events)
+    }).collect())
 }
 
 
@@ -412,45 +461,190 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 /// The menu's Quit, which asks first: see `menu_that_asks`.
 const QUIT: &str = "proton-quit";
 
-/// Whether to stop and ask before quitting. When quitting would lose unsaved
-/// changes, the page is told which files, and the quit waits for its answer.
+/// Proton is to quit: whether to stop and ask first. When quitting would
+/// lose unsaved changes, the first window holding some is told which files,
+/// and the quit waits for its answer — then asks the next.
 fn asks_first(app: &tauri::AppHandle) -> bool {
     if QUITTING.load(Ordering::SeqCst) {
         return false;
     }
-    let Some(state) = app.try_state::<Mutex<BridgeSession>>() else {
+    if let Some(windows) = app.try_state::<Windows>() {
+        held(&windows.settled).clear();
+    }
+    asks_next(app)
+}
+
+/// Ask the next window with unsaved changes not yet answered for, this quit.
+fn asks_next(app: &tauri::AppHandle) -> bool {
+    let Some(windows) = app.try_state::<Windows>() else {
         return false;
     };
-    let batch = match state.lock() {
-        Ok(mut it) => it.apply(Command::AskToQuit),
-        Err(poisoned) => poisoned.into_inner().apply(Command::AskToQuit),
+    let settled = held(&windows.settled).clone();
+    for (label, session) in windows.all() {
+        if settled.contains(&label) {
+            continue;
+        }
+        let batch = held(&session).apply(Command::AskToQuit);
+        if batch.events.is_empty() {
+            continue;
+        }
+        held(&windows.asked).insert(label.clone(), Ending::Quit);
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+        let _ = app.emit(&channel(&label), batch);
+        return true;
+    }
+    false
+}
+
+/// One window is to close, the others staying: whether to stop and ask it
+/// about its own unsaved changes first.
+fn asks_to_close(app: &tauri::AppHandle, label: &str) -> bool {
+    let Some(windows) = app.try_state::<Windows>() else {
+        return false;
     };
+    let Some(session) = windows.of(label) else {
+        return false;
+    };
+    let batch = held(&session).apply(Command::AskToClose);
     if batch.events.is_empty() {
         return false;
     }
-    let _ = app.emit(PUSHED, batch);
+    held(&windows.asked).insert(label.to_string(), Ending::Close);
+    let _ = app.emit(&channel(label), batch);
     true
 }
 
-/// Quit — having saved every file with unsaved changes, when asked to; and
-/// not at all, saying which could not be saved and why, when one could not.
+/// The window's answer: its files saved, when asked to, and refused, saying
+/// which could not be and why, when one could not; then the window closed,
+/// if only it was closing, or the next window asked, or Proton quit.
 #[tauri::command]
-fn quit(save: bool, app: tauri::AppHandle, session: State<'_, Mutex<BridgeSession>>) -> Result<(), String> {
+fn quit(save: bool, window: tauri::WebviewWindow, app: tauri::AppHandle, windows: State<'_, Windows>) -> Result<(), String> {
+    let label = window.label().to_string();
     if save {
-        let failed = match session.lock() {
-            Ok(mut it) => it.session.save_unsaved(),
-            Err(poisoned) => poisoned.into_inner().session.save_unsaved(),
-        };
-        if !failed.is_empty() {
-            return Err(failed.join("\n"));
+        if let Some(session) = windows.of(&label) {
+            let failed = held(&session).session.save_unsaved();
+            if !failed.is_empty() {
+                return Err(failed.join("\n"));
+            }
         }
+    }
+    let ending = held(&windows.asked).remove(&label);
+    if ending == Some(Ending::Close) {
+        // Not asked again on the way out: destroyed, not closed.
+        return window.destroy().map_err(|err| err.to_string());
+    }
+    held(&windows.settled).insert(label);
+    if asks_next(&app) {
+        return Ok(());
     }
     QUITTING.store(true, Ordering::SeqCst);
     app.exit(0);
     Ok(())
 }
 
-/// The default menu, with a Quit that asks first.
+/// A window gone: its session written down (if it is the one that is) and
+/// what it had running stopped — all of Proton's, if it was the last.
+fn let_go(app: &tauri::AppHandle, label: &str) {
+    let Some(windows) = app.try_state::<Windows>() else {
+        return;
+    };
+    held(&windows.asked).remove(label);
+    let Some(session) = windows.remove(label) else {
+        return;
+    };
+    let last = windows.all().is_empty();
+    let mut session = held(&session);
+    session.session.save();
+    if last {
+        session.session.shutdown();
+    } else {
+        session.session.shutdown_window();
+    }
+}
+
+/// What every window does when closed: asks about its unsaved changes —
+/// the whole quit's, if it is the last one — and lets its session go.
+fn watch(window: &tauri::WebviewWindow) {
+    let this = window.clone();
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            let app = this.app_handle();
+            let others = app.webview_windows().keys().any(|label| label != this.label());
+            let asks = if others { asks_to_close(app, this.label()) } else { asks_first(app) };
+            if asks {
+                api.prevent_close();
+            }
+        }
+        tauri::WindowEvent::Destroyed => let_go(this.app_handle(), this.label()),
+        _ => {}
+    });
+}
+
+/// The menu's New Window.
+const NEW_WINDOW: &str = "proton-new-window";
+
+/// Another window, with a session of its own on the home folder: in front of
+/// the one in front, as large, a little down and to the right.
+fn open_window(app: &tauri::AppHandle) -> Result<(), String> {
+    let windows = app.try_state::<Windows>().ok_or("Proton is closing")?;
+    let label = format!("window-{}", windows.opened.fetch_add(1, Ordering::SeqCst) + 2);
+    // Before the window, so its page's first command finds it.
+    windows.add(&label, BridgeSession::new(Session::another_window()));
+    let front = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| app.get_webview_window("main"));
+    let mut builder = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("index.html".into()))
+        .title("Proton")
+        .inner_size(1600.0, 1000.0)
+        .min_inner_size(1100.0, 700.0)
+        .resizable(true)
+        .decorations(false)
+        .transparent(true)
+        .theme(Some(tauri::Theme::Dark))
+        .disable_drag_drop_handler()
+        .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Throttle);
+    if let Some(front) = &front {
+        let scale = front.scale_factor().unwrap_or(1.0);
+        if let Ok(size) = front.inner_size() {
+            let size = size.to_logical::<f64>(scale);
+            builder = builder.inner_size(size.width, size.height);
+        }
+        if let Ok(at) = front.outer_position() {
+            let at = at.to_logical::<f64>(scale);
+            builder = builder.position(at.x + 28.0, at.y + 28.0);
+        }
+    }
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(err) => {
+            if let Some(session) = windows.remove(&label) {
+                held(&session).session.shutdown_window();
+            }
+            return Err(err.to_string());
+        }
+    };
+    dress(&window, app);
+    watch(&window);
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// A window made to look like the first: its icon, the backdrop in use, the
+/// page kept drawn while out of sight.
+fn dress(window: &tauri::WebviewWindow, app: &tauri::AppHandle) {
+    if let Some(icon) = window_icon() {
+        // A failed icon is cosmetic; it must not stop the window opening.
+        if let Err(err) = window.set_icon(icon) {
+            eprintln!("proton: could not set the window icon: {err}");
+        }
+    }
+    let material = app.try_state::<Surface>().map(|s| *held(&s)).unwrap_or_default();
+    backdrop::apply(window, material);
+    keep_drawing(window);
+}
+
+/// The default menu, with a Quit that asks first and a New Window.
 ///
 /// The menu's own Quit ends the app before anything can ask: tao answers
 /// macOS's `applicationWillTerminate` but not `applicationShouldTerminate`,
@@ -459,8 +653,14 @@ fn quit(save: bool, app: tauri::AppHandle, session: State<'_, Mutex<BridgeSessio
 fn menu_that_asks(app: &tauri::AppHandle) -> Option<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItem, MenuItemKind};
     let menu = Menu::default(app).ok()?;
+    let mut quit_given = false;
     for item in menu.items().ok()? {
         let MenuItemKind::Submenu(submenu) = item else { continue };
+        // File's first item: ⌘⇧N, as in every editor that has windows.
+        if submenu.text().is_ok_and(|text| text == "File") {
+            let new = MenuItem::with_id(app, NEW_WINDOW, "New Window", true, Some("CmdOrCtrl+Shift+N")).ok()?;
+            submenu.insert(&new, 0).ok()?;
+        }
         for (at, entry) in submenu.items().ok()?.into_iter().enumerate() {
             let MenuItemKind::Predefined(predefined) = &entry else { continue };
             if !predefined.text().is_ok_and(|text| text.starts_with("Quit")) {
@@ -469,10 +669,10 @@ fn menu_that_asks(app: &tauri::AppHandle) -> Option<tauri::menu::Menu<tauri::Wry
             let quit = MenuItem::with_id(app, QUIT, "Quit Proton", true, Some("CmdOrCtrl+Q")).ok()?;
             submenu.remove(predefined).ok()?;
             submenu.insert(&quit, at).ok()?;
-            return Some(menu);
+            quit_given = true;
         }
     }
-    None
+    quit_given.then_some(menu)
 }
 
 /// The window and taskbar icon.
@@ -543,10 +743,10 @@ fn main() {
         // The PATH kept from the last launch, asked for again for the next.
         proton_claude::process::refresh_launch_path();
     });
+    let windows = Windows::default();
+    windows.add("main", BridgeSession::new(Session::restore(requested_folder(), working_folder())));
     tauri::Builder::default()
-        .manage(Mutex::new(BridgeSession::new(
-            Session::restore(requested_folder(), working_folder()),
-        )))
+        .manage(windows)
         .invoke_handler(tauri::generate_handler![
             dispatch,
             backdrop,
@@ -566,23 +766,16 @@ fn main() {
                 return Err("no main window in tauri.conf.json".into());
             };
 
-            if let Some(icon) = window_icon() {
-                // A failed icon is cosmetic; it must not stop the app booting.
-                if let Err(err) = window.set_icon(icon) {
-                    eprintln!("proton: could not set the window icon: {err}");
-                }
-            }
-
             // Before anything else touches the window: it opens where it was
             // last closed, and the size in `tauri.conf.json` is only the
-            // first-run default.
+            // first-run default. Only the first window's place is kept.
             window::restore(&window);
             window::remember(&window);
 
             let applied = backdrop::apply(&window, Backdrop::default());
             println!("[shell] backdrop: {applied}");
             app.manage(Surface::new(applied));
-            keep_drawing(&window);
+            dress(&window, app.handle());
 
             spawn_poll(app.handle().clone());
 
@@ -597,15 +790,17 @@ fn main() {
                     QUITTING.store(true, Ordering::SeqCst);
                     app.exit(0);
                 }
-            });
-            let asking = window.clone();
-            window.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    if asks_first(asking.app_handle()) {
-                        api.prevent_close();
-                    }
+                if event.id() == NEW_WINDOW {
+                    // Off the main thread: a session starts its servers.
+                    let app = app.clone();
+                    std::thread::spawn(move || {
+                        if let Err(err) = open_window(&app) {
+                            eprintln!("proton: could not open another window: {err}");
+                        }
+                    });
                 }
             });
+            watch(&window);
 
             Ok(())
         })
@@ -618,16 +813,17 @@ fn main() {
                 }
             }
             if matches!(event, tauri::RunEvent::Exit) {
-                if let Some(state) = app.try_state::<Mutex<BridgeSession>>() {
-                    let mut session = match state.lock() {
-                        Ok(session) => session,
-                        Err(poisoned) => poisoned.into_inner(),
-                    };
-                    session.session.save();
-                    // A Lab run and a notebook's kernel each lead a process
-                    // group of their own, and the app exits without dropping
-                    // the session: they would outlive it if not stopped here.
-                    session.session.shutdown();
+                if let Some(windows) = app.try_state::<Windows>() {
+                    for (label, session) in windows.all() {
+                        windows.remove(&label);
+                        let mut session = held(&session);
+                        session.session.save();
+                        // A Lab run and a notebook's kernel each lead a
+                        // process group of their own, and the app exits
+                        // without dropping the session: they would outlive
+                        // it if not stopped here.
+                        session.session.shutdown();
+                    }
                 }
             }
         });
@@ -637,6 +833,24 @@ fn main() {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn each_window_has_a_session_of_its_own_until_it_is_let_go() {
+        let windows = Windows::default();
+        let at = |dir: &str| BridgeSession::new(Session::new(std::env::temp_dir().join(dir)));
+        windows.add("main", at("proton-shell-main"));
+        windows.add("window-2", at("proton-shell-second"));
+        let main = windows.of("main").unwrap();
+        let second = windows.of("window-2").unwrap();
+        assert!(!Arc::ptr_eq(&main, &second), "two windows share a core");
+        assert!(held(&second).session.active().root().ends_with("proton-shell-second"));
+        assert!(windows.of("window-3").is_none());
+        assert!(windows.remove("window-2").is_some());
+        assert!(windows.of("window-2").is_none() && windows.remove("window-2").is_none());
+        assert_eq!(windows.all().iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(), ["main"]);
+        // Pushes go to the window they are for, by name.
+        assert_eq!(channel("window-2"), "proton://events/window-2");
+    }
 
     #[test]
     fn the_heartbeat_slows_as_things_go_quiet() {

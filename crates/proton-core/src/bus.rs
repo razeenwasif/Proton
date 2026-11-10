@@ -1014,6 +1014,9 @@ pub enum Command {
     /// Proton is about to quit: would anything be lost? Answered with
     /// `Unsaved`, naming the files with unsaved changes, or with nothing.
     AskToQuit,
+    /// This window is about to close, the others staying: as `AskToQuit`,
+    /// its `Unsaved` saying it is the window closing.
+    AskToClose,
     /// Write the notebook back.
     SaveNotebook,
     /// Accept or reject what the agent proposed to do to the notebook.
@@ -1543,6 +1546,9 @@ pub enum Event {
     /// for the person to say whether to save them.
     Unsaved {
         files: Vec<String>,
+        /// Only this window is closing; Proton goes on in the others.
+        #[serde(default)]
+        closing: bool,
     },
     /// The investigations, newest first, which one is open, and where they
     /// are kept: `research/` in the project, or a folder of their own —

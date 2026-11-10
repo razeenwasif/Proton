@@ -1188,7 +1188,7 @@ fn quitting_with_unsaved_changes_names_them_and_saving_them_spares_a_file_change
     }
     let asked = session.apply(Command::AskToQuit);
     assert!(
-        matches!(asked.as_slice(), [Event::Unsaved { files }] if files == &["a.txt", "b.txt"]),
+        matches!(asked.as_slice(), [Event::Unsaved { files, closing: false }] if files == &["a.txt", "b.txt"]),
         "{asked:?}"
     );
 
@@ -1199,7 +1199,9 @@ fn quitting_with_unsaved_changes_names_them_and_saving_them_spares_a_file_change
     assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "ax\n");
     assert_eq!(std::fs::read_to_string(root.join("b.txt")).unwrap(), "theirs\n");
     assert!(failed.len() == 1 && failed[0].starts_with("b.txt: "), "{failed:?}");
-    assert!(matches!(session.apply(Command::AskToQuit).as_slice(), [Event::Unsaved { files }] if files == &["b.txt"]));
+    assert!(matches!(session.apply(Command::AskToQuit).as_slice(), [Event::Unsaved { files, closing: false }] if files == &["b.txt"]));
+    // Closing only this window asks the same, saying so.
+    assert!(matches!(session.apply(Command::AskToClose).as_slice(), [Event::Unsaved { files, closing: true }] if files == &["b.txt"]));
 }
 
 #[test]
@@ -1499,4 +1501,24 @@ fn where_investigations_are_kept_is_moved_from_the_window_and_saved() {
     let events = session.apply(Command::ResearchFolder { folder: String::new() });
     assert_eq!(folder_of(&events).as_deref(), Some("research/"));
     assert!(read(&settings)["research"].get("folder").is_none(), "{}", read(&settings));
+}
+
+#[test]
+fn another_window_starts_where_it_is_told_offers_the_recents_and_leaves_the_stored_session_alone() {
+    let scratch = Scratch::new("another-window");
+    let store = scratch.root.join("session.json");
+    let alpha = folder::normalise(&scratch.root.join("alpha"));
+    let beta = folder::normalise(&scratch.root.join("beta"));
+    std::fs::create_dir_all(&beta).unwrap();
+    // The first window, on alpha, written down.
+    let first = Session::restore_from(Some(store.clone()), Some(alpha.clone()), None);
+    assert_eq!(first.active().root(), alpha.as_path());
+    let written = std::fs::read_to_string(&store).unwrap();
+    // Another, on beta: alpha among its recents; its moves not written.
+    let mut other = Session::another_from(Some(store.clone()), Some(beta.clone())).with_mode_homes(scratch.root.join("homes"));
+    assert_eq!(other.active().root(), beta.as_path());
+    assert!(other.recents().contains(&alpha), "{:?}", other.recents());
+    other.apply(Command::OpenWorkspace { path: alpha.display().to_string() });
+    other.save();
+    assert_eq!(std::fs::read_to_string(&store).unwrap(), written, "another window wrote over the first's session");
 }

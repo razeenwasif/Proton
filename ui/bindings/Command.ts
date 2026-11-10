@@ -23,7 +23,7 @@ view: number, firstLine: number, lines: number, } | { "type": "split", vertical:
 /**
  * The line the cursor is on when absent.
  */
-line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index: number, } | { "type": "setCell", index: number, source: string, } | { "type": "addCell", code: boolean, } | { "type": "removeCell", index: number, } | { "type": "selectCell", index: number, } | { "type": "runAll" } | { "type": "setSetting", key: string, value: unknown, } | { "type": "setLibraryScope", sources: Array<string>, } | { "type": "refreshLibrary" } | { "type": "openCitation", cite: string, } | { "type": "askToQuit" } | { "type": "saveNotebook" } | { "type": "answerProposal", id: number, accept: boolean, } | { "type": "jumpTo", mode: ModeId, path: string, 
+line: number | null, } | { "type": "refreshRepo" } | { "type": "runCell", index: number, } | { "type": "setCell", index: number, source: string, } | { "type": "addCell", code: boolean, } | { "type": "removeCell", index: number, } | { "type": "selectCell", index: number, } | { "type": "runAll" } | { "type": "setSetting", key: string, value: unknown, } | { "type": "setLibraryScope", sources: Array<string>, } | { "type": "refreshLibrary" } | { "type": "openCitation", cite: string, } | { "type": "askToQuit" } | { "type": "askToClose" } | { "type": "saveNotebook" } | { "type": "answerProposal", id: number, accept: boolean, } | { "type": "jumpTo", mode: ModeId, path: string, 
 /**
  * Zero-based, as every line number crossing this bus is.
  */

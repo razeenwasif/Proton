@@ -1316,6 +1316,13 @@ await test('Quitting with unsaved changes asks, and Cancel stays', async () => {
   assert(ask.querySelector('[data-quit="save"]') && ask.querySelector('[data-quit="lose"]'), 'the choices are missing');
   ask.querySelector('[data-quit="stay"]').click(); await settle();
   assert(ask.hidden, 'Cancel did not put the question away');
+  assert(ask.querySelector('h2').textContent.includes('quitting'), 'quitting is not what it asks about');
+  // One window of several closing asks about closing it, not quitting.
+  await win.pushEvents([{type: 'unsaved', files: ['notes.md'], closing: true}]); await settle();
+  assert(!ask.hidden && ask.querySelector('h2').textContent === 'Save your changes before closing this window?', `closing a window asks: ${ask.querySelector('h2').textContent}`);
+  assert(ask.querySelector('[data-quit="save"]').textContent === 'Save all and close' && ask.querySelector('[data-quit="lose"]').textContent === 'Close without saving', 'the choices still say quit');
+  ask.querySelector('[data-quit="stay"]').click(); await settle();
+  assert(ask.hidden, 'Cancel did not put the window\'s question away');
 });
 await test('A running cell sends only itself: it is drawn again and the notebook\'s other cells are left as they are', async () => {
   await win.dispatch({type: 'setMode', mode: 'data'}); await settle();

@@ -125,6 +125,15 @@ events missed before listener setup. Duplicate batches are ignored. A missing
 batch blocking a reply for two seconds triggers a fresh sync, without replaying
 the uncertain user action. Dependent UI gestures reserve their commands together
 so focus and editing cannot be separated by another keystroke.
+Each window has a `BridgeSession` of its own (`Windows` in the shell, by
+the window's label): its projects, modes, terminals and agents, sharing with
+the others only what the machine has one of — the Lab, Lean. Pushes go on
+`proton://events/<label>`, because a page's `listen` hears every event sent
+to any window. File ▸ New Window (⌘⇧N) opens one on the home folder; only
+the first window's session is written down and reopened at launch. Closing
+one of several asks about that window's unsaved files only (`AskToClose`)
+and stops what it had running, but not what is shared; quitting asks each
+window with unsaved files in turn.
 `Viewport` carries a window of source lines; other events carry cursor,
 buffer-list, tree, settings, or mode-specific document state. Events are not
 uniformly deltas, and not all of them have version fields.

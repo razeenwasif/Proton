@@ -3299,7 +3299,7 @@ function renderEvent(event) {
       break;
 
     case "unsaved":
-      askBeforeQuitting(event.files);
+      askBeforeQuitting(event.files, event.closing);
       break;
 
     case "viewport":
@@ -5071,8 +5071,8 @@ document.addEventListener("keydown", (e) => {
    stay. Saving that fails — a file changed on disk since it was read, one
    with no file — says why and does not quit. */
 
-/** @param {string[]} files */
-function askBeforeQuitting(files) {
+/** @param {string[]} files @param {boolean} [closing] only this window is closing */
+function askBeforeQuitting(files, closing = false) {
   let box = /** @type {HTMLElement | null} */ ($("[data-quit-ask]"));
   if (!box) {
     box = document.createElement("div");
@@ -5083,13 +5083,14 @@ function askBeforeQuitting(files) {
   const n = files.length;
   box.innerHTML =
     `<div class="quit-card" role="alertdialog" aria-modal="true" aria-label="Unsaved changes">` +
-    `<h2>Save your changes before quitting?</h2>` +
+    `<h2>Save your changes before ${closing ? "closing this window" : "quitting"}?</h2>` +
     `<p>${n === 1 ? "This file has" : `These ${n} files have`} changes that are not saved:</p>` +
     `<ul>${files.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>` +
     `<p class="quit-why" data-quit-why hidden></p>` +
     `<div class="quit-acts"><button data-quit="stay">Cancel</button><span class="grow"></span>` +
-    `<button data-quit="lose">Quit without saving</button>` +
-    `<button class="go" data-quit="save">Save all and quit</button></div></div>`;
+    `<button data-quit="lose">${closing ? "Close" : "Quit"} without saving</button>` +
+    `<button class="go" data-quit="save">Save all and ${closing ? "close" : "quit"}</button></div></div>`;
+  box.dataset.quitAsk = closing ? "closing" : "";
   box.hidden = false;
   /** @type {HTMLElement | null} */ (box.querySelector('[data-quit="save"]'))?.focus();
 }
@@ -5105,11 +5106,13 @@ document.addEventListener("click", async (e) => {
   }
   try {
     await quitApp(act.dataset.quit === "save");
+    // Answered: Proton goes on to ask another window, or this one goes.
+    box.hidden = true;
   } catch (why) {
     const said = /** @type {HTMLElement | null} */ (box.querySelector("[data-quit-why]"));
     if (said) {
       said.hidden = false;
-      said.textContent = `Not quitting — these could not be saved:\n${String(why)}`;
+      said.textContent = `Not ${box.dataset.quitAsk === "closing" ? "closing" : "quitting"} — these could not be saved:\n${String(why)}`;
     }
   }
 });

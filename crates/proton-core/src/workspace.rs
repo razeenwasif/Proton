@@ -1660,11 +1660,11 @@ impl Workspace {
             )],
 
             // The session asks every project; a workspace on its own, itself.
-            Command::AskToQuit => {
+            Command::AskToQuit | Command::AskToClose => {
                 let files = self.unsaved();
                 match files.is_empty() {
                     true => Vec::new(),
-                    false => vec![Event::Unsaved { files }],
+                    false => vec![Event::Unsaved { files, closing: matches!(command, Command::AskToClose) }],
                 }
             }
 

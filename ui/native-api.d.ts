@@ -15,9 +15,10 @@ export interface NativeApi {
     invoke(name: 'quit', args: {save: boolean}): Promise<void>;
   };
   event?: {
-    listen(name: 'proton://events', listener: (event: {payload: EventBatch}) => unknown): Promise<() => void>;
+    listen(name: `proton://events/${string}`, listener: (event: {payload: EventBatch}) => unknown): Promise<() => void>;
   };
   window?: {getCurrentWindow(): {
+    label: string;
     close(): void | Promise<void>;
     minimize(): void | Promise<void>;
     toggleMaximize(): void | Promise<void>;

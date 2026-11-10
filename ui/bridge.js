@@ -23,7 +23,9 @@ async function send(command) {
 const ready = Promise.resolve().then(() => {
   if (!tauri) return;
   if (!tauri.event?.listen) throw new Error("Native event listener is unavailable");
-  return tauri.event.listen("proton://events", ({payload}) => transport.receive(payload));
+  // Each window has a core of its own, and its pushes a channel of their own.
+  const label = tauri.window?.getCurrentWindow().label ?? "main";
+  return tauri.event.listen(`proton://events/${label}`, ({payload}) => transport.receive(payload));
 });
 const transport = createTransport({send: command => send(command), ready, ordered: HAS_SHELL});
 export const dispatch = transport.dispatch;

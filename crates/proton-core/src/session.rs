@@ -555,15 +555,48 @@ impl Session {
     /// Proton is going: what every workspace has running that would outlive
     /// it — a notebook's kernel, Research's runs and calls — is stopped.
     pub fn shutdown(&mut self) {
+        self.shutdown_window();
+        // The machine's Lean, if it is being made: here, not in Research's
+        // shutdown, which also runs when the investigations' folder moves.
+        crate::research::quit_lean();
+    }
+
+    /// This window is closing and Proton goes on in others: what its own
+    /// workspaces and Research have running is stopped, but not what the
+    /// machine shares — the Lab's other runs, Lean being made.
+    pub fn shutdown_window(&mut self) {
         for workspace in &mut self.workspaces {
             workspace.shutdown();
         }
         if let Some(research) = &self.research {
             research.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
         }
-        // The machine's Lean, if it is being made: here, not in Research's
-        // shutdown, which also runs when the investigations' folder moves.
-        crate::research::quit_lean();
+    }
+
+    /// A session for another window: on the home folder as a first run is,
+    /// its modes given their folders in ~/Proton, the recent projects to
+    /// pick from — and never written down, so it leaves alone what the
+    /// first window reopens next time.
+    pub fn another_window() -> Session {
+        Session::another_from(state_file(), folder::home())
+            .with_language_servers()
+            .with_plugins()
+            .with_research()
+    }
+
+    /// [`Session::another_window`], its recents from `store` and starting in
+    /// `start`, without language servers: for tests.
+    pub fn another_from(store: Option<PathBuf>, start: Option<PathBuf>) -> Session {
+        let start = start.unwrap_or_else(|| PathBuf::from("."));
+        let mut session = Session::new(folder::normalise(&start));
+        session.homes = folder::home().map(|home| home.join("Proton"));
+        session.listed = vec![Listed::on(ModeId::Codex)];
+        session.recents = store
+            .as_deref()
+            .and_then(read_state)
+            .map(|s| s.recents.iter().map(PathBuf::from).filter(|path| path.is_absolute() && !folder::is_root(path)).collect())
+            .unwrap_or_default();
+        session
     }
 
     /// Where a file a Lab run left is, in the workspace on screen.
@@ -636,11 +669,11 @@ impl Session {
                 Some(&index) => self.focus(index),
                 None => vec![notice(format!("no workspace {index}"), NoticeLevel::Warn)],
             },
-            Command::AskToQuit => {
+            Command::AskToQuit | Command::AskToClose => {
                 let files = self.unsaved();
                 match files.is_empty() {
                     true => Vec::new(),
-                    false => vec![Event::Unsaved { files }],
+                    false => vec![Event::Unsaved { files, closing: matches!(command, Command::AskToClose) }],
                 }
             }
             Command::CloseWorkspace { index } => match self.listed_on(self.mode()).get(index) {

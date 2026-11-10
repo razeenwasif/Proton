@@ -3,7 +3,7 @@
 # Proton
 
 A code editor that is also a data notebook, a research workbench, a
-spreadsheet, a logic simulator, a logic workbench and a CAD program — one window,
+spreadsheet, a logic simulator, a logic workbench and a CAD program — one app,
 seven modes, a shared Vim-style
 modal engine underneath all of them, and an agent that can act in any of them.
 
