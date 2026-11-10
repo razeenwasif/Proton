@@ -852,6 +852,19 @@ mod tests {
         assert_eq!(channel("window-2"), "proton://events/window-2");
     }
 
+    /// A window the capability does not name may not even listen: every
+    /// window's label, the first's and the ones New Window makes, is in it.
+    #[test]
+    fn every_window_may_use_what_the_first_may() {
+        let text = include_str!("../capabilities/default.json");
+        let caps: serde_json::Value = serde_json::from_str(text).unwrap();
+        let windows: Vec<&str> = caps["windows"].as_array().unwrap().iter().filter_map(|w| w.as_str()).collect();
+        assert!(windows.contains(&"main"), "{windows:?}");
+        let made = format!("window-{}", 2);
+        let covered = windows.iter().any(|w| *w == made || w.strip_suffix('*').is_some_and(|prefix| made.starts_with(prefix)));
+        assert!(covered, "a new window's label {made} is not in the capability's windows {windows:?}");
+    }
+
     #[test]
     fn the_heartbeat_slows_as_things_go_quiet() {
         assert_eq!(cadence(Duration::ZERO), FAST);
