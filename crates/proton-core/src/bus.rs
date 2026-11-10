@@ -796,6 +796,12 @@ pub enum Command {
     CadOpen {
         path: String,
     },
+    /// A second file shown with the open one, read-only: `path` names it,
+    /// empty for the one that goes with what is open (a drawing's model, a
+    /// model's drawing); none, to stop showing one.
+    CadCompanion {
+        path: Option<String>,
+    },
     /// The part put away; unsaved changes kept from it only with `discard`.
     CadClose {
         discard: bool,
@@ -1417,6 +1423,10 @@ pub enum Event {
     /// The drawing open, laid out on its sheet — or none.
     CadDrawing {
         drawing: Option<Box<crate::cad_drawing::CadDrawingView>>,
+    },
+    /// The file shown with the open one — or none.
+    CadCompanion {
+        companion: Option<Box<crate::cad::CadCompanionView>>,
     },
     /// The schematic open, checked and drawn — or none.
     CadSchematic {

@@ -294,8 +294,10 @@ impl Scene {
         let q = Quality { chord: size / 1000.0, angle: 9f64.to_radians() };
         let mut tris = Vec::new();
         let mut ready = Vec::new();
-        for s in cut_solids {
-            let m = tessellate(&s, &q)?;
+        // Each solid tessellated on a core of its own.
+        let meshes = crate::par::map(&cut_solids, |s| tessellate(s, &q));
+        for (s, m) in cut_solids.into_iter().zip(meshes) {
+            let m = m?;
             for t in &m.triangles {
                 tris.push([m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]]);
             }
@@ -375,7 +377,9 @@ impl Scene {
                 }
             }
         };
-        for r in &self.ready {
+        // Each solid's lines on a core of its own, gathered in order.
+        let one = |r: &Ready| -> Lines {
+            let mut lines = Lines::default();
             let s = &r.solid;
             let out_at = |f: usize, p: Vec3| {
                 let g = s.faces[f].surface.gradient(p);
@@ -517,7 +521,38 @@ impl Scene {
                     lines.hatch.extend(hatch_lines(&polys, hatch));
                 }
             }
+                    lines
+        };
+        for part in crate::par::map(&self.ready, one) {
+            lines.visible.extend(part.visible);
+            lines.hidden.extend(part.hidden);
+            // A centre mark — its across line, then its up line through the
+            // middle — drawn by two solids (a pin in its hole) once; an axis
+            // as each draws it.
+            let mut k = 0;
+            while k < part.center.len() {
+                let c = &part.center[k];
+                let mark = part.center.get(k + 1).filter(|d| {
+                    c.len() == 2 && d.len() == 2 && (c[0].y - c[1].y).abs() < 1e-9 && (d[0].x - d[1].x).abs() < 1e-9 && ((c[0] + c[1]) * 0.5).distance((d[0] + d[1]) * 0.5) < 1e-9
+                });
+                match mark {
+                    Some(d) => {
+                        if !lines.center.iter().any(|l| l.len() == 2 && l[0].distance(c[0]) < 1e-6) {
+                            lines.center.push(c.clone());
+                            lines.center.push(d.clone());
+                        }
+                        k += 2;
+                    }
+                    None => {
+                        lines.center.push(c.clone());
+                        k += 1;
+                    }
+                }
+            }
+            lines.hatch.extend(part.hatch);
+            lines.circles.extend(part.circles);
         }
+
         merge(&mut lines, size * 1e-7);
         // A through hole's two ends are one circle; seen, if either is.
         let mut kept: Vec<(P2, f64, bool)> = Vec::new();

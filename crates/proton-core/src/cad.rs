@@ -151,12 +151,17 @@ pub struct CadFace {
 pub struct CadBody {
     pub name: String,
     pub line: u32,
-    pub positions: Vec<f32>,
-    pub normals: Vec<f32>,
+    /// Millimetres, sent to the micrometre: the window needs no finer, and
+    /// the numbers are half as long.
+    #[ts(as = "Vec<f32>")]
+    pub positions: Thousandths,
+    #[ts(as = "Vec<f32>")]
+    pub normals: Thousandths,
     pub indices: Vec<u32>,
     pub face_of: Vec<u32>,
     pub faces: Vec<CadFace>,
-    pub edges: Vec<Vec<f32>>,
+    #[ts(as = "Vec<Vec<f32>>")]
+    pub edges: Vec<Thousandths>,
     /// Each edge's name to round or chamfer it by — `a.top & a.side(r.left)`,
     /// its two faces — or none for a seam or a smooth join, which is no
     /// corner; and whether it is `convex`, `concave`, or neither.
@@ -242,6 +247,54 @@ pub struct CadSketchView {
     pub profile: Option<String>,
     /// How many closed regions it bounds.
     pub regions: u32,
+}
+
+/// A second file shown with the one open — under it, in the window — read
+/// from its saved file and not edited there: an assembly's blueprint under
+/// the assembly, or the model under its drawing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct CadCompanionView {
+    /// As the project names it.
+    pub path: String,
+    pub name: String,
+    /// `part`, `assembly`, `drawing` or `import`.
+    pub kind: String,
+    pub part: Option<CadPartView>,
+    pub assembly: Option<crate::cad_assembly::CadAssemblyView>,
+    pub drawing: Option<crate::cad_drawing::CadDrawingView>,
+    /// Why it could not be shown, if it could not.
+    pub error: Option<String>,
+}
+
+/// Numbers sent to three decimals: a list of `f32` otherwise.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(transparent)]
+pub struct Thousandths(pub Vec<f32>);
+
+impl Serialize for Thousandths {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = s.serialize_seq(Some(self.0.len()))?;
+        for &x in &self.0 {
+            seq.serialize_element(&((x as f64 * 1000.0).round() / 1000.0))?;
+        }
+        seq.end()
+    }
+}
+
+impl std::ops::Deref for Thousandths {
+    type Target = Vec<f32>;
+    fn deref(&self) -> &Vec<f32> {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Thousandths {
+    fn deref_mut(&mut self) -> &mut Vec<f32> {
+        &mut self.0
+    }
 }
 
 /// The part open: its text, what is wrong with it, and what it builds.
@@ -362,6 +415,8 @@ pub struct Cads {
     parts: crate::cad_assembly::PartCache,
     /// What the agent's calls changed on screen, for the next poll.
     pending: Vec<Event>,
+    /// The file shown with the open one, as the project names it.
+    companion: Option<String>,
 }
 
 const START: &str = "units mm\n";
@@ -369,6 +424,86 @@ const START: &str = "units mm\n";
 impl Cads {
     pub fn is_open(&self) -> bool {
         self.open.is_some()
+    }
+
+    /// The file to show with the one open: a drawing's model; else the
+    /// first drawing of the project that is of the file open.
+    fn companion_for(&self, root: &Path) -> Result<String, String> {
+        let open = self.open.as_ref().ok_or("open a part, an assembly or a drawing first")?;
+        // As the project names it: a path under the root, or under the
+        // root with its links followed (macOS's /var is /private/var).
+        let real_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let rel = |p: &Path| {
+            let real = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+            p.strip_prefix(root).ok().or_else(|| real.strip_prefix(&real_root).ok()).unwrap_or(p).to_string_lossy().replace('\\', "/")
+        };
+        let of = |drawing: &Path, text: &str| -> Option<PathBuf> {
+            let line = text.lines().map(str::trim).find(|l| l.starts_with("of "))?;
+            let name = line[3..].trim().trim_matches('"');
+            Some(drawing.parent().unwrap_or(root).join(name))
+        };
+        let same = |a: &Path, b: &Path| a == b || (a.canonicalize().ok().is_some() && a.canonicalize().ok() == b.canonicalize().ok());
+        if open.kind == Doc::Drawing {
+            let model = of(&open.path, &open.text).ok_or("the drawing names no part or assembly: `of \"FILE\"`")?;
+            return Ok(rel(&model));
+        }
+        // A drawing of it; else of a file named for it and more —
+        // `t1-build-open.assembly`, the build out of its case, for
+        // `t1-build.assembly`.
+        let drawings: Vec<(String, PathBuf)> = find(root)
+            .into_iter()
+            .filter(|f| f.kind == "drawing")
+            .filter_map(|f| {
+                let path = root.join(&f.path);
+                let text = std::fs::read_to_string(&path).ok()?;
+                Some((f.path, of(&path, &text)?))
+            })
+            .collect();
+        if let Some((d, _)) = drawings.iter().find(|(_, m)| same(m, &open.path)) {
+            return Ok(d.clone());
+        }
+        let stem = open.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let kin = |m: &Path| {
+            m.file_stem().is_some_and(|s| s.to_string_lossy().starts_with(&format!("{stem}-")))
+                && open.path.file_name().is_some_and(|n| same(&m.with_file_name(n), &open.path))
+        };
+        if let Some((d, _)) = drawings.iter().find(|(_, m)| kin(m)) {
+            return Ok(d.clone());
+        }
+        Err(format!("no drawing is of {} yet: choose a file to show with it, or make one (Drawing, or Blueprint for an assembly)", open.shown))
+    }
+
+    /// The file shown with the open one, built from its saved file.
+    fn companion_event(&mut self, root: &Path) -> Event {
+        let Some(path) = self.companion.clone() else { return Event::CadCompanion { companion: None } };
+        let name = Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut view = CadCompanionView { path: path.clone(), name, kind: String::new(), part: None, assembly: None, drawing: None, error: None };
+        // Opened as it would be, on a second CAD sharing the parts built.
+        let mut other = Cads { parts: std::mem::take(&mut self.parts), ..Default::default() };
+        let events = other.apply(root, Command::CadOpen { path });
+        self.parts = std::mem::take(&mut other.parts);
+        for e in events {
+            match e {
+                Event::CadPart { part: Some(p) } => {
+                    view.kind = if p.imported { "import".into() } else { "part".into() };
+                    view.part = Some(*p);
+                }
+                Event::CadAssembly { assembly: Some(a) } => {
+                    view.kind = "assembly".into();
+                    view.assembly = Some(*a);
+                }
+                Event::CadDrawing { drawing: Some(d) } => {
+                    view.kind = "drawing".into();
+                    view.drawing = Some(*d);
+                }
+                Event::Notice { text, .. } if view.error.is_none() => view.error = Some(text),
+                _ => {}
+            }
+        }
+        if view.kind.is_empty() && view.error.is_none() {
+            view.error = Some("only a part, an assembly, a drawing or another program's file can be shown here".into());
+        }
+        Event::CadCompanion { companion: Some(Box::new(view)) }
     }
 
     pub fn events(&mut self, root: &Path) -> Vec<Event> {
@@ -468,7 +603,30 @@ impl Cads {
                 if let Some(why) = self.save_unsaved().into_iter().next() {
                     return vec![notice(why, NoticeLevel::Warn)];
                 }
-                self.events(root)
+                let mut out = self.events(root);
+                // Saved, the file shown with it may show it changed.
+                if self.companion.is_some() {
+                    out.push(self.companion_event(root));
+                }
+                out
+            }
+            Command::CadCompanion { path } => {
+                self.companion = match path {
+                    None => None,
+                    Some(p) if p.is_empty() => match self.companion_for(root) {
+                        Ok(p) => Some(p),
+                        Err(why) if self.open.is_none() => return vec![notice(why, NoticeLevel::Info), Event::CadCompanion { companion: None }],
+                        // Nothing goes with it yet: the split opens on
+                        // its list, saying so, for a file to be chosen.
+                        Err(why) => {
+                            self.companion = None;
+                            let view = CadCompanionView { path: String::new(), name: String::new(), kind: String::new(), part: None, assembly: None, drawing: None, error: Some(why) };
+                            return vec![Event::CadCompanion { companion: Some(Box::new(view)) }];
+                        }
+                    },
+                    Some(p) => Some(p),
+                };
+                vec![self.companion_event(root)]
             }
             Command::CadText { .. } | Command::CadEdit { .. } if self.open.as_ref().is_some_and(|o| o.kind == Doc::Import) => {
                 vec![notice("another program's file is read, not edited here: place it in an assembly, or draw a part beside it".into(), NoticeLevel::Warn)]
@@ -953,7 +1111,7 @@ impl Cads {
             Err(d) => (proton_cad::assembly::read(&open.saved).unwrap_or(proton_cad::assembly::Assembly { items: Vec::new() }), Some(CadDiag::from(&d))),
         };
         let m = self.parts.build(&a, &open.path, &open.root);
-        let mut v = crate::cad_assembly::view(&a, &m, &open.shown, &open.name, open.generation, open.clashes.clone());
+        let mut v = crate::cad_assembly::view(&a, &m, &open.shown, &open.name, open.generation, open.clashes.clone(), &mut self.parts);
         v.text = open.text.clone();
         v.dirty = open.text != open.saved;
         v.can_undo = !open.undo.is_empty();
@@ -1545,12 +1703,12 @@ fn body_view(b: &model::Body, bounds: &mut Aabb) -> CadBody {
     CadBody {
         name: b.name.clone(),
         line: b.line as u32,
-        positions,
-        normals,
+        positions: Thousandths(positions),
+        normals: Thousandths(normals),
         indices,
         face_of: mesh.face_of.clone(),
         faces,
-        edges: mesh.edges.iter().map(|e| e.iter().flat_map(|p| [p.x as f32, p.y as f32, p.z as f32]).collect()).collect(),
+        edges: mesh.edges.iter().map(|e| Thousandths(e.iter().flat_map(|p| [p.x as f32, p.y as f32, p.z as f32]).collect())).collect(),
         edge_picks: turns.iter().map(|t| t.0.clone()).collect(),
         edge_turns: turns.into_iter().map(|t| t.1).collect(),
         volume: ms.map_or(0.0, |m| m.volume),

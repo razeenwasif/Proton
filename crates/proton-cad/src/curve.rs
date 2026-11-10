@@ -70,8 +70,8 @@ impl Curve {
                 (e.frame.origin + x * co + y * s, y * co - x * s, -(x * co + y * s))
             }
             Curve::BSpline(b) => {
-                let d = b.derivatives(t, 2);
-                (d[0], d[1], d[2])
+                let [p, d1, d2] = b.eval2(t, 2);
+                (p, d1, d2)
             }
         }
     }

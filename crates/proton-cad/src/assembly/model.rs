@@ -34,6 +34,10 @@ pub struct Built {
     pub bodies: Vec<(String, Solid)>,
     /// Its own mistakes, each as `line: message`.
     pub mistakes: Vec<String>,
+    /// What it was built from, hashed: the same file read again is the
+    /// same part, so what was drawn of it can be kept. 0 for a tube, which
+    /// follows from its assembly's text and its fittings.
+    pub stamp: u64,
 }
 
 /// A part where an assembly puts it: `name` its instance's path through
@@ -449,13 +453,19 @@ fn part_at(ctx: &mut Ctx, path: &Path) -> Result<Arc<Built>, String> {
         return Ok(p.clone());
     }
     let text = (ctx.load)(path)?;
+    let stamp = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut h);
+        h.finish()
+    };
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     // A maker's STEP or STL is a part like any: its solids, its faces named.
     let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
     let built = match ext.as_deref() {
         Some("step") | Some("stp") => {
             let solids = crate::import::read_step(&text)?;
-            Arc::new(Built { path: path.to_path_buf(), title: Some(stem), material: None, bodies: solids, mistakes: Vec::new() })
+            Arc::new(Built { path: path.to_path_buf(), title: Some(stem), material: None, bodies: solids, mistakes: Vec::new(), stamp })
         }
         Some("stl") => {
             // Read as text or, binary, a character a byte.
@@ -463,7 +473,7 @@ fn part_at(ctx: &mut Ctx, path: &Path) -> Result<Arc<Built>, String> {
             let bytes = if text.trim_start().starts_with("solid") && text.is_ascii() { text.as_bytes().to_vec() } else { bytes };
             let tris = crate::import::read_stl(&bytes)?;
             let solid = crate::import::solid_from_triangles(&tris)?;
-            Arc::new(Built { path: path.to_path_buf(), title: Some(stem.clone()), material: None, bodies: vec![(stem, solid)], mistakes: Vec::new() })
+            Arc::new(Built { path: path.to_path_buf(), title: Some(stem.clone()), material: None, bodies: vec![(stem, solid)], mistakes: Vec::new(), stamp })
         }
         _ => {
             let part = crate::part::read(&text).map_err(|d| format!("line {} does not read: {}", d.line, d.message))?;
@@ -474,6 +484,7 @@ fn part_at(ctx: &mut Ctx, path: &Path) -> Result<Arc<Built>, String> {
                 material: m.material.clone(),
                 bodies: m.bodies.iter().map(|b| (b.name.clone(), b.solid.clone())).collect(),
                 mistakes: m.errors.iter().map(|d| format!("{}: {}", d.line, d.message)).collect(),
+                stamp,
             })
         }
     };

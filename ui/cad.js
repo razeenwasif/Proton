@@ -14,6 +14,7 @@ import { asmText, historyHtml, libraryHtml, libraryParams, lineIndex, offsets, p
 import { boxAt, drawText, drawingHistoryHtml, drawingSettingsHtml, freshName, itemOfBox, moved, scaleOf } from "./cad-drawing.js";
 import { netLine, partLine, referenceFor, schematicHistoryHtml, schematicItemOfBox, schematicMoved, schematicSettingsHtml } from "./cad-schematic.js";
 import { boardHistoryHtml, boardItemOfBox, boardMoved, boardSettingsHtml, layersOf, snap, trackLine, viaLine } from "./cad-board.js";
+import { createCompanion } from "./cad-companion.js";
 
 /** @typedef {import("./bindings/CadFound").CadFound} Found */
 /** @typedef {import("./bindings/CadPartView").CadPartView} PartView */
@@ -134,6 +135,17 @@ export function createCad(host) {
     diag: q("[data-cad-diag]"),
   };
   els.sketch.setAttribute("tabindex", "0");
+  const companion = createCompanion({
+    main: q("[data-cad-part]"),
+    section: q("[data-cad-companion]"),
+    gutter: q("[data-cad-split-gutter]"),
+    dispatch: (c) => host.dispatch(c),
+    resized: () => {
+      view?.resize();
+      placeSheet();
+      if (state.sketching != null) sketcher.resize();
+    },
+  });
   const state = {
     /** @type {Found[]} */ parts: [],
     /** @type {PartView | null} */ part: null,
@@ -1105,6 +1117,17 @@ export function createCad(host) {
       leaveSketch();
       return void host.dispatch({ type: "cadClose", discard: false });
     }
+    if (t.closest("[data-cad-split]")) {
+      // On, the file that goes with the one open; off, none.
+      return void host.dispatch({ type: "cadCompanion", path: companion.isOpen() ? null : "" });
+    }
+    if (t.closest("[data-cad-comp-swap]")) {
+      const below = companion.debug().comp?.path, above = doc()?.path;
+      if (!below || !above) return;
+      if (doc()?.dirty) return status("Save first: the file below is read from its saved file.");
+      host.dispatch({ type: "cadOpen", path: below });
+      return void host.dispatch({ type: "cadCompanion", path: above });
+    }
     if (t.closest("[data-cad-fit]")) {
       if (sheetDoc()) return fitSheet();
       const d = state.part ?? state.asm;
@@ -1277,6 +1300,7 @@ export function createCad(host) {
     if (state.sketching != null) sketcher.resize();
     view?.resize();
     placeSheet();
+    companion.resize();
   });
 
   /* ── the sheet: zoomed, panned, its views dragged ─────────────── */
@@ -1389,7 +1413,13 @@ export function createCad(host) {
     /** @param {{parts: Found[]}} e */
     home(e) {
       state.parts = e.parts;
+      companion.parts(e.parts);
       renderList();
+    },
+    /** @param {{companion: import("./bindings/CadCompanionView").CadCompanionView | null}} e */
+    companion(e) {
+      companion.show(e.companion);
+      ws.querySelector("[data-cad-split]")?.setAttribute("aria-pressed", String(!!e.companion));
     },
     /** @param {{families: import("./bindings/CadFamily").CadFamily[]}} e */
     families(e) {
@@ -1556,10 +1586,11 @@ export function createCad(host) {
         placeSheet();
         view?.resize();
         if (state.sketching != null) sketcher.resize();
+        companion.resize();
       });
     },
     debug() {
-      return { drw: state.drw, sch: state.sch, brd: state.brd, tool: state.tool, route: state.route, brdNet: state.brdNet, toBoard, sheet: state.sheet, toSheet, family: state.family, libValues: state.libValues, asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
+      return { companion: companion.debug(), drw: state.drw, sch: state.sch, brd: state.brd, tool: state.tool, route: state.route, brdNet: state.brdNet, toBoard, sheet: state.sheet, toSheet, family: state.family, libValues: state.libValues, asm: state.asm, picks: state.picks, exploded: state.exploded, part: state.part, step: state.step, sketching: state.sketching, face: state.face, edges: state.edges, tab: state.tab, noView: state.noView, sketch: sketcher.debug(), view: view?.debug() ?? null, viewer: view, sketcher, pickEdge, pickFace };
     },
   };
 }

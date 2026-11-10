@@ -4073,6 +4073,18 @@ body { font-size: calc(13px * var(--ui-scale)); }
 .cd-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--xl-line);
   background: radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--text) 5%, var(--bg)), var(--bg) 75%); }
 .cd-3d, .cd-sketch { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+/* Split: the file open above, a second below (an assembly's blueprint,
+   a drawing's model), the divider between them dragged. */
+.cd-split .cd-stage { flex: 0 0 var(--cd-split, 50%); }
+.cd-split-gutter { flex: 0 0 6px; cursor: row-resize; background: var(--xl-line); opacity: .6; }
+.cd-split-gutter:hover { opacity: 1; background: var(--accent); }
+.cd-split-gutter[hidden], .cd-companion[hidden] { display: none; }
+.cd-companion { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.cd-comp-head { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-bottom: 1px solid var(--xl-line); font: var(--z-xs)/1.4 var(--zed); color: var(--muted); }
+.cd-comp-head select { max-width: 50%; font: inherit; color: var(--text); background: transparent; border: 1px solid var(--xl-line); border-radius: 4px; padding: 1px 4px; }
+.cd-comp-note { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
+.cd-comp-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden;
+  background: radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--text) 5%, var(--bg)), var(--bg) 75%); }
 .cd-3d[hidden], .cd-sketch[hidden] { display: none; }
 .cd-sketch { background: var(--bg); cursor: crosshair; user-select: none; touch-action: none; }
 /* A drawing's sheet, zoomed and panned in the stage; the view chosen or

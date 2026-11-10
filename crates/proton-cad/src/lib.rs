@@ -51,6 +51,7 @@ pub mod march;
 pub mod mass;
 pub mod mesh;
 pub mod model;
+pub mod par;
 pub mod part;
 pub mod poly;
 pub mod profile;

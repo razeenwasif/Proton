@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use proton_cad::assembly;
 use proton_cad::brep::Solid;
-use proton_cad::drawing::build::{blueprint, build, standard, Built};
+use proton_cad::drawing::build::{blueprint, build, build_cached, standard, Built, Cache};
 use proton_cad::drawing::view::{project, Cut, Dir, Lines};
 use proton_cad::drawing::{lang, out, Anchor, Pen, Prim, Sheet, Style, P2};
 use proton_cad::model;
@@ -416,4 +416,36 @@ fn the_bill_of_materials_is_as_wide_as_its_names_and_balloons_stay_on_the_sheet(
     for p in &balls {
         assert!(p.x >= 15.0 && p.x <= b.sheet.width - 15.0 && p.y >= 15.0 && p.y <= b.sheet.height - 15.0, "a balloon at {p:?} is off the {} × {} sheet", b.sheet.width, b.sheet.height);
     }
+}
+
+/// Moving a view, or building again, projects nothing again — even with a
+/// tube, which is made anew each time the assembly is.
+#[test]
+fn a_moved_view_is_drawn_from_what_was_projected_before() {
+    let fit = proton_cad::library::make("fitting", &[]).unwrap().text;
+    let asm = "assembly \"Loop\"\nunits mm\npart plate from \"plate.part\"\npart f1 from \"fit.part\"\npart f2 from \"fit.part\"\nground plate\nplace f1 at (12, 45, 4)\nplace f2 at (92, 45, 4)\nroute t1 hard 14/16 from f1.socket to f2.socket via (12, 45, 60), (92, 45, 60) bend 20\n";
+    let fs = files(&[("fit.part", &fit), ("loop.assembly", asm)]);
+    let load = move |p: &Path| fs.get(p).cloned().ok_or_else(|| format!("no file {}", p.display()));
+    let a = assembly::lang::read(asm).unwrap();
+    let m = assembly::build(&a, Path::new("/a/loop.assembly"), &load);
+    assert!(m.errors.is_empty(), "{:?}", m.errors);
+    let text = blueprint("loop.assembly", "Loop", &m, true);
+    let at = text.lines().find(|l| l.starts_with("view iso ")).expect("an iso view").to_string();
+    let moved = text.replace(&at, &format!("{} at (200, 150)", at.split(" at ").next().unwrap()));
+    assert_ne!(text, moved);
+    let (mut cache, mut parts) = (Cache::default(), HashMap::new());
+    let first = build_cached(&lang::read(&text).unwrap(), Path::new("/a/loop.drawing"), &load, &mut parts, &mut cache);
+    assert!(first.errors.is_empty(), "{:?}", first.errors);
+    let kept = cache.sizes();
+    assert!(kept.0 > 0 && kept.1 > 0);
+    for t in [&text, &moved] {
+        let mut fresh = HashMap::new();
+        let b = build_cached(&lang::read(t).unwrap(), Path::new("/a/loop.drawing"), &load, &mut fresh, &mut cache);
+        assert!(b.errors.is_empty(), "{:?}", b.errors);
+        assert_eq!(cache.sizes(), kept, "something was projected again");
+    }
+    // What was kept draws what a build from nothing draws.
+    let plain = build(&lang::read(&moved).unwrap(), Path::new("/a/loop.drawing"), &load);
+    let kept = build_cached(&lang::read(&moved).unwrap(), Path::new("/a/loop.drawing"), &load, &mut parts, &mut cache);
+    assert_eq!(out::svg(&plain.sheet), out::svg(&kept.sheet));
 }

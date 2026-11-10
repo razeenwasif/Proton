@@ -198,3 +198,20 @@ test('a schematic\'s lines: a part named for its kind, a net\'s pins, a part mov
   assert.equal(schematicMoved(placed, c1, 10, 0), 'part C1 capacitor value 10u at (100, 150) turn 90');
   assert.equal(schematicItemOfBox(SCHEMATIC, 'title'), null);
 });
+
+test('the split keeps both panes in reach, and offers only what CAD shows', async () => {
+  const {clampShare, showable} = await import('../../ui/cad-companion.js');
+  assert.equal(clampShare(0.5), 0.5);
+  assert.equal(clampShare(0.01), 0.15);
+  assert.equal(clampShare(2), 0.85);
+  assert.equal(clampShare(NaN), 0.5);
+  const files = [
+    {path: 'a.part', name: 'a', kind: 'part'},
+    {path: 'b.assembly', name: 'b', kind: 'assembly'},
+    {path: 'c.drawing', name: 'c', kind: 'drawing'},
+    {path: 'd.step', name: 'd', kind: 'import'},
+    {path: 'e.schematic', name: 'e', kind: 'schematic'},
+    {path: 'f.board', name: 'f', kind: 'board'},
+  ];
+  assert.deepEqual(showable(files).map((f) => f.path), ['a.part', 'b.assembly', 'c.drawing', 'd.step']);
+});

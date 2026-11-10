@@ -50,6 +50,7 @@
     "cad-drawing.js",
     "cad-schematic.js",
     "cad-board.js",
+    "cad-companion.js",
     "cad-sketch.js",
     "preview-cad.js",
     "kmap.js",

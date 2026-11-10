@@ -1076,6 +1076,7 @@
             <button class="tb-btn" data-cad-undo title="Undo  ⌘Z" aria-label="Undo"><svg class="i"><use href="#i-undo"/></svg></button>
             <button class="tb-btn" data-cad-redo title="Redo  ⇧⌘Z" aria-label="Redo"><svg class="i"><use href="#i-redo"/></svg></button>
             <button class="tb-btn" data-cad-fit title="Fit the part in view  F" aria-label="Fit the part in view"><svg class="i"><use href="#i-search"/></svg></button>
+            <button class="tb-btn" data-cad-split title="Split: the drawing under the model, or the model under its drawing" aria-label="Split" aria-pressed="false"><svg class="i"><use href="#i-split-h"/></svg></button>
             <button class="tb-btn" data-cad-save title="Save  ⌘S" aria-label="Save"><svg class="i"><use href="#i-check"/></svg></button>
             <button class="tb-btn" data-cad-close title="Close the part" aria-label="Close the part"><svg class="i"><use href="#i-close"/></svg></button>
           </header>
@@ -1087,6 +1088,22 @@
             <div class="cd-banner" data-cad-banner hidden></div>
             <div class="cd-status" data-cad-status></div>
           </div>
+          <div class="cd-split-gutter" data-cad-split-gutter hidden title="Drag to resize · double-click to share evenly"></div>
+          <section class="cd-companion" data-cad-companion hidden aria-label="The file shown under the one open">
+            <header class="cd-comp-head">
+              <select data-cad-comp-pick aria-label="The file shown below"></select>
+              <span class="cd-comp-note" data-cad-comp-note></span>
+              <button class="tb-btn" data-cad-comp-fit title="Fit it in view" aria-label="Fit it in view"><svg class="i"><use href="#i-search"/></svg></button>
+              <button class="tb-btn" data-cad-comp-refresh title="Read it again from its saved file" aria-label="Read it again"><svg class="i"><use href="#i-undo"/></svg></button>
+              <button class="tb-btn" data-cad-comp-swap title="Open it above, and show this one below" aria-label="Swap"><svg class="i"><use href="#i-split-v"/></svg></button>
+              <button class="tb-btn" data-cad-comp-close title="Close the split" aria-label="Close the split"><svg class="i"><use href="#i-close"/></svg></button>
+            </header>
+            <div class="cd-comp-stage">
+              <canvas class="cd-3d" data-cad-comp-canvas hidden aria-label="The file below, in 3D"></canvas>
+              <div class="cd-sheet" data-cad-comp-sheet hidden aria-label="The drawing below"></div>
+              <div class="cd-status" data-cad-comp-status></div>
+            </div>
+          </section>
         </div>
       </main>
 

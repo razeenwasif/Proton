@@ -516,6 +516,59 @@ export async function cadChecks({test, assert, win, doc, $, settle, key, shown})
     assert(sent(before, 'cadDraw')[0]?.blueprint === true, 'Blueprint did not ask for one on blue');
   });
 
+  await test('Split shows the blueprint under its assembly, and swapped the model under its drawing; the divider moves, and closing leaves one', async () => {
+    await win.pushEvents([{type: 'cadHome', parts: [{path: 'parts/plate.part', name: 'plate', kind: 'part'}, {path: 'rig.assembly', name: 'rig', kind: 'assembly'}, {path: 'rig.drawing', name: 'rig', kind: 'drawing'}]}, {type: 'cadPart', part: null}, {type: 'cadDrawing', drawing: null}, {type: 'cadAssembly', assembly: {...structuredClone(ASSEMBLY), path: 'rig.assembly', generation: 9, dirty: false}}]); await settle();
+    const section = ws().querySelector('[data-cad-companion]');
+    assert(!shown(section), 'a split shown before it was asked for');
+    let before = win.commands.length;
+    ws().querySelector('[data-cad-split]').click(); await settle();
+    assert(JSON.stringify(sent(before, 'cadCompanion')) === JSON.stringify([{type: 'cadCompanion', path: ''}]), `Split did not ask for the file that goes with it: ${JSON.stringify(sent(before, 'cadCompanion'))}`);
+    const below = (/** @type {any} */ more) => ({type: 'cadCompanion', companion: {path: 'rig.drawing', name: 'rig', kind: 'drawing', part: null, assembly: null, drawing: null, error: null, ...more}});
+    await win.pushEvents([below({drawing: {...structuredClone(DRAWING), path: 'rig.drawing', dirty: false}})]); await settle();
+    await new Promise((r) => win.requestAnimationFrame(() => win.requestAnimationFrame(r)));
+    assert(shown(section) && shown(ws().querySelector('[data-cad-split-gutter]')), 'the split is not shown');
+    assert(section.querySelector('[data-cad-comp-pick]').value === 'rig.drawing', 'the file below is not the one chosen');
+    assert(section.querySelector('[data-cad-comp-sheet] svg') && shown(section.querySelector('[data-cad-comp-sheet]')), 'the blueprint is not drawn below');
+    const stage = ws().querySelector('[data-cad-stage]').getBoundingClientRect(), comp = section.getBoundingClientRect();
+    assert(stage.height > 40 && comp.height > 40 && comp.top >= stage.bottom - 1, `not one above the other: ${stage.top}..${stage.bottom} and ${comp.top}..${comp.bottom}`);
+    assert(ws().querySelector('[data-cad-split]').getAttribute('aria-pressed') === 'true', 'Split is not shown pressed');
+    // The divider dragged down, the top grows; double-clicked, even again.
+    const gutter = ws().querySelector('[data-cad-split-gutter]'), g = gutter.getBoundingClientRect();
+    gutter.dispatchEvent(new win.PointerEvent('pointerdown', {clientX: g.left + 5, clientY: g.top + 2, bubbles: true, pointerId: 9, button: 0}));
+    gutter.dispatchEvent(new win.PointerEvent('pointermove', {clientX: g.left + 5, clientY: g.top + 60, bubbles: true, pointerId: 9}));
+    gutter.dispatchEvent(new win.PointerEvent('pointerup', {clientX: g.left + 5, clientY: g.top + 60, bubbles: true, pointerId: 9}));
+    await settle();
+    assert(debug().companion.share > 0.5, `the divider did not move: ${debug().companion.share}`);
+    gutter.dispatchEvent(new win.MouseEvent('dblclick', {bubbles: true})); await settle();
+    assert(debug().companion.share === 0.5, 'a double click did not share it evenly');
+    // Another file chosen below; then swapped: the drawing above.
+    before = win.commands.length;
+    const pick = section.querySelector('[data-cad-comp-pick]');
+    pick.value = 'parts/plate.part'; pick.dispatchEvent(new win.Event('change', {bubbles: true})); await settle();
+    assert(sent(before, 'cadCompanion')[0]?.path === 'parts/plate.part', 'choosing a file below did not ask for it');
+    before = win.commands.length;
+    section.querySelector('[data-cad-comp-swap]').click(); await settle();
+    assert(sent(before, 'cadOpen')[0]?.path === 'rig.drawing' && sent(before, 'cadCompanion')[0]?.path === 'rig.assembly', `swap did not open the one below above: ${JSON.stringify(win.commands.slice(before))}`);
+    await win.pushEvents([{type: 'cadAssembly', assembly: null}, drw(), below({path: 'rig.assembly', kind: 'assembly', assembly: {...structuredClone(ASSEMBLY), path: 'rig.assembly', dirty: false}})]); await settle();
+    const canvas = section.querySelector('[data-cad-comp-canvas]');
+    assert(shown(canvas) || section.querySelector('[data-cad-comp-status]').textContent.includes('WebGL'), 'the assembly is not drawn below, nor said why not');
+    assert(!shown(section.querySelector('[data-cad-comp-sheet]')), 'the sheet is still shown below');
+    // What cannot be shown says why.
+    await win.pushEvents([below({path: 'x.part', kind: 'part', error: 'x.part: no such file'})]); await settle();
+    assert(section.querySelector('[data-cad-comp-status]').textContent === 'x.part: no such file', 'the reason is not shown');
+    // Nothing to go with it: the list to choose from, and why.
+    await win.pushEvents([below({path: '', name: '', kind: '', error: 'no drawing is of rig yet: choose a file to show with it'})]); await settle();
+    assert(shown(section) && pick.value === '' && pick.options[0].textContent === 'Choose a file…', `nothing chosen is not offered the list: ${pick.value}`);
+    assert(section.querySelector('[data-cad-comp-status]').textContent.includes('choose a file'), 'why nothing is shown is not said');
+    assert(!shown(canvas) && !shown(section.querySelector('[data-cad-comp-sheet]')), 'something is drawn when nothing was chosen');
+    // Closed: asked to stop, and the stage whole again.
+    before = win.commands.length;
+    section.querySelector('[data-cad-comp-close]').click(); await settle();
+    assert(JSON.stringify(sent(before, 'cadCompanion')) === JSON.stringify([{type: 'cadCompanion', path: null}]), 'closing did not ask to stop');
+    await win.pushEvents([{type: 'cadCompanion', companion: null}]); await settle();
+    assert(!shown(section) && !shown(gutter) && ws().querySelector('[data-cad-split]').getAttribute('aria-pressed') === 'false', 'the split did not close');
+  });
+
   await test('A drawing shows its sheet and its statements; a view dragged is moved, the sheet zoomed about the pointer', async () => {
     await win.pushEvents([{type: 'cadPart', part: null}, {type: 'cadAssembly', assembly: null}, drw()]); await settle();
     const sheet = ws().querySelector('[data-cad-sheet]');

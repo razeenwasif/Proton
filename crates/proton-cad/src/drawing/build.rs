@@ -37,6 +37,41 @@ struct Piece {
     solid: Solid,
 }
 
+/// Scenes and views kept between builds of a drawing: neither depends on
+/// where a view sits on the sheet, its scale or the dimensions, only on the
+/// solids and which way they are seen — so moving a view or adding a
+/// dimension projects nothing again.
+#[derive(Default)]
+pub struct Cache {
+    scenes: HashMap<u64, Arc<Scene>>,
+    lines: HashMap<u64, Arc<Lines>>,
+}
+
+impl Cache {
+    /// How many scenes and views are kept: what a test reads to see a
+    /// build made nothing again.
+    pub fn sizes(&self) -> (usize, usize) {
+        (self.scenes.len(), self.lines.len())
+    }
+
+    /// Kept small: the last few drawings' worth.
+    fn trim(&mut self) {
+        if self.scenes.len() > 24 {
+            self.scenes.clear();
+        }
+        if self.lines.len() > 96 {
+            self.lines.clear();
+        }
+    }
+}
+
+fn hash_of(parts: impl FnOnce(&mut std::collections::hash_map::DefaultHasher)) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    parts(&mut h);
+    h.finish()
+}
+
 impl Target {
     fn pieces(&self) -> Vec<Piece> {
         match self {
@@ -236,6 +271,13 @@ pub fn build(d: &Drawing, here: &Path, load: Load) -> Built {
 /// The drawing laid out, an assembly's parts taken from `parts` where
 /// they are built already, and those it builds left there.
 pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<PathBuf, Arc<assembly::model::Built>>) -> Built {
+    build_cached(d, here, load, parts, &mut Cache::default())
+}
+
+/// As [`build_with`], scenes and views taken from `cache` where what they
+/// show is as it was, and those made left there.
+pub fn build_cached(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<PathBuf, Arc<assembly::model::Built>>, cache: &mut Cache) -> Built {
+    cache.trim();
     let mut errors: Vec<Diag> = Vec::new();
     let mut title = None;
     let (mut sheet_name, mut scale_expr, mut first, mut blue) = ("A3".to_string(), None, false, false);
@@ -260,6 +302,7 @@ pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<Path
     });
     // What it is of.
     let dir = here.parent().unwrap_or(Path::new("")).to_path_buf();
+    let mut text_hash = 0u64;
     let target = match &of {
         None => {
             errors.push(Diag::new(1, 1, "a drawing says what it is of: `of \"bracket.part\"`"));
@@ -269,6 +312,8 @@ pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<Path
             let path = dir.join(file);
             let got = (|| -> Result<Target, String> {
                 let t = load(&path)?;
+                use std::hash::Hash;
+                text_hash = hash_of(|h| t.hash(h));
                 if file.ends_with(".assembly") {
                     let a = assembly::read(&t).map_err(|d| format!("line {} of {file} does not read: {}", d.line, d.message))?;
                     Ok(Target::Assembly(Box::new(assembly::model::build_with(&a, &path, load, parts))))
@@ -287,6 +332,26 @@ pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<Path
         }
     };
     let pieces = target.as_ref().map(|t| t.pieces()).unwrap_or_default();
+    // What the solids are: the file's text, and each part an assembly holds
+    // — what it was built from, and where it is — so a part changed is a
+    // new scene.
+    let solids_hash = hash_of(|h| {
+        use std::hash::Hash;
+        text_hash.hash(h);
+        if let Some(Target::Assembly(m)) = &target {
+            for l in m.leaves() {
+                l.name.hash(h);
+                // What it was built from, not where it sits in memory: a
+                // part read again may land where another was.
+                l.part.stamp.hash(h);
+                l.part.path.hash(h);
+                let (at, turn) = l.place.placement();
+                for x in [at.x, at.y, at.z, turn[0], turn[1], turn[2]] {
+                    x.to_bits().hash(h);
+                }
+            }
+        }
+    });
     let assembly = matches!(target, Some(Target::Assembly(_)));
     let mut faces = std::collections::BTreeSet::new();
     let mut parts = std::collections::BTreeSet::new();
@@ -308,10 +373,28 @@ pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<Path
     // The views.
     let mut places: HashMap<String, Place> = HashMap::new();
     let mut view_lines: HashMap<String, Lines> = HashMap::new();
-    let mut scenes: HashMap<String, Scene> = HashMap::new();
     // Each view's name goes under it, and under its dimensions: after them.
     let mut labels: Vec<(String, String)> = Vec::new();
     let mut below: HashMap<String, f64> = HashMap::new();
+    // First what each view is — its solids, which way they are seen, and
+    // the keys what is drawn of them is kept by; then whatever is not kept
+    // yet made at once, every view on its own core; then each placed on the
+    // sheet in the file's order.
+    struct Job<'a> {
+        item: &'a crate::part::ast::Noted<Item>,
+        name: String,
+        dir: Dir,
+        at: [f64; 2],
+        scale: f64,
+        hidden: bool,
+        exploded: bool,
+        cut: Option<Cut>,
+        moved: Vec<Solid>,
+        scene_key: u64,
+        line_key: u64,
+    }
+    let mut jobs: Vec<Job> = Vec::new();
+    let mut named = std::collections::HashSet::new();
     for n in &d.items {
         let line_no = n.line;
         let (name, dir_, at, scale, hidden, exploded, cut) = match &n.item {
@@ -335,7 +418,7 @@ pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<Path
             }
             _ => continue,
         };
-        if places.contains_key(&name) {
+        if !named.insert(name.clone()) {
             errors.push(Diag::new(line_no, 1, format!("`{name}` is a view's name already")));
             continue;
         }
@@ -366,7 +449,7 @@ pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<Path
                 errors.push(Diag::new(line_no, 1, "only an assembly comes apart"));
                 continue;
             }
-            _ => pieces.iter().map(|p| p.solid.clone()).collect(),
+            _ => Vec::new(),
         };
         // The same solids are made ready once for all their views; a
         // section's are its own.
@@ -374,34 +457,77 @@ pub fn build_with(d: &Drawing, here: &Path, load: Load, parts: &mut HashMap<Path
             (Some(_), _) => format!("\u{0}{name}"),
             (None, e) => e.clone().unwrap_or_default(),
         };
-        let made = if scenes.contains_key(&key) {
-            Ok(())
-        } else {
-            let refs: Vec<&Solid> = moved.iter().collect();
-            Scene::new(&refs, cut).map(|sc| {
-                scenes.insert(key.clone(), sc);
-            })
-        };
-        let scene = made.map(|()| &scenes[&key]);
-        let lines = match scene.map(|sc| sc.lines(dir_, hidden, 3.0 / s)) {
-            Ok(l) => l,
-            Err(e) => {
-                errors.push(Diag::new(line_no, 1, format!("`{name}` cannot be drawn: {e}")));
-                continue;
+        let scene_key = hash_of(|h| {
+            use std::hash::Hash;
+            solids_hash.hash(h);
+            key.hash(h);
+            if let Some(c) = &cut {
+                for x in [c.point.x, c.point.y, c.point.z, c.toward.x, c.toward.y, c.toward.z] {
+                    x.to_bits().hash(h);
+                }
             }
-        };
+        });
+        let line_key = hash_of(|h| {
+            use std::hash::Hash;
+            scene_key.hash(h);
+            format!("{dir_:?}").hash(h);
+            hidden.hash(h);
+            (3.0 / s).to_bits().hash(h);
+        });
+        jobs.push(Job { item: n, name, dir: dir_, at, scale: s, hidden, exploded: exploded.is_some(), cut, moved, scene_key, line_key });
+    }
+    // The scenes not kept, each once.
+    let mut wanted: Vec<&Job> = Vec::new();
+    for j in &jobs {
+        if !cache.scenes.contains_key(&j.scene_key) && !wanted.iter().any(|w| w.scene_key == j.scene_key) {
+            wanted.push(j);
+        }
+    }
+    let mut failed: HashMap<u64, String> = HashMap::new();
+    let made = crate::par::map(&wanted, |j| {
+        let refs: Vec<&Solid> = if j.moved.is_empty() { pieces.iter().map(|p| &p.solid).collect() } else { j.moved.iter().collect() };
+        Scene::new(&refs, j.cut)
+    });
+    for (j, sc) in wanted.iter().zip(made) {
+        match sc {
+            Ok(sc) => {
+                cache.scenes.insert(j.scene_key, Arc::new(sc));
+            }
+            Err(e) => {
+                failed.insert(j.scene_key, e);
+            }
+        }
+    }
+    // The views not kept, each once.
+    let mut wanted: Vec<&Job> = Vec::new();
+    for j in &jobs {
+        if !failed.contains_key(&j.scene_key) && !cache.lines.contains_key(&j.line_key) && !wanted.iter().any(|w| w.line_key == j.line_key) {
+            wanted.push(j);
+        }
+    }
+    let drawn = crate::par::map(&wanted, |j| cache.scenes[&j.scene_key].lines(j.dir, j.hidden, 3.0 / j.scale));
+    for (j, l) in wanted.iter().zip(drawn) {
+        cache.lines.insert(j.line_key, Arc::new(l));
+    }
+    for j in jobs {
+        let (name, s, cut) = (j.name, j.scale, j.cut);
+        if let Some(e) = failed.get(&j.scene_key) {
+            errors.push(Diag::new(j.item.line, 1, format!("`{name}` cannot be drawn: {e}")));
+            continue;
+        }
+        let lines = (*cache.lines[&j.line_key]).clone();
         let (eye, u, v) = match &cut {
             Some(c) => Dir::along(c.toward).axes(),
-            None => dir_.axes(),
+            None => j.dir.axes(),
         };
         let mid = (lines.min + lines.max) * 0.5;
-        let at = P2::new(at[0], at[1]);
+        let at = P2::new(j.at[0], j.at[1]);
         let place = Place { eye, u, v, mid, at, scale: s, lo: at + (lines.min - mid) * s, hi: at + (lines.max - mid) * s };
         draw_lines(&mut sheet.prims, &lines, &place);
         // Its name under it.
-        let label = match &n.item {
+        let label = match &j.item.item {
             Item::Section(_) => format!("SECTION {}–{}", name.to_uppercase(), name.to_uppercase()),
-            _ if exploded.is_some() => format!("{} — EXPLODED", name.to_uppercase()),
+            _ if j.exploded => format!("{} — EXPLODED", name.to_uppercase()),
             _ => name.to_uppercase(),
         };
         let scale_words = if (s - base).abs() > 1e-9 { format!(" ({})", ratio(s)) } else { String::new() };

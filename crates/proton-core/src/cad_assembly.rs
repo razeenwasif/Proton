@@ -300,10 +300,21 @@ pub fn relative(from: &str, to: &str) -> String {
     out.join("/")
 }
 
+/// A body's triangles kept: the part they are of, the quality's bits, the
+/// mesh and its mass properties.
+type Meshed = (Arc<Built>, u64, Arc<Mesh>, Option<proton_cad::mass::Mass>);
+
 /// Parts built, kept until their files change.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct PartCache {
     built: HashMap<PathBuf, (Option<SystemTime>, Arc<Built>)>,
+    /// Each part's bodies as triangles, by its file and body, while the part
+    /// built is the same one, or one built again from the same text, and at
+    /// the same fineness: an edit that moves or mates parts tessellates
+    /// nothing again.
+    meshes: HashMap<(PathBuf, usize), Meshed>,
+    /// Drawings' scenes and views, kept while their solids are as they were.
+    drawn: proton_cad::drawing::build::Cache,
 }
 
 fn mtime(p: &Path) -> Option<SystemTime> {
@@ -333,9 +344,29 @@ impl PartCache {
     pub fn drawing(&mut self, d: &proton_cad::drawing::lang::Drawing, here: &Path, root: &Path) -> proton_cad::drawing::build::Built {
         let mut parts: HashMap<PathBuf, Arc<Built>> = self.built.iter().filter(|(p, (t, _))| mtime(p) == *t).map(|(p, (_, b))| (p.clone(), b.clone())).collect();
         let load = load_inside(root);
-        let b = proton_cad::drawing::build::build_with(d, here, &load, &mut parts);
+        let b = proton_cad::drawing::build::build_cached(d, here, &load, &mut parts, &mut self.drawn);
         self.built = parts.into_iter().map(|(p, b)| (p.clone(), (mtime(&p), b))).collect();
         b
+    }
+
+    /// A part's body as triangles at `q`, from the last time if the part is
+    /// the same and `q` is.
+    /// A part's body as triangles at `q`, and its mass properties, from the
+    /// last time if the part is the same and `q` is.
+    pub fn mesh(&mut self, part: &Arc<Built>, body: usize, s: &Solid, q: &Quality) -> (Arc<Mesh>, Option<proton_cad::mass::Mass>) {
+        let key = (part.path.clone(), body);
+        let fine = q.chord.to_bits() ^ q.angle.to_bits().rotate_left(17);
+        // The same part, or one read again from the same text; the one kept
+        // is held, so nothing new lands where it was. A tube has no text.
+        if let Some((w, f, m, ms)) = self.meshes.get(&key) {
+            if *f == fine && (Arc::ptr_eq(w, part) || (part.stamp != 0 && w.stamp == part.stamp)) {
+                return (m.clone(), *ms);
+            }
+        }
+        let m = Arc::new(tessellate(s, q).unwrap_or_default());
+        let ms = proton_cad::mass::mass(s).ok();
+        self.meshes.insert(key, (part.clone(), fine, m.clone(), ms));
+        (m, ms)
     }
 
     /// The assembly built, the parts it holds taken from here while their
@@ -346,6 +377,12 @@ impl PartCache {
         let m = asm::build_with(a, here, &load, &mut parts);
         self.built = parts.into_iter().map(|(p, b)| (p.clone(), (mtime(&p), b))).collect();
         m
+    }
+}
+
+impl std::fmt::Debug for PartCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "PartCache {{ {} parts, {} meshes }}", self.built.len(), self.meshes.len())
     }
 }
 
@@ -428,7 +465,7 @@ pub fn edit(a: &mut lang::Assembly, op: CadOp) -> Result<(), String> {
 /* ── the view ─────────────────────────────────────────────────────── */
 
 /// A part's body drawn where an instance puts it, named for the instance.
-fn body_at(name: &str, line: usize, s: &Solid, place: &Transform, mesh: &Mesh) -> CadBody {
+fn body_at(name: &str, line: usize, s: &Solid, place: &Transform, mesh: &Mesh, ms: Option<proton_cad::mass::Mass>) -> CadBody {
     let mut index = HashMap::new();
     let (mut positions, mut normals, mut indices) = (Vec::new(), Vec::new(), Vec::new());
     for (t, (tri, ns)) in mesh.triangles.iter().zip(&mesh.normals).enumerate() {
@@ -461,19 +498,18 @@ fn body_at(name: &str, line: usize, s: &Solid, place: &Transform, mesh: &Mesh) -
             plane: None,
         })
         .collect();
-    let ms = proton_cad::mass::mass(s).ok();
     CadBody {
         name: name.to_string(),
         line: line as u32,
-        positions,
-        normals,
+        positions: crate::cad::Thousandths(positions),
+        normals: crate::cad::Thousandths(normals),
         indices,
         face_of: mesh.face_of.clone(),
         faces,
-        edges: mesh.edges.iter().map(|e| e.iter().flat_map(|p| {
+        edges: mesh.edges.iter().map(|e| crate::cad::Thousandths(e.iter().flat_map(|p| {
             let q = place.apply_point(*p);
             [q.x as f32, q.y as f32, q.z as f32]
-        }).collect()).collect(),
+        }).collect())).collect(),
         edge_picks: vec![None; mesh.edges.len()],
         edge_turns: vec!["smooth".into(); mesh.edges.len()],
         volume: ms.map_or(0.0, |m| m.volume),
@@ -487,7 +523,7 @@ fn body_at(name: &str, line: usize, s: &Solid, place: &Transform, mesh: &Mesh) -
 
 /// The assembly as the window draws it.
 #[allow(clippy::too_many_arguments)]
-pub fn view(a: &lang::Assembly, m: &Model, path: &str, name: &str, generation: u32, clashes: Option<Vec<CadClash>>) -> CadAssemblyView {
+pub fn view(a: &lang::Assembly, m: &Model, path: &str, name: &str, generation: u32, clashes: Option<Vec<CadClash>>, cache: &mut PartCache) -> CadAssemblyView {
     let k = m.units.mm();
     let item_at = |pred: &dyn Fn(&Item) -> bool| a.items.iter().position(|n| pred(&n.item)).unwrap_or(0);
     let line_of = |item: &Item| lang::write(&lang::Assembly { items: vec![Noted::new(item.clone())] }).trim_end().to_string();
@@ -565,9 +601,23 @@ pub fn view(a: &lang::Assembly, m: &Model, path: &str, name: &str, generation: u
     // Every part drawn where it is: each body cut into triangles once, then
     // put where each instance of it is.
     let mut bounds = Aabb::empty();
-    let mut meshes: HashMap<(PathBuf, usize), Mesh> = HashMap::new();
     let mut bodies = Vec::new();
-    for l in m.leaves() {
+    let leaves = m.leaves();
+    // As finely as the whole assembly needs on screen: a fan's blades need
+    // not be finer in an assembly than its case.
+    let mut whole = Aabb::empty();
+    for l in &leaves {
+        for (_, s) in &l.part.bodies {
+            let b = s.bounds();
+            if !b.is_empty() {
+                for c in b.corners() {
+                    whole.include(l.place.apply_point(c));
+                }
+            }
+        }
+    }
+    let q = Quality::view(if whole.is_empty() { 100.0 } else { whole.diagonal().max(1.0) });
+    for l in leaves {
         let line = m.instances.iter().find(|i| l.name == i.name || l.name.starts_with(&format!("{}.", i.name))).map_or(0, |i| i.line);
         for (bi, (_, s)) in l.part.bodies.iter().enumerate() {
             let b = s.bounds();
@@ -577,8 +627,14 @@ pub fn view(a: &lang::Assembly, m: &Model, path: &str, name: &str, generation: u
             for c in b.corners() {
                 bounds.include(l.place.apply_point(c));
             }
-            let mesh = meshes.entry((l.part.path.clone(), bi)).or_insert_with(|| tessellate(s, &Quality::view(b.diagonal().max(1.0))).unwrap_or_default());
-            bodies.push(body_at(&l.name, line, s, &l.place, mesh));
+            // A part's own size can ask for finer than the whole does; a
+            // maker's model, read for show, is drawn coarser.
+            let mut fine = Quality { chord: q.chord.min(Quality::view(b.diagonal().max(1.0)).chord * 4.0), ..q };
+            if s.free_face().is_some() || matches!(l.part.path.extension().and_then(|e| e.to_str()), Some("step" | "stp" | "stl")) {
+                fine = Quality { chord: q.chord * 3.0, angle: 25f64.to_radians() };
+            }
+            let (mesh, ms) = cache.mesh(&l.part, bi, s, &fine);
+            bodies.push(body_at(&l.name, line, s, &l.place, &mesh, ms));
         }
     }
     let units = a.items.iter().find_map(|n| if let Item::Units(u) = n.item { Some(u.word().to_string()) } else { None }).unwrap_or_else(|| "mm".into());
@@ -717,6 +773,50 @@ mod tests {
 
     /// `cargo test -p proton-core --lib dump_assembly_for_the_preview -- --ignored`
     /// writes `ui/preview-cad-assembly.js`.
+    #[test]
+    fn the_file_shown_with_the_one_open_is_its_drawing_or_its_model_and_follows_a_save() {
+        let root = scratch("companion");
+        let text = "assembly \"Rig\"\nunits mm\npart plate from \"parts/plate.part\"\n";
+        std::fs::write(root.join("rig.assembly"), text).unwrap();
+        std::fs::write(root.join("rig.drawing"), "drawing \"Rig\"\nof \"rig.assembly\"\nsheet A3\nview f front at (100, 100)\n").unwrap();
+        let shown = |events: &[Event]| events.iter().find_map(|e| if let Event::CadCompanion { companion } = e { Some(companion.clone()) } else { None });
+        let mut c = Cads::default();
+        // Nothing open: nothing goes with it.
+        let none = c.apply(&root, Command::CadCompanion { path: Some(String::new()) });
+        assert!(shown(&none).is_some_and(|x| x.is_none()));
+        // The assembly open: its drawing below.
+        c.apply(&root, Command::CadOpen { path: "rig.assembly".into() });
+        let got = shown(&c.apply(&root, Command::CadCompanion { path: Some(String::new()) })).flatten().expect("a companion");
+        assert_eq!((got.path.as_str(), got.kind.as_str()), ("rig.drawing", "drawing"));
+        assert!(got.drawing.as_ref().is_some_and(|d| d.svg.contains("<svg")) && got.error.is_none(), "{:?}", got.error);
+        // Saved, it is sent again.
+        assert!(shown(&c.apply(&root, Command::CadSave)).flatten().is_some_and(|x| x.path == "rig.drawing"));
+        // The drawing open: its model below.
+        c.apply(&root, Command::CadOpen { path: "rig.drawing".into() });
+        let got = shown(&c.apply(&root, Command::CadCompanion { path: Some(String::new()) })).flatten().expect("a companion");
+        assert_eq!((got.path.as_str(), got.kind.as_str()), ("rig.assembly", "assembly"));
+        assert!(got.assembly.as_ref().is_some_and(|a| !a.bodies.is_empty()));
+        // A part named; one that is not there says so; none stops it.
+        let got = shown(&c.apply(&root, Command::CadCompanion { path: Some("parts/plate.part".into()) })).flatten().unwrap();
+        assert_eq!(got.kind, "part");
+        let got = shown(&c.apply(&root, Command::CadCompanion { path: Some("nope.part".into()) })).flatten().unwrap();
+        assert!(got.error.is_some() && got.kind.is_empty());
+        assert!(shown(&c.apply(&root, Command::CadCompanion { path: None })).is_some_and(|x| x.is_none()));
+        assert!(!c.apply(&root, Command::CadSave).iter().any(|e| matches!(e, Event::CadCompanion { .. })));
+        // A drawing of the same build in another form goes with it.
+        std::fs::write(root.join("bench.assembly"), text).unwrap();
+        std::fs::write(root.join("bench-open.assembly"), text).unwrap();
+        std::fs::write(root.join("blue.drawing"), "drawing \"Bench\"\nof \"bench-open.assembly\"\nsheet A3\nview f front at (100, 100)\n").unwrap();
+        c.apply(&root, Command::CadOpen { path: "bench.assembly".into() });
+        let got = shown(&c.apply(&root, Command::CadCompanion { path: Some(String::new()) })).flatten().expect("a companion");
+        assert_eq!(got.path, "blue.drawing");
+        // With nothing to go with it, the split opens to choose one, saying why.
+        std::fs::write(root.join("lone.assembly"), text).unwrap();
+        c.apply(&root, Command::CadOpen { path: "lone.assembly".into() });
+        let got = shown(&c.apply(&root, Command::CadCompanion { path: Some(String::new()) })).flatten().expect("the split, to choose in");
+        assert!(got.path.is_empty() && got.error.as_deref().is_some_and(|e| e.contains("choose a file")), "{got:?}");
+    }
+
     #[test]
     #[ignore]
     fn dump_assembly_for_the_preview() {

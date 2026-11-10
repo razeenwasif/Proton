@@ -282,7 +282,11 @@ constraints drawn as glyphs, dimensions edited in place, and the solver
 saying how many degrees of freedom are left — and, over-constrained, which
 constraints disagree. An assembly shows its tree and mates; a drawing its
 sheet; a schematic and a board their canvases. ⌘S saves; unsaved files
-join the quit prompt.
+join the quit prompt. Split (in the toolbar) shows a second file under the
+one open, read-only as saved: an assembly's or a part's blueprint under
+it, a drawing's model under the drawing, or any file chosen; its sheet
+pans and zooms, its model turns, the divider drags (kept between
+windows), Swap opens the lower one above, and a save shows itself below.
 
 ## The agent
 
@@ -1067,6 +1071,41 @@ not; a strip and an L cut whole by ears; a loop through two blocks and
 their fittings; fittings fastened near their block not too near, sunk
 into it overlapping; a blind hole marked only from where it is seen; a
 long name widening the table, and balloons kept on an A4.
+
+After it (2026-11-10), split view and speed. `Command::CadCompanion`
+shows a file under the one open (`CadCompanionView`: a part, an assembly or
+a drawing, built by a `Cads` of its own sharing the part cache), the file
+that goes with it found when none is named — for a drawing the file it is
+`of`; for a part or an assembly a drawing of it, else a drawing of a file
+named for it and more (`t1-build-open.assembly` for `t1-build.assembly`);
+else the split opens on its list of files, saying why, for one to be
+chosen. Measured on the T1 build
+(release, M-class Mac), first open → again:
+
+| | Before | Now |
+|---|---|---|
+| The build | 3.9 s, 13.7 MB of JSON | 1.3 s → 0.08 s, 9.8 MB |
+| Its blueprint | 8.5 s | 2.5 s → 0.4 s; a view moved 0.4 s |
+| The fan's STEP meshed | 0.6 + 0.7 s | 0.33 + 0.44 s |
+
+The parts in the build were then drawn in more detail (fins, grilles,
+vents, sockets: about four times the faces), and the build opens in 2.6 s,
+its blueprint in 2.3 s. How: `par::map` runs work across the cores in
+order (a scene's solids tessellated, each solid's edges seen, a drawing's
+views each at once); a part's meshes and mass are kept between builds,
+for the same part or one built again from the same text (`Built::stamp`,
+its file hashed; never a pointer, which a part read again may reuse); a
+drawing's scenes and views are kept by what their solids are and which
+way they are seen, so moving a view or adding a dimension projects
+nothing again; the B-spline basis of curves (to the second derivative)
+and of patches (the first) is worked on the stack; imported and
+free-form bodies are meshed a third as finely as the build's own parts,
+and an assembly's view no finer than its size needs; the view's numbers
+are sent to a thousandth of a millimetre. Tested: the split's pairing,
+following a save, refusing a file not there, and in the window (shown
+under, swapped, the divider dragged and kept, closed); a moved view
+drawn from what was kept, and the same as drawn from nothing; the stack
+bases against the general one, every degree to 15.
 
 | | What | Tested by |
 |---|---|---|

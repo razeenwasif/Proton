@@ -6,7 +6,12 @@ import type { CadFace } from "./CadFace";
  * exact normals of the face they are on, the triangles by point, each
  * triangle's face, and its edges as runs of points.
  */
-export type CadBody = { name: string, line: number, positions: Array<number>, normals: Array<number>, indices: Array<number>, faceOf: Array<number>, faces: Array<CadFace>, edges: Array<Array<number>>, 
+export type CadBody = { name: string, line: number, 
+/**
+ * Millimetres, sent to the micrometre: the window needs no finer, and
+ * the numbers are half as long.
+ */
+positions: Array<number>, normals: Array<number>, indices: Array<number>, faceOf: Array<number>, faces: Array<CadFace>, edges: Array<Array<number>>, 
 /**
  * Each edge's name to round or chamfer it by — `a.top & a.side(r.left)`,
  * its two faces — or none for a seam or a smooth join, which is no

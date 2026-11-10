@@ -1466,6 +1466,7 @@ impl Workspace {
             | Command::CadFit { .. }
             | Command::CadDraw { .. }
             | Command::CadOpen { .. }
+            | Command::CadCompanion { .. }
             | Command::CadClose { .. }
             | Command::CadSave
             | Command::CadText { .. }

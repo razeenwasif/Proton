@@ -31,6 +31,17 @@ export function createCadPreview(_deliver) {
   const brdEvent = () => ({ type: "cadBoard", board: open?.brd ? { ...open, dirty: open.text !== open.saved } : null });
   const docEvents = () => [partEvent(), asmEvent(), drwEvent(), schEvent(), brdEvent()];
   const notice = (/** @type {string} */ message) => ({ type: "notice", message, level: "info" });
+  /** The file shown under the one open, as the core sends it: the sample
+   *  blueprint under the sample assembly, and the other way round. */
+  let companion = /** @type {string | null} */ (null);
+  const companionEvent = () => {
+    if (!companion) return { type: "cadCompanion", companion: null };
+    const base = { path: companion, name: companion.replace(/\.[a-z]+$/, "").replace(/^.*\//, ""), part: null, assembly: null, drawing: null, error: null };
+    if (companion === "rig.drawing") return { type: "cadCompanion", companion: { ...base, kind: "drawing", drawing: { ...structuredClone(DRAWING), path: companion, dirty: false } } };
+    if (companion === "rig.assembly") return { type: "cadCompanion", companion: { ...base, kind: "assembly", assembly: { ...structuredClone(ASSEMBLY), path: companion, dirty: false } } };
+    if (companion === "pump-bracket.part") return { type: "cadCompanion", companion: { ...base, kind: "part", part: { ...structuredClone(PART), path: companion, dirty: false } } };
+    return { type: "cadCompanion", companion: { ...base, kind: "part", error: "The browser preview shows the sample assembly, its blueprint and the pump bracket only." } };
+  };
   /** @param {string} path @param {any} part */
   const show = (path, part) => {
     open = { ...structuredClone(part), path, generation: ++generations, saved: part.text };
@@ -76,7 +87,18 @@ export function createCadPreview(_deliver) {
           return [home(), ...docEvents()];
         case "cadSave":
           if (open) open.saved = open.text;
-          return [home(), ...docEvents()];
+          return [home(), ...docEvents(), ...(companion ? [companionEvent()] : [])];
+        case "cadCompanion":
+          if (command.path === "") {
+            if (!open) return [notice("open a part, an assembly or a drawing first"), { type: "cadCompanion", companion: null }];
+            const pair = open.drw ? "rig.assembly" : open.path === "rig.assembly" ? "rig.drawing" : null;
+            if (!pair) {
+              companion = null;
+              return [notice(`no drawing is of ${open.path} yet: make one (Drawing, or Blueprint for an assembly), then split again`), companionEvent()];
+            }
+            companion = pair;
+          } else companion = command.path;
+          return [companionEvent()];
         case "cadText":
           if (!open || command.generation !== open.generation) return [];
           open.text = command.text;

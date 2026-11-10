@@ -15,7 +15,59 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
-use crate::bspline::{basis_of, span_of};
+use crate::bspline::span_of;
+
+/// The most degree a patch is evaluated at without the heap: more than any
+/// file uses (STEP writers stop at 25; makers' files at 9 or less).
+const MAX_DEGREE: usize = 15;
+
+/// The nonzero basis functions at `t` of degree `p`, and their first
+/// derivatives, on the stack: `(n, dn)`, the `j`th for N(span − p + j).
+fn basis1(knots: &[f64], p: usize, span: usize, t: f64) -> ([f64; MAX_DEGREE + 1], [f64; MAX_DEGREE + 1]) {
+    let mut n = [0.0; MAX_DEGREE + 1];
+    let mut lower = [0.0; MAX_DEGREE + 1];
+    let mut left = [0.0; MAX_DEGREE + 1];
+    let mut right = [0.0; MAX_DEGREE + 1];
+    n[0] = 1.0;
+    for j in 1..=p {
+        left[j] = t - knots[span + 1 - j];
+        right[j] = knots[span + j] - t;
+        let mut saved = 0.0;
+        for r in 0..j {
+            let den = right[r + 1] + left[j - r];
+            let temp = if den == 0.0 { 0.0 } else { n[r] / den };
+            n[r] = saved + right[r + 1] * temp;
+            saved = left[j - r] * temp;
+        }
+        n[j] = saved;
+        if j == p - 1 {
+            lower[..p].copy_from_slice(&n[..p]);
+        }
+    }
+    if p == 1 {
+        lower[0] = 1.0;
+    }
+    // N′(i, p) = p·N(i, p−1)/(u(i+p) − u(i)) − p·N(i+1, p−1)/(u(i+p+1) − u(i+1)).
+    let mut dn = [0.0; MAX_DEGREE + 1];
+    let pf = p as f64;
+    for r in 0..=p {
+        let i = span - p + r;
+        let a = if r >= 1 {
+            let den = knots[i + p] - knots[i];
+            if den == 0.0 { 0.0 } else { lower[r - 1] / den }
+        } else {
+            0.0
+        };
+        let b = if r < p {
+            let den = knots[i + p + 1] - knots[i + 1];
+            if den == 0.0 { 0.0 } else { lower[r] / den }
+        } else {
+            0.0
+        };
+        dn[r] = pf * (a - b);
+    }
+    (n, dn)
+}
 use crate::vec::Vec3;
 
 /// A tensor-product B-spline patch: `nu × nv` poles, row by row along `v`
@@ -42,6 +94,9 @@ impl Patch {
     pub fn new(du: usize, dv: usize, ku: Vec<f64>, kv: Vec<f64>, nu: usize, nv: usize, poles: Vec<Vec3>, weights: Option<Vec<f64>>) -> Result<Patch, String> {
         if du == 0 || dv == 0 {
             return Err("a B-spline surface needs a degree of at least 1 each way".into());
+        }
+        if du > MAX_DEGREE || dv > MAX_DEGREE {
+            return Err(format!("a B-spline surface of degree {du} × {dv}: no more than {MAX_DEGREE} each way is read"));
         }
         if nu <= du || nv <= dv {
             return Err(format!("a B-spline surface of degree {du} × {dv} needs more than {du} × {dv} poles; it has {nu} × {nv}"));
@@ -98,7 +153,7 @@ impl Patch {
         let ((u0, u1), (v0, v1)) = self.domain();
         let (u, v) = (u.clamp(u0, u1), v.clamp(v0, v1));
         let (su, sv) = (span_of(&self.ku, self.du, self.nu, u), span_of(&self.kv, self.dv, self.nv, v));
-        let (bu, bv) = (basis_of(&self.ku, self.du, su, u, 1), basis_of(&self.kv, self.dv, sv, v, 1));
+        let ((nu, dnu), (nv, dnv)) = (basis1(&self.ku, self.du, su, u), basis1(&self.kv, self.dv, sv, v));
         let (fu, fv) = (su - self.du, sv - self.dv);
         // Homogeneous sums: the point, and its derivatives, times the weight.
         let (mut s, mut s_u, mut s_v) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
@@ -109,7 +164,7 @@ impl Patch {
                 let k = (fu + a) * self.nv + fv + b;
                 let wt = self.weights.as_ref().map_or(1.0, |ws| ws[k]);
                 let p = self.poles[k] * wt;
-                let (n, nu_, nv_) = (bu[0][a] * bv[0][b], bu[1][a] * bv[0][b], bu[0][a] * bv[1][b]);
+                let (n, nu_, nv_) = (nu[a] * nv[b], dnu[a] * nv[b], nu[a] * dnv[b]);
                 s += p * n;
                 s_u += p * nu_;
                 s_v += p * nv_;
@@ -297,6 +352,24 @@ mod tests {
         for k in 0..=10 {
             let s = p.eval(k as f64 / 10.0, 0.3).0;
             assert!((s.x.hypot(s.y) - 1.0).abs() < 1e-12, "{s:?} is off the circle");
+        }
+    }
+
+    #[test]
+    fn the_basis_on_the_stack_is_the_curves_basis() {
+        let knots = [0.0, 0.0, 0.0, 0.0, 0.3, 0.3, 0.7, 1.0, 1.0, 1.0, 1.0];
+        for p in [1usize, 2, 3] {
+            let ks: Vec<f64> = if p == 3 { knots.to_vec() } else { knots[3 - p..knots.len() - (3 - p)].to_vec() };
+            let n = ks.len() - p - 1;
+            for k in 0..=50 {
+                let t = k as f64 / 50.0;
+                let span = span_of(&ks, p, n, t);
+                let general = crate::bspline::basis_of(&ks, p, span, t, 1);
+                let (b, db) = basis1(&ks, p, span, t);
+                for j in 0..=p {
+                    assert!((b[j] - general[0][j]).abs() < 1e-12 && (db[j] - general[1][j]).abs() < 1e-9, "degree {p} at {t}: {} {} against {} {}", b[j], db[j], general[0][j], general[1][j]);
+                }
+            }
         }
     }
 

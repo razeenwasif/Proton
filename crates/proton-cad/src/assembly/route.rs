@@ -283,6 +283,7 @@ pub fn leaf(name: &str, size: &str, tube: Tube, solid: Solid) -> Leaf {
             material: Some(if tube == Tube::Hard { "petg".into() } else { "pvc".into() }),
             bodies: vec![(name.to_string(), solid)],
             mistakes: Vec::new(),
+            stamp: 0,
         }),
         place: crate::frame::Transform::identity(),
     }
