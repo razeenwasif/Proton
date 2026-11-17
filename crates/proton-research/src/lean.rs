@@ -361,7 +361,8 @@ pub fn read(lines: &[String], ended: Ended, err: &str, assembled: &Assembled) ->
         let at = m["pos"]["line"].as_u64().unwrap_or(0) as u32;
         let text = m["data"].as_str().unwrap_or("").to_string();
         errors |= severity == "error";
-        sorry |= m["kind"] == "hasSorry" || (severity == "warning" && text.contains("declaration uses 'sorry'"));
+        // Lean 4.36 quotes it with backticks; earlier Leans with straight quotes.
+        sorry |= m["kind"] == "hasSorry" || (severity == "warning" && (text.contains("declaration uses 'sorry'") || text.contains("declaration uses `sorry`")));
         if severity == "information" {
             if at == assembled.check_line && statement.is_none() {
                 statement = Some(statement_of(&text, &assembled.theorem));
@@ -483,7 +484,7 @@ mod tests {
         assert_eq!(outcome(ProofKind::Proof, &c), Some(FormalOutcome::Open));
         let (_, assembled, _) = fixture("sorry");
         let told = feedback(&c, &assembled, 300);
-        assert!(told.starts_with("Lean accepts your statement") && told.contains("Line 3, column 8 (warning):\ndeclaration uses 'sorry'"), "{told}");
+        assert!(told.starts_with("Lean accepts your statement") && told.contains("Line 3, column 8 (warning):\ndeclaration uses `sorry`"), "{told}");
     }
 
     #[test]
@@ -495,15 +496,16 @@ mod tests {
         }
         let (_, assembled, _) = fixture("unsolved");
         let told = feedback(&checked("unsolved"), &assembled, 300);
-        assert!(told.starts_with("Lean found errors") && told.contains("Line 6, column 17 (error):\nunsolved goals\ncase succ"), "{told}");
+        assert!(told.starts_with("Lean found errors") && told.contains("Line 6, column 14 (error):\nunsolved goals\ncase succ"), "{told}");
         let (_, assembled, _) = fixture("unknown");
-        assert!(feedback(&checked("unknown"), &assembled, 300).contains("unknown identifier 'Nat.add_comm_swapped'"));
+        assert!(feedback(&checked("unknown"), &assembled, 300).contains("Unknown constant `Nat.add_comm_swapped`"));
     }
 
     #[test]
     fn a_proof_on_untrusted_axioms_proves_nothing() {
         let c = checked("reduce_bool");
-        assert_eq!(c.verdict, LeanVerdict::Untrusted(vec!["Lean.ofReduceBool".into()]));
+        // Lean 4.36 gives native_decide's trust an axiom of its own, named after the theorem; earlier Leans used Lean.ofReduceBool.
+        assert_eq!(c.verdict, LeanVerdict::Untrusted(vec!["H004._native.native_decide.ax_1_1".into()]));
         let c = checked("axiom");
         assert_eq!(c.verdict, LeanVerdict::Untrusted(vec!["cheat".into()]));
         assert_eq!(outcome(ProofKind::Proof, &c), None);

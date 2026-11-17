@@ -32,7 +32,7 @@ fn expected(name: &str, verdict: &LeanVerdict) -> bool {
         "clean" => *verdict == LeanVerdict::Clean,
         "sorry" | "fake" => *verdict == LeanVerdict::Sorry,
         "unsolved" | "unknown" => *verdict == LeanVerdict::Errors,
-        "reduce_bool" => matches!(verdict, LeanVerdict::Untrusted(axioms) if axioms.iter().any(|a| a.starts_with("Lean."))),
+        "reduce_bool" => matches!(verdict, LeanVerdict::Untrusted(axioms) if axioms.iter().any(|a| a.starts_with("Lean.") || a.contains("._native.native_decide."))),
         "axiom" => matches!(verdict, LeanVerdict::Untrusted(axioms) if axioms.contains(&"cheat".to_string())),
         "exit" => *verdict == LeanVerdict::NoAnswer,
         _ => true,
