@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// A seat at the table: the engines Research drives, Gemini (which cannot
-/// sit unattended yet), and the scientist.
+/// sit unattended yet), and the scientist. DeepSeek is an engine Proton
+/// itself does not run: Fairy, which runs Proton's driver, seats it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../ui/bindings/", rename = "ResearchSeat")]
 #[serde(rename_all = "lowercase")]
@@ -12,18 +13,20 @@ pub enum Seat {
     Claude,
     Codex,
     Antigravity,
+    DeepSeek,
     Gemini,
     Scientist,
 }
 
 impl Seat {
-    pub const ENGINES: [Seat; 3] = [Seat::Claude, Seat::Codex, Seat::Antigravity];
+    pub const ENGINES: [Seat; 4] = [Seat::Claude, Seat::Codex, Seat::Antigravity, Seat::DeepSeek];
 
     pub fn name(self) -> &'static str {
         match self {
             Seat::Claude => "Claude Code",
             Seat::Codex => "Codex",
             Seat::Antigravity => "Antigravity",
+            Seat::DeepSeek => "DeepSeek",
             Seat::Gemini => "Gemini",
             Seat::Scientist => "You",
         }
@@ -37,7 +40,19 @@ impl Seat {
             Seat::Claude => Family::Anthropic,
             Seat::Codex => Family::OpenAI,
             Seat::Antigravity | Seat::Gemini => Family::Google,
+            Seat::DeepSeek => Family::DeepSeek,
             Seat::Scientist => Family::Scientist,
+        }
+    }
+
+    /// The role a seat takes when it is brought to a table that had none
+    /// for it: DeepSeek, on an investigation made before it could sit,
+    /// works the derivations, as Codex does.
+    pub fn default_role(self) -> Role {
+        match self {
+            Seat::Claude | Seat::Scientist => Role::Investigator,
+            Seat::Codex | Seat::DeepSeek => Role::Engineer,
+            Seat::Antigravity | Seat::Gemini => Role::Sandbox,
         }
     }
 }
@@ -51,6 +66,7 @@ pub enum Family {
     Anthropic,
     OpenAI,
     Google,
+    DeepSeek,
     Scientist,
     Other,
 }
@@ -66,6 +82,8 @@ impl Family {
             Some(Family::OpenAI)
         } else if starts(&["gemini", "google"]) {
             Some(Family::Google)
+        } else if starts(&["deepseek"]) {
+            Some(Family::DeepSeek)
         } else {
             None
         }
@@ -677,6 +695,11 @@ mod tests {
     fn a_model_says_whose_it_is_and_the_seat_says_the_rest() {
         assert_eq!(Author::new(Seat::Antigravity, "claude-opus-5-5-low").family(), Family::Anthropic);
         assert_eq!(Author::new(Seat::Antigravity, "gemini-3.8-flash-low").family(), Family::Google);
+        // DeepSeek is a family of its own, whichever seat runs it.
+        assert_eq!(Author::new(Seat::DeepSeek, "deepseek-reasoner").family(), Family::DeepSeek);
+        assert_eq!(Author::new(Seat::DeepSeek, "").family(), Family::DeepSeek);
+        assert_eq!(Author::new(Seat::Antigravity, "deepseek-v4").family(), Family::DeepSeek);
+        assert_eq!(Seat::DeepSeek.default_role(), Role::Engineer);
         assert_eq!(Author::new(Seat::Codex, "gpt-6.1-sol").family(), Family::OpenAI);
         assert_eq!(Author::new(Seat::Codex, "").family(), Family::OpenAI);
         assert_eq!(Author::scientist().family(), Family::Scientist);

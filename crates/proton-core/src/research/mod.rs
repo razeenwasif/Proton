@@ -28,7 +28,7 @@ use proton_lab::{EnvState, Lab, Run, RunState, Sandbox};
 use proton_literature::fetch::{Fetch, Job, Reply};
 use proton_research::cite::{self, Ident};
 use proton_research::literature::{known, Candidate};
-use proton_research::model::{AddedBy, Author, Experiment, ExperimentStatus, Hypothesis, HypothesisStatus, LiteratureSource, Record, Seat};
+use proton_research::model::{AddedBy, Author, Experiment, ExperimentStatus, Hypothesis, HypothesisStatus, LiteratureSource, Record, Seat, SeatConfig};
 use proton_research::store::{Folder, Store};
 use proton_research::supervisor::{RoundStatus, RunSummary};
 use proton_research::view::{self, Board, LiteratureSourceRow, PaperResult};
@@ -1548,6 +1548,11 @@ impl Research {
             return vec![notice("Pause or stop the round to change who sits at the table.".into(), NoticeLevel::Warn)];
         }
         let mut investigation = folder.investigation().clone();
+        // An engine the table had no seat for (DeepSeek, on an investigation
+        // made before it could sit) is brought to it in its usual role.
+        if !investigation.seats.iter().any(|s| s.seat == seat) && Seat::ENGINES.contains(&seat) {
+            investigation.seats.push(SeatConfig { seat, role: seat.default_role(), model: None, effort: None, enabled });
+        }
         let Some(config) = investigation.seats.iter_mut().find(|s| s.seat == seat) else {
             return vec![notice(format!("{} has no seat here.", seat.name()), NoticeLevel::Warn)];
         };

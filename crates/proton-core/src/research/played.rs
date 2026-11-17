@@ -460,7 +460,8 @@ fn a_round_runs_on_three_engines_and_leaves_its_files() {
     assert!(used <= cap);
     // Framed by the Investigator, then two hypotheses a seat, then each reviewed.
     assert_eq!((log.calls[0].seat, log.calls[0].phase), (Seat::Claude, Phase::Frame));
-    for seat in Seat::ENGINES {
+    // Every engine at this table: DeepSeek, which Proton doesn't run, isn't at it.
+    for seat in [Seat::Claude, Seat::Codex, Seat::Antigravity] {
         assert!(log.calls.iter().any(|c| c.seat == seat && c.phase == Phase::Generate), "{seat:?} did not generate");
     }
     for phase in [Phase::Reflect, Phase::Verify, Phase::Rank, Phase::Evolve, Phase::Meta] {

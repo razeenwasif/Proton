@@ -57,7 +57,7 @@ const DISCIPLINE = Object.fromEntries(DISCIPLINES);
 
 /** Who sits at the table, as the board names them. */
 const SEATS = /** @type {Record<string, string>} */ ({
-  claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", gemini: "Gemini", scientist: "You",
+  claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", deepseek: "DeepSeek", gemini: "Gemini", scientist: "You",
 });
 
 /** The roles of the user's AGENTS.md. */

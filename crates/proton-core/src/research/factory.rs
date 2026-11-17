@@ -39,7 +39,8 @@ pub fn engine_of(seat: Seat) -> Option<Engine> {
         Seat::Codex => Some(Engine::Codex),
         Seat::Antigravity => Some(Engine::Antigravity),
         Seat::Gemini => Some(Engine::Gemini),
-        Seat::Scientist => None,
+        // Not one of Proton's engines: Fairy runs it.
+        Seat::DeepSeek | Seat::Scientist => None,
     }
 }
 
@@ -91,6 +92,7 @@ impl AgentFactory for Engines {
         match engine_of(seat) {
             Some(Engine::Gemini) => Some("The Gemini CLI cannot take part unattended yet.".into()),
             Some(engine) => engine::missing(engine),
+            None if seat == Seat::DeepSeek => Some("Proton doesn't run DeepSeek; Fairy does.".into()),
             None => Some("The scientist is not an engine.".into()),
         }
     }

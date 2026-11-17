@@ -4,4 +4,4 @@
  * Whose model it is. Independence is decided on this, not on the seat: a
  * judge never judges its own family's work, and a reviewer never reviews it.
  */
-export type ResearchFamily = "anthropic" | "openai" | "google" | "scientist" | "other";
+export type ResearchFamily = "anthropic" | "openai" | "google" | "deepseek" | "scientist" | "other";

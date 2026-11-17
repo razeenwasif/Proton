@@ -2,6 +2,7 @@
 
 /**
  * A seat at the table: the engines Research drives, Gemini (which cannot
- * sit unattended yet), and the scientist.
+ * sit unattended yet), and the scientist. DeepSeek is an engine Proton
+ * itself does not run: Fairy, which runs Proton's driver, seats it.
  */
-export type ResearchSeat = "claude" | "codex" | "antigravity" | "gemini" | "scientist";
+export type ResearchSeat = "claude" | "codex" | "antigravity" | "deepseek" | "gemini" | "scientist";
