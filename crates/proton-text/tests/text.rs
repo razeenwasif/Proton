@@ -300,3 +300,25 @@ fn saving_an_open_group_preserves_the_saved_revision() {
     assert!(b.is_modified());
     std::fs::remove_file(path).unwrap();
 }
+
+/* ── the file on disk ────────────────────────────────────────────── */
+
+/// A file rewritten within the same tick of a coarse clock keeps its
+/// modification time (Linux filesystems stamp to the kernel's tick). The
+/// length still says it changed, so a save doesn't write over it.
+#[test]
+fn a_rewrite_that_keeps_the_modification_time_is_still_a_change() {
+    let dir = std::env::temp_dir().join(format!("proton-text-disk-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("b.txt");
+    std::fs::write(&path, "b\n").unwrap();
+    let b = Buffer::open(&path).unwrap();
+    assert!(!b.changed_on_disk());
+
+    let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::fs::write(&path, "theirs\n").unwrap();
+    std::fs::File::options().write(true).open(&path).unwrap().set_modified(stamp).unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), stamp, "same time as when it was read");
+    assert!(b.changed_on_disk(), "the length changed, so the file did");
+    let _ = std::fs::remove_dir_all(&dir);
+}

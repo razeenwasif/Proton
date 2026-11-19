@@ -39,7 +39,7 @@ pub struct Buffer {
     /// Formatters, language servers and `git checkout` rewrite files under an
     /// open editor constantly, and a `:w` that silently discards that is the
     /// one data-loss bug an editor must not have.
-    disk: Option<std::time::SystemTime>,
+    disk: Option<DiskStamp>,
     /// Whether edits are currently folding into one undoable group.
     group: Group,
     /// Bumped on every change so the front end can drop stale deltas.
@@ -653,8 +653,15 @@ pub struct Change {
 }
 
 /// The file's modification time, if the filesystem will say.
-fn modified_at(path: &Path) -> Option<std::time::SystemTime> {
-    std::fs::metadata(path).ok()?.modified().ok()
+/// What a file on disk looked like when it was read or written: its
+/// modification time and its length. Time alone misses a change made within
+/// the same tick of a coarse clock (Linux filesystems stamp files to the
+/// kernel's tick, a few milliseconds), and a save would then write over it.
+type DiskStamp = (std::time::SystemTime, u64);
+
+fn modified_at(path: &Path) -> Option<DiskStamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
 }
 
 impl Buffer {

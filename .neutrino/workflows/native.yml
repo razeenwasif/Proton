@@ -1,0 +1,86 @@
+# Proton's .github/workflows/ui-and-paths.yml macOS and Windows legs, on Neutrino.
+#
+# Changes from the GitHub version:
+#   * the matrices become jobs: macOS on atlas itself (runs-on: host),
+#     Windows on forge through Nexus (runs-on: nexus)
+#   * they run for version tags and when started by hand, not on every push:
+#     host jobs need the server started with --host-executor (off for now),
+#     and each Nexus job is a ticket waiting for your Accept in Nexus
+#   * the steps GitHub skipped on Windows are left out of the Windows jobs, and
+#     proton-study, proton-voice and proton-core's `study` test, which aren't
+#     on master yet, are left out of both
+#   * atlas needs Rust and Node 22 on its PATH; forge needs Rust, Node 22 and
+#     Git for Windows' bash
+
+name: native
+
+on:
+  push: { tags: ['v*'] }
+  workflow_dispatch: {}
+
+jobs:
+  ui-browser-macos:
+    runs-on: host
+    timeout-minutes: 15
+    artifacts: [playwright-report, test-results]
+    steps:
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install chromium
+      - run: npm run test:browser
+
+  paths-macos:
+    runs-on: host
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - run: cargo test --locked -p proton-agent --lib --test transport --test gemini --test assemble
+      - run: cargo test --locked -p proton-core --lib
+      - run: cargo test --locked -p proton-core --test layout --test workspaces --test working_directory --test home_folder --test reliability
+      - run: cargo test --locked -p proton-research
+      - run: cargo test --locked -p proton-literature
+      - run: cargo test --locked -p proton-library --lib
+      - run: cargo test --locked -p proton-mcp
+      - run: cargo test --locked -p proton-claude --lib --test engines --test fold
+      - run: cargo test --locked -p proton-lab
+      - run: git diff --exit-code -- ui/bindings
+      - run: cargo test --locked -p proton-council --lib
+
+  ui-browser-windows:
+    runs-on: nexus
+    nexus: { node: forge }
+    resources: { cpus: 4, memory: 8G }
+    timeout-minutes: 20
+    artifacts: [playwright-report, test-results]
+    steps:
+      - shell: bash
+        run: npm ci --ignore-scripts
+      - shell: bash
+        run: npx playwright install chromium
+      - shell: bash
+        run: npm run test:browser
+
+  paths-windows:
+    runs-on: nexus
+    nexus: { node: forge }
+    resources: { cpus: 4, memory: 8G }
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - shell: bash
+        run: cargo test --locked -p proton-agent --lib --test transport --test gemini --test assemble
+      - shell: bash
+        run: cargo test --locked -p proton-core --lib
+      - shell: bash
+        run: cargo test --locked -p proton-core --test layout --test workspaces --test working_directory --test home_folder --test reliability
+      - shell: bash
+        run: cargo test --locked -p proton-research
+      - shell: bash
+        run: cargo test --locked -p proton-literature
+      - shell: bash
+        run: cargo test --locked -p proton-lab
+      - shell: bash
+        run: git diff --exit-code -- ui/bindings
+      - shell: bash
+        run: cargo test --locked -p proton-council --lib
