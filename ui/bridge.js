@@ -244,6 +244,48 @@ export async function quitApp(save) {
 
 /* ── window controls ──────────────────────────────────────────────────── */
 
+/** @param {import('./native-api').FullscreenState | null | undefined} state */
+export function applyFullscreenState(state) {
+  const root = document.documentElement;
+  if (state?.active) {
+    root.dataset.fullscreen = "true";
+  } else {
+    delete root.dataset.fullscreen;
+  }
+  const h = state?.active && Number(state.notchHeight) > 0 ? Number(state.notchHeight) : 0;
+  const w = h > 0 && Number(state?.notchWidth) > 0 ? Number(state?.notchWidth) : 0;
+  const l = h > 0 && Number(state?.notchLeft) > 0 ? Number(state?.notchLeft) : 0;
+  if (h > 0) {
+    root.dataset.notch = "true";
+  } else {
+    delete root.dataset.notch;
+  }
+  root.style.setProperty("--notch-h", `${h}px`);
+  root.style.setProperty("--notch-w", `${w}px`);
+  root.style.setProperty("--notch-left", `${l}px`);
+}
+
+/** Toggle borderless notch-wrapping full screen on macOS.
+ * @returns {Promise<import('./native-api').FullscreenState>} */
+export async function toggleFullscreen() {
+  if (!tauri) return { active: false, notchHeight: 0, notchWidth: 0, notchLeft: 0 };
+  const state = await tauri.core.invoke("toggle_fullscreen");
+  applyFullscreenState(state);
+  return state;
+}
+
+export async function syncFullscreenState() {
+  if (!tauri) return;
+  try {
+    const state = await tauri.core.invoke("fullscreen_state");
+    applyFullscreenState(state);
+  } catch (err) {
+    console.error("proton: could not read fullscreen state", err);
+  }
+  const label = tauri.window?.getCurrentWindow().label ?? "main";
+  await tauri.event?.listen(`proton://fullscreen/${label}`, ({ payload }) => applyFullscreenState(payload));
+}
+
 /* The window is undecorated because the titlebar is drawn in the page, which
    means the traffic lights and dragging are ours to wire. */
 export function wireWindowChrome() {
@@ -252,13 +294,18 @@ export function wireWindowChrome() {
   if (!win) return;
 
   // Two sets: the chrome rail's, and Codex's title bar's. Each is close,
-  // minimise, maximise in that order, whichever one is on screen.
-  const actions = [() => win.close(), () => win.minimize(), () => win.toggleMaximize()];
+  // minimise, full screen (⌥-click to maximise) in that order.
+  /** @type {Array<(e: MouseEvent) => void>} */
+  const actions = [
+    () => { void win.close(); },
+    () => { void win.minimize(); },
+    (e) => { if (e.altKey) { void win.toggleMaximize(); } else { void toggleFullscreen(); } },
+  ];
   document.querySelectorAll(".lights").forEach((set) => {
     set.querySelectorAll("i").forEach((light, i) => {
       if (!(light instanceof HTMLElement)) return;
       light.style.cursor = "pointer";
-      light.addEventListener("click", () => actions[i]?.());
+      light.addEventListener("click", (e) => actions[i]?.(e));
     });
   });
 
@@ -267,13 +314,20 @@ export function wireWindowChrome() {
   // them keeps working.
   for (const surface of document.querySelectorAll(".chrome-rail, .titlebar")) {
     surface.addEventListener("mousedown", (e) => {
+      if (document.documentElement.dataset.fullscreen === "true") return;
       if (!(e instanceof MouseEvent) || !(e.target instanceof Element) || e.button !== 0 ||
         e.target.closest("button, .lights, .avatars")) return;
       win.startDragging();
     });
     surface.addEventListener("dblclick", (e) => {
       if (!(e.target instanceof Element) || e.target.closest("button, .lights, .avatars")) return;
-      win.toggleMaximize();
+      if (document.documentElement.dataset.fullscreen === "true") {
+        void toggleFullscreen();
+      } else {
+        win.toggleMaximize();
+      }
     });
   }
+
+  void syncFullscreenState();
 }

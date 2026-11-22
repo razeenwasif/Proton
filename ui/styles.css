@@ -4556,3 +4556,25 @@ body { font-size: calc(13px * var(--ui-scale)); }
   padding-top: 8px; border-top: 1px solid var(--edge); flex-wrap: wrap;
 }
 .rm-footer-btns { display: flex; gap: 8px; margin-left: auto; }
+
+/* ── notch-wrapping full screen (macOS) ─────────────────────────── */
+:root[data-fullscreen="true"] .app,
+:root[data-fullscreen="true"][data-backdrop]:not([data-backdrop="solid"]) .app {
+  margin: 0;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+:root[data-notch="true"] .workspace > main.pane {
+  padding-top: var(--notch-h, 0px);
+}
+:root[data-notch="true"] #telescope {
+  top: max(8vh, calc(var(--notch-h, 0px) + 18px));
+}
+:root[data-notch="true"] #remote-modal {
+  top: max(9vh, calc(var(--notch-h, 0px) + 18px));
+}
+:root[data-notch="true"] #settings {
+  top: max(6vh, calc(var(--notch-h, 0px) + 18px));
+}

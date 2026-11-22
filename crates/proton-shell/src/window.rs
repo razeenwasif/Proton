@@ -166,6 +166,9 @@ fn snapshot(window: &WebviewWindow) -> Option<Stored> {
     if window.is_minimized().unwrap_or(false) {
         return None;
     }
+    if crate::fullscreen::is_active(window.label()) || window.is_fullscreen().unwrap_or(false) {
+        return None;
+    }
 
     let previous = LAST.lock().unwrap().clone();
     if window.is_maximized().unwrap_or(false) {

@@ -15,7 +15,7 @@
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
 import { HAS_SHELL, applyBackdrop, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, readLab, sendKey, setBackdrop, setOpaque,
-  setMode as coreSetMode, sync, wireWindowChrome, quitApp,
+  setMode as coreSetMode, sync, toggleFullscreen, wireWindowChrome, quitApp,
   resetTransport, remoteStatus, remoteHosts, remoteBrowse, remoteConnect, remoteDisconnect, remoteForwardPort, onRemoteStatus, onOpenRemote } from "./bridge.js";
 import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, saveDocument, zoomDocument } from "./document.js";
 import { createOverlays } from "./overlays.js";
@@ -3365,6 +3365,11 @@ function renderEvent(event) {
       break;
 
     case "cmdlineRun": {
+      const cmdText = event.text.trim();
+      if (cmdText === "fullscreen" || cmdText === "fs") {
+        void toggleFullscreen();
+        break;
+      }
       if (parseSshCommand(event.text)) {
         void remoteUi.runEx(event.text);
         break;

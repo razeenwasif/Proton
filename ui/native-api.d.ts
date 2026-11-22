@@ -40,6 +40,13 @@ export interface RemoteDirEntry {
   hasDevcontainer: boolean;
 }
 
+export interface FullscreenState {
+  active: boolean;
+  notchHeight: number;
+  notchWidth: number;
+  notchLeft: number;
+}
+
 /** The subset of Tauri's injected API used by Proton. */
 export interface NativeApi {
   core: {
@@ -59,11 +66,14 @@ export interface NativeApi {
     invoke(name: 'remote_connect', args: {host: string; folder: string | null; newWindow: boolean}): Promise<RemoteStatus>;
     invoke(name: 'remote_disconnect'): Promise<RemoteStatus>;
     invoke(name: 'remote_forward_port', args: {localPort: number; remotePort: number | null}): Promise<RemoteStatus>;
+    invoke(name: 'fullscreen_state'): Promise<FullscreenState>;
+    invoke(name: 'toggle_fullscreen'): Promise<FullscreenState>;
   };
   event?: {
     listen(name: `proton://events/${string}`, listener: (event: {payload: EventBatch}) => unknown): Promise<() => void>;
     listen(name: `proton://remote-status/${string}`, listener: (event: {payload: RemoteStatus}) => unknown): Promise<() => void>;
     listen(name: `proton://open-remote/${string}`, listener: (event: {payload: unknown}) => unknown): Promise<() => void>;
+    listen(name: `proton://fullscreen/${string}`, listener: (event: {payload: FullscreenState}) => unknown): Promise<() => void>;
   };
   window?: {getCurrentWindow(): {
     label: string;

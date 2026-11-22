@@ -426,33 +426,33 @@
     <h1 class="display">Proton Status <span class="amp">&amp;</span> Plan</h1>
     <p class="lede">Where Proton stands, the order we work through what's left, the backlog after it, and how to use its modes. Work the plan top to bottom: each step's status updates here as it lands.</p>
     <div class="facts">
-      <span>master · Container Jupyter kernels + Remote-SSH (<b class="mono">7091cbf</b> → next)</span><span>bundle <b class="mono">7ddaef8</b> (mini installed; local awaiting quit)</span><span>research-deepseek <b class="mono">de8750f</b> · 2 ahead</span>
-      <span><b class="tab-num">443</b> commits on master</span>
+      <span>master · Notch-wrapping full screen + Remote-SSH (<b class="mono">19fda7d</b> → next)</span><span>bundle <b class="mono">2fa204d</b> (local installed; mini <b class="mono">7ddaef8</b>)</span><span>research-deepseek <b class="mono">de8750f</b> · 2 ahead</span>
+      <span><b class="tab-num">444</b> commits on master</span>
       <span>Written <b>22 Nov</b></span>
     </div>
     <section class="vitals" aria-label="Vitals">
       <div class="vital paper">
         <span class="legend">Neutrino · GitHub</span>
         <div class="head"><span class="big">Up to date</span><span class="pill ok">master</span></div>
-        <p><code>origin</code> is Neutrino on <code>atlas</code> (use <code>ntr</code>, not <code>git</code>); GitHub mirrors on push. Dev Containers Phase 1 (<code>422b172</code>), Graviton auto-detection (<code>bc132ad</code>), Obsidian UI (<code>3222d27</code>), Phase 2 Dev Containers (<code>7091cbf</code>), Container Jupyter kernels &amp; Remote-SSH to <code>mini</code> on <code>master</code>.</p>
+        <p><code>origin</code> is Neutrino on <code>atlas</code> (use <code>ntr</code>, not <code>git</code>); GitHub mirrors on push. Dev Containers Phase 1 (<code>422b172</code>), Graviton auto-detection (<code>bc132ad</code>), Obsidian UI (<code>3222d27</code>), Phase 2 Dev Containers (<code>7091cbf</code>), Container Jupyter kernels &amp; Remote-SSH to <code>mini</code> (<code>19fda7d</code>), and macOS notch-wrapping full screen on <code>master</code>.</p>
         <span class="when">As of 22 Nov</span>
       </div>
       <div class="vital paper">
         <span class="legend">CI</span>
-        <div class="head"><span class="big">Neutrino</span><span class="pill ok">#20 ok</span></div>
-        <p>Moved off GitHub Actions onto Neutrino on <code>atlas</code> via <code>.neutrino/workflows</code> (#15, #16, #19, #20 passed). Check runs with <code>ntr runs</code> and <code>ntr run logs</code>.</p>
+        <div class="head"><span class="big">Neutrino</span><span class="pill ok">#21 ok</span></div>
+        <p>Moved off GitHub Actions onto Neutrino on <code>atlas</code> via <code>.neutrino/workflows</code> (#15, #16, #19, #20, #21 passed). Check runs with <code>ntr runs</code> and <code>ntr run logs</code>.</p>
         <span class="when">As of 22 Nov</span>
       </div>
       <div class="vital paper">
         <span class="legend">Installed app</span>
-        <div class="head"><span class="big">Remote-SSH</span><span class="pill ok">7ddaef8</span></div>
-        <p>Built and signed on 22 Nov (<code>7ddaef8</code>) &amp; installed on <code>mini</code>: all seven modes, Obsidian UI, Dev Containers Phase 1 + 2, Data container Jupyter kernels, and Remote-SSH to <code>mini</code>. Local swap pending close of running Proton.</p>
+        <div class="head"><span class="big">Full Screen</span><span class="pill ok">2fa204d</span></div>
+        <p>Built and signed on 22 Nov: <code>2fa204d</code> installed locally (macOS notch-wrapping full screen via <code>⌃⌘F</code>, green traffic light, or <code>:fullscreen</code>) and <code>7ddaef8</code> on <code>mini</code> (all seven modes, Obsidian UI, Dev Containers Phase 1 + 2, Data container Jupyter kernels, Remote-SSH).</p>
         <span class="when">Built 22 Nov</span>
       </div>
       <div class="vital paper">
         <span class="legend">Tests</span>
         <div class="head"><span class="big">Passing</span><span class="pill ok">Live SSH + Graviton</span></div>
-        <p>Live <code>live_graviton_data</code> (Linux ZMQ kernel in Graviton) and <code>live_ssh_connect_and_browse_mini</code> (SSH on <code>mini</code>) passed; <code>proton-core</code> (385), data (35 + 11 notebook), container (24), shell (19 + 1 loopback), <code>tsc</code>, UI unit tests (62), and Playwright browser tests (2) all pass.</p>
+        <p>Live <code>live_graviton_data</code> (Linux ZMQ kernel in Graviton) and <code>live_ssh_connect_and_browse_mini</code> (SSH on <code>mini</code>) passed; <code>proton-core</code> (385), data (35 + 11 notebook), container (24), shell (23 + 1 loopback), <code>tsc</code>, UI unit tests (62), and Playwright browser tests (2) all pass.</p>
         <span class="when">As of 22 Nov</span>
       </div>
     </section>

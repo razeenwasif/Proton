@@ -124,6 +124,22 @@ pub fn rgb(hex: &str) -> Option<(f64, f64, f64)> {
 /// off when the user disables transparency effects or enters battery saver, and
 /// it has to look deliberate when it does.
 pub fn apply(window: &tauri::WebviewWindow, wanted: Backdrop) -> Backdrop {
+    let radius = if crate::fullscreen::is_active(window.label()) {
+        0.0
+    } else {
+        13.0
+    };
+    apply_with_radius(window, wanted, Some(radius))
+}
+
+pub fn apply_with_radius(
+    window: &tauri::WebviewWindow,
+    wanted: Backdrop,
+    corner_radius: Option<f64>,
+) -> Backdrop {
+    #[cfg(not(target_os = "macos"))]
+    let _ = corner_radius;
+
     #[cfg(target_os = "windows")]
     let result = {
         // DWM holds whichever material was set last, so switching has to reset
@@ -148,7 +164,7 @@ pub fn apply(window: &tauri::WebviewWindow, wanted: Backdrop) -> Backdrop {
             window,
             window_vibrancy::NSVisualEffectMaterial::HudWindow,
             None,
-            Some(13.0),
+            corner_radius,
         ),
     };
 

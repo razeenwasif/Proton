@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod backdrop;
+mod fullscreen;
 mod pasteboard;
 mod remote_client;
 mod remote_protocol;
@@ -309,6 +310,19 @@ fn set_opaque(color: Option<String>, window: tauri::WebviewWindow, surface: Stat
     let material = surface.lock().map(|current| *current).unwrap_or_default();
     let color = color.as_deref().map(|hex| backdrop::rgb(hex).unwrap_or((0.0, 0.0, 0.0)));
     backdrop::set_opaque(&window, color, material);
+}
+
+#[tauri::command]
+fn fullscreen_state(window: tauri::WebviewWindow) -> fullscreen::FullscreenState {
+    fullscreen::state(window.label())
+}
+
+#[tauri::command]
+fn toggle_fullscreen(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<fullscreen::FullscreenState, String> {
+    fullscreen::toggle(&window, &app)
 }
 
 /// A project the user actually named: `proton .` or `proton C:\src\thing`, the
@@ -818,14 +832,22 @@ fn watch(window: &tauri::WebviewWindow) {
                 api.prevent_close();
             }
         }
-        tauri::WindowEvent::Destroyed => let_go(this.app_handle(), this.label()),
+        tauri::WindowEvent::Focused(focused) => fullscreen::on_focus(this.label(), *focused),
+        tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+            fullscreen::on_geometry_change(&this, this.app_handle());
+        }
+        tauri::WindowEvent::Destroyed => {
+            fullscreen::on_destroyed(this.app_handle(), this.label());
+            let_go(this.app_handle(), this.label());
+        }
         _ => {}
     });
 }
 
-/// The menu's New Window and Connect to Host (SSH).
+/// The menu's New Window, Connect to Host (SSH), and Full Screen toggle.
 const NEW_WINDOW: &str = "proton-new-window";
 const CONNECT_SSH: &str = "proton-connect-ssh";
+const FULLSCREEN: &str = "proton-fullscreen";
 
 fn build_and_open_window(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
     let front = app
@@ -913,13 +935,24 @@ fn menu_that_asks(app: &tauri::AppHandle) -> Option<tauri::menu::Menu<tauri::Wry
         }
         for (at, entry) in submenu.items().ok()?.into_iter().enumerate() {
             let MenuItemKind::Predefined(predefined) = &entry else { continue };
-            if !predefined.text().is_ok_and(|text| text.starts_with("Quit")) {
-                continue;
+            let Ok(text) = predefined.text() else { continue };
+            if text.starts_with("Quit") {
+                let quit = MenuItem::with_id(app, QUIT, "Quit Proton", true, Some("CmdOrCtrl+Q")).ok()?;
+                submenu.remove(predefined).ok()?;
+                submenu.insert(&quit, at).ok()?;
+                quit_given = true;
+            } else if text.contains("Full Screen") {
+                let fs = MenuItem::with_id(
+                    app,
+                    FULLSCREEN,
+                    "Toggle Full Screen",
+                    true,
+                    Some("Ctrl+Cmd+F"),
+                )
+                .ok()?;
+                submenu.remove(predefined).ok()?;
+                submenu.insert(&fs, at).ok()?;
             }
-            let quit = MenuItem::with_id(app, QUIT, "Quit Proton", true, Some("CmdOrCtrl+Q")).ok()?;
-            submenu.remove(predefined).ok()?;
-            submenu.insert(&quit, at).ok()?;
-            quit_given = true;
         }
     }
     quit_given.then_some(menu)
@@ -1023,7 +1056,9 @@ fn main() {
             remote_browse,
             remote_connect,
             remote_disconnect,
-            remote_forward_port
+            remote_forward_port,
+            fullscreen_state,
+            toggle_fullscreen
         ])
         .setup(move |app| {
             let Some(window) = app.get_webview_window("main") else {
@@ -1089,6 +1124,16 @@ fn main() {
                         .map(|w| w.label().to_string())
                         .unwrap_or_else(|| "main".to_string());
                     let _ = app.emit(&open_remote_channel(&target), ());
+                }
+                if event.id() == FULLSCREEN {
+                    let win = app
+                        .webview_windows()
+                        .into_values()
+                        .find(|w| w.is_focused().unwrap_or(false))
+                        .or_else(|| app.get_webview_window("main"));
+                    if let Some(win) = win {
+                        let _ = fullscreen::toggle(&win, app);
+                    }
                 }
             });
             watch(&window);
