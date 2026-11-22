@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="aura-dark" data-mode="codex">
+<html lang="en" data-theme="antigravity-obsidian" data-mode="codex">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -242,8 +242,12 @@
     <!-- ══ CODEX ═════════════════════════════════════════════════ -->
     <section class="workspace on" data-ws="codex" style="--col-l:200px; --col-r:330px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
       <aside class="pane side">
-        <header>Explorer <span class="grow"></span>
-          <button class="hbtn" data-reveal title="Reveal the file you are in — ␣e"><svg class="i"><use href="#i-target"/></svg></button>
+        <header>
+          <span class="exp-name" data-codex-project>Proton</span>
+          <span class="exp-branch" data-codex-branch hidden></span>
+          <span class="grow"></span>
+          <button class="hbtn" data-open="telescope" title="Find files — ␣ff" aria-label="Find files"><svg class="i"><use href="#i-search"/></svg></button>
+          <button class="hbtn" data-reveal title="Reveal the file you are in — ␣e" aria-label="Reveal active file"><svg class="i"><use href="#i-target"/></svg></button>
         </header>
         <button class="find" data-open="telescope"><svg class="i" width="13" height="13" style="opacity:.6"><use href="#i-search"/></svg> Find files… <kbd>␣ f f</kbd></button>
         <!-- Rendered from Event::Tree. The core decides what is in it, what is
@@ -294,17 +298,21 @@
                header, as in Zed: the two flags below only appear when there
                is something to do — history to leave, or a shell to restart. -->
           <section class="term-pane" data-term-pane aria-label="Terminal" hidden>
-            <div class="term-flags">
-              <span class="chip accent" data-term-container hidden></span>
-              <!-- Only while looking at history. A terminal scrolled back
-                   looks exactly like one whose shell has stopped answering,
-                   so it has to say which it is — and offer the way out. -->
-              <button class="chip warn" data-term-back hidden title="Back to the live screen">↑ <span data-term-back-rows>0</span></button>
-              <!-- Only when the shell has gone. There is no button to start
-                   one: opening the pane does that, because that is what
-                   opening it means. -->
-              <button class="term-restart" data-term-restart hidden title="Start a new shell">Shell exited · restart</button>
-            </div>
+            <header class="term-head">
+              <span class="term-label"><svg class="i" aria-hidden="true"><use href="#i-term"/></svg><span>zsh</span></span>
+              <div class="term-flags">
+                <span class="chip accent" data-term-container hidden></span>
+                <!-- Only while looking at history. A terminal scrolled back
+                     looks exactly like one whose shell has stopped answering,
+                     so it has to say which it is — and offer the way out. -->
+                <button class="chip warn" data-term-back hidden title="Back to the live screen">↑ <span data-term-back-rows>0</span></button>
+                <!-- Only when the shell has gone. There is no button to start
+                     one: opening the pane does that, because that is what
+                     opening it means. -->
+                <button class="term-restart" data-term-restart hidden title="Start a new shell">Shell exited · restart</button>
+              </div>
+              <button class="hbtn" data-term-close title="Hide terminal  ⌃`" aria-label="Hide terminal"><svg class="i"><use href="#i-close"/></svg></button>
+            </header>
             <div class="scroll term" data-term-screen tabindex="0" aria-label="Terminal"></div>
             <!-- What the keyboard types through while the shell has it. A
                  paste only lands in something that takes text, and the screen
@@ -324,6 +332,11 @@
              them is open at a time and the agent is the one that usually is. -->
         <header class="dock-head">
           <span class="dock-title" data-dock-title>New Thread</span>
+          <div class="dock-quick" role="tablist" aria-label="Quick panels">
+            <button class="dock-q on" role="tab" aria-selected="true" data-dock-quick="agent">Agent</button>
+            <button class="dock-q" role="tab" aria-selected="false" data-dock-quick="tasks">Tasks<span class="dot" data-task-quick-dot hidden></span></button>
+            <button class="dock-q" role="tab" aria-selected="false" data-dock-quick="git">Git</button>
+          </div>
           <button class="hbtn" data-chat-new data-dock-only="agent" title="New thread" aria-label="New thread"><svg class="i"><use href="#i-plus"/></svg></button>
           <button class="hbtn" data-chat-history data-dock-only="agent" title="Past threads" aria-label="Past threads" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-clock"/></svg></button>
           <button class="hbtn" data-dock-menu title="Panels" aria-label="Panels" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-dots"/></svg><span class="dot" data-task-dot hidden></span></button>
@@ -1280,7 +1293,11 @@
         <h4>Workspace theme</h4>
         <p>Choose the colors used throughout Proton.</p>
         <div class="themes">
-          <button class="theme-card on" data-theme-set="aura-dark">
+          <button class="theme-card on" data-theme-set="antigravity-obsidian">
+            <span class="sw"><i style="background:#0b0b0e"></i><i style="background:#ec6a88"></i><i style="background:#ebdbb2"></i><i style="background:#b8bb25"></i><i style="background:#fb4833"></i></span>
+            <span class="nm">Antigravity Obsidian</span>
+          </button>
+          <button class="theme-card" data-theme-set="aura-dark">
             <span class="sw"><i style="background:#15141b"></i><i style="background:#a277ff"></i><i style="background:#ebdbb2"></i><i style="background:#b8bb25"></i><i style="background:#fb4833"></i></span>
             <span class="nm">Aura Dark</span>
           </button>
@@ -1473,9 +1490,10 @@
         <div class="st-head">Dev Containers</div>
         <div class="setting">
           <h4>Container runtime</h4>
-          <p>Which engine Proton uses when starting or attaching to a <code>devcontainer.json</code> environment. <strong>Auto</strong> looks for Docker (or OrbStack), Podman, and nerdctl.</p>
+          <p>Which engine Proton uses when starting or attaching to a <code>devcontainer.json</code> environment. <strong>Auto</strong> tries Docker, falls back to Graviton (<code>~/Library/Application Support/Graviton/docker.sock</code>), then Podman and nerdctl.</p>
           <div class="seg" data-set-choice="container.runtime">
             <button data-value="auto">Auto</button>
+            <button data-value="graviton">Graviton</button>
             <button data-value="docker">Docker</button>
             <button data-value="podman">Podman</button>
             <button data-value="nerdctl">nerdctl</button>

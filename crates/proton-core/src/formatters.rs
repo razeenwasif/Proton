@@ -67,7 +67,7 @@ pub fn start(program: &Path, path: &Path, text: String) -> Receiver<Result<Strin
         "--fallback-style=LLVM".to_string(),
     ];
     let cwd = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    run_clang_format(program.to_path_buf(), args, cwd, text)
+    run_clang_format(program.to_path_buf(), args, Vec::new(), cwd, text)
 }
 
 /// Format `text` as `path` inside an attached dev container using `clang-format`.
@@ -89,6 +89,7 @@ pub fn start_in_container(
     run_clang_format(
         target.runtime.clone(),
         args,
+        target.host_env_pairs(),
         target.path_map.host_root.clone(),
         text,
     )
@@ -97,6 +98,7 @@ pub fn start_in_container(
 fn run_clang_format(
     program: PathBuf,
     args: Vec<String>,
+    host_env: Vec<(String, String)>,
     cwd: PathBuf,
     text: String,
 ) -> Receiver<Result<String, String>> {
@@ -105,6 +107,7 @@ fn run_clang_format(
         let answer = (|| {
             let mut child = Command::new(&program)
                 .args(&args)
+                .envs(host_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
                 .current_dir(&cwd)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())

@@ -92,6 +92,7 @@ impl Client {
             &cwd_str,
             breakpoints,
             None,
+            &[],
         )
     }
 
@@ -106,10 +107,12 @@ impl Client {
         cwd_target: &str,
         breakpoints: Vec<(PathBuf, Vec<usize>)>,
         path_map: Option<(PathBuf, String)>,
+        host_env: &[(String, String)],
     ) -> std::io::Result<Client> {
         let mut command = Command::new(adapter);
         command
             .args(adapter_args)
+            .envs(host_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .current_dir(cwd_host)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

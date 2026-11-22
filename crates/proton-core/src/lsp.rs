@@ -315,7 +315,7 @@ impl Servers {
             return None;
         }
         if !self.clients.contains_key(language.id) {
-            let (program, args, path_map) = if let Some(target) = &self.container {
+            let (program, args, path_map, host_env) = if let Some(target) = &self.container {
                 let (prog, arg_list) = match target.lsp_overrides.get(language.id) {
                     Some(ov) => (ov.program.as_str(), ov.args.clone()),
                     None => (
@@ -332,12 +332,14 @@ impl Servers {
                     target.runtime.to_string_lossy().into_owned(),
                     exec,
                     Some(map),
+                    target.host_env_pairs(),
                 )
             } else {
                 (
                     language.program.to_string(),
                     language.args.iter().map(|s| (*s).to_string()).collect(),
                     None,
+                    Vec::new(),
                 )
             };
             match Client::spawn_with_map(
@@ -347,6 +349,7 @@ impl Servers {
                 &self.root,
                 &self.root,
                 path_map,
+                &host_env,
             ) {
                 Ok(client) => {
                     self.clients.insert(language.id, client);

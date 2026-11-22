@@ -255,6 +255,7 @@ impl Debugger {
                     target.path_map.host_root.clone(),
                     target.path_map.container_root.clone(),
                 )),
+                &target.host_env_pairs(),
             )
             .map_err(|err| format!("could not start {}: {err}", launch.adapter.display()))?
         } else {

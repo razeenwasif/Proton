@@ -214,7 +214,7 @@ impl Client {
         args: &[String],
         root: &std::path::Path,
     ) -> std::io::Result<Self> {
-        Self::spawn_with_map(name, program, args, root, root, None)
+        Self::spawn_with_map(name, program, args, root, root, None, &[])
     }
 
     /// Spawn a server in `cwd` (e.g. a host path for a `docker exec` wrapper)
@@ -226,10 +226,12 @@ impl Client {
         cwd: &std::path::Path,
         root: &std::path::Path,
         path_map: Option<uri::PathMap>,
+        host_env: &[(String, String)],
     ) -> std::io::Result<Self> {
         let mut command = Command::new(program);
         command
             .args(args)
+            .envs(host_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1506,6 +1508,7 @@ done
             &host_root,
             &host_root,
             Some(map),
+            &[],
         )
         .unwrap();
 

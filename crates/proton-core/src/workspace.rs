@@ -288,6 +288,7 @@ fn start_command(
         );
         let mut proc = Process::new(&target.runtime);
         proc.args(&exec);
+        proc.envs(&target.host_env);
         (target.runtime.display().to_string(), proc)
     } else {
         let shell = std::env::var("SHELL")
@@ -1093,20 +1094,7 @@ impl Workspace {
                 if self.terminal.is_none() {
                     let (rows, cols) = self.term_size;
                     let opened = if let Some(target) = self.container.exec_target() {
-                        let exec = proton_container::runtime::exec_args(
-                            target,
-                            true,
-                            &target.shell,
-                            &[],
-                        );
-                        proton_term::Terminal::open_program(
-                            &target.runtime,
-                            &exec,
-                            self.pickers.root(),
-                            &[("TERM", "xterm-256color")],
-                            rows,
-                            cols,
-                        )
+                        open_container_terminal(self.pickers.root(), target, rows, cols)
                     } else {
                         proton_term::Terminal::open(self.pickers.root(), rows, cols)
                     };
@@ -6704,15 +6692,8 @@ impl Workspace {
         if had_term {
             let (rows, cols) = self.term_size;
             if let Some(target) = self.container.exec_target() {
-                let exec = proton_container::runtime::exec_args(target, true, &target.shell, &[]);
-                if let Ok(term) = proton_term::Terminal::open_program(
-                    &target.runtime,
-                    &exec,
-                    self.pickers.root(),
-                    &[("TERM", "xterm-256color")],
-                    rows,
-                    cols,
-                ) {
+                if let Ok(term) = open_container_terminal(self.pickers.root(), target, rows, cols)
+                {
                     self.terminal = Some(term);
                 }
             }
@@ -6773,6 +6754,20 @@ impl Workspace {
             NoticeLevel::Warn,
         )]
     }
+}
+
+fn open_container_terminal(
+    root: &Path,
+    target: &proton_container::ExecTarget,
+    rows: u16,
+    cols: u16,
+) -> std::io::Result<proton_term::Terminal> {
+    let exec = proton_container::runtime::exec_args(target, true, &target.shell, &[]);
+    let mut env = vec![("TERM", "xterm-256color")];
+    for (k, v) in &target.host_env {
+        env.push((k.as_str(), v.as_str()));
+    }
+    proton_term::Terminal::open_program(&target.runtime, &exec, root, &env, rows, cols)
 }
 
 pub(crate) fn notice(text: String, level: NoticeLevel) -> Event {

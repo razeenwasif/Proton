@@ -33,13 +33,14 @@ Files are parsed as JSONC (comments and trailing commas allowed). Supported fiel
 
 ## Container runtimes
 
-`crates/proton-container/src/runtime.rs` auto-detects container engines in order:
+`crates/proton-container/src/runtime.rs` auto-detects reachable container engines in order:
 
-- `docker`
+- `docker` (default context / Docker Desktop / OrbStack)
+- `graviton` (`docker` CLI targeting `~/Library/Application Support/Graviton/docker.sock` with `DOCKER_BUILDKIT=0` injected automatically)
 - `podman`
 - `nerdctl`
 
-Detection searches `PATH` plus common macOS locations so Dock-launched builds find Docker Desktop, OrbStack, Rancher Desktop, Podman Desktop, or Lima without inheriting a custom shell profile. You can override engine preference in **Settings ▸ Containers** (`container.runtime`: `auto`, `docker`, `podman`, `nerdctl`; `container.autoAttach` for auto-attaching when opening a project).
+Detection searches `PATH` plus common macOS locations (`/opt/homebrew/bin`, `/usr/local/bin`, Docker Desktop, OrbStack) so Dock-launched builds find your runtime without inheriting a custom shell profile. When `Auto` sees Docker Desktop stopped and Graviton's socket running, Proton automatically switches to Graviton and propagates `DOCKER_HOST` and `DOCKER_BUILDKIT=0` to build/hook steps, terminals, LSP servers, debuggers, formatters, and agent commands. You can also set an explicit engine in **Settings ▸ Containers** (`container.runtime`: `auto`, `graviton`, `docker`, `podman`, `nerdctl`; `container.autoAttach` to auto-attach when opening a project).
 
 For tests and custom CLI wrappers, set `PROTON_CONTAINER_BIN=/path/to/executable`.
 

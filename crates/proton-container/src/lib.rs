@@ -18,5 +18,5 @@ pub use manager::{
     Transition,
 };
 pub use pathmap::PathMap;
-pub use runtime::{EngineKind, ExecTarget, Runtime};
+pub use runtime::{graviton_socket_path, EngineKind, ExecTarget, Runtime};
 pub use templates::{suggest as suggest_template, write as write_template, Template, TEMPLATES};

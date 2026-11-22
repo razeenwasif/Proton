@@ -479,11 +479,11 @@ fn run_start(
     tx: &Sender<WorkerMsg>,
 ) -> Result<(), String> {
     let resolved = ResolvedConfig::load(root, cfg_path)?;
-    let rt = Runtime::detect(runtime_pref)?;
-    let server_ver = rt.check_daemon()?;
+    let (rt, server_ver) = Runtime::resolve_reachable(runtime_pref)?;
     let _ = tx.send(WorkerMsg::Log(format!(
-        "Using {} ({server_ver}) for {}",
+        "Using {} ({}, {server_ver}) for {}",
         rt.program.display(),
+        rt.kind.as_str(),
         resolved.name
     )));
 
@@ -494,7 +494,7 @@ fn run_start(
             run_services,
         } => {
             if let Some(cmd) = &resolved.initialize_command {
-                run_host_lifecycle("initializeCommand", cmd, root, tx)?;
+                run_host_lifecycle("initializeCommand", cmd, root, &rt.host_env, tx)?;
             }
             let _ = tx.send(WorkerMsg::Phase(
                 if rebuild {
@@ -519,11 +519,11 @@ fn run_start(
                     up_args.push(service.clone());
                 }
             }
-            run_streaming(&rt.program, &up_args, root, tx)?;
+            run_streaming(&rt.program, &up_args, root, &rt.host_env, tx)?;
 
             let mut ps_args = compose_base_args(&resolved);
             ps_args.extend(["ps".into(), "-q".into(), service.clone()]);
-            let cid = run_capture(&rt.program, &ps_args, root)?;
+            let cid = run_capture(&rt.program, &ps_args, root, &rt.host_env)?;
             let cid = cid.lines().next().unwrap_or("").trim().to_string();
             if cid.is_empty() {
                 return Err(format!(
@@ -596,6 +596,7 @@ fn run_start(
                                 &rt.program,
                                 &["start".into(), resolved.container_name.clone()],
                                 root,
+                                &rt.host_env,
                                 tx,
                             )?;
                             let target = build_exec_target(&rt, &state.id, &resolved, tx)?;
@@ -625,7 +626,7 @@ fn run_start(
 
             // Fresh build / create path.
             if let Some(cmd) = &resolved.initialize_command {
-                run_host_lifecycle("initializeCommand", cmd, root, tx)?;
+                run_host_lifecycle("initializeCommand", cmd, root, &rt.host_env, tx)?;
             }
 
             if inspect.is_some() {
@@ -637,6 +638,7 @@ fn run_start(
                     &rt.program,
                     &["rm".into(), "-f".into(), resolved.container_name.clone()],
                     root,
+                    &rt.host_env,
                 );
             }
 
@@ -645,7 +647,7 @@ fn run_start(
                     ContainerPhase::Building,
                     format!("Building {}…", resolved.image_tag),
                 ));
-                run_streaming(&rt.program, &b_args, root, tx)?;
+                run_streaming(&rt.program, &b_args, root, &rt.host_env, tx)?;
                 image_name = resolved.image_tag.clone();
             }
 
@@ -654,7 +656,7 @@ fn run_start(
                 format!("Creating {}…", resolved.container_name),
             ));
             let r_args = run_args(&resolved, &image_name);
-            let cid_raw = run_capture(&rt.program, &r_args, root)?;
+            let cid_raw = run_capture(&rt.program, &r_args, root, &rt.host_env)?;
             let cid = cid_raw
                 .lines()
                 .last()
@@ -707,7 +709,8 @@ struct InspectInfo {
 }
 
 fn inspect_container(rt: &Runtime, name: &str) -> Option<InspectInfo> {
-    let out = Command::new(&rt.program)
+    let out = rt
+        .command()
         .args([
             "inspect",
             "--format",
@@ -750,6 +753,7 @@ fn build_exec_target(
 
     let mut target = ExecTarget {
         runtime: rt.program.clone(),
+        host_env: rt.host_env.clone(),
         container_id: cid.to_string(),
         workdir: resolved.workspace_folder.clone(),
         user: resolved.effective_user.clone(),
@@ -772,7 +776,7 @@ fn detect_shell(target: &ExecTarget) -> String {
         "for s in /bin/zsh /bin/bash /bin/sh; do [ -x \"$s\" ] && { echo \"$s\"; exit 0; }; done; echo /bin/sh".to_string(),
     ];
     let args = exec_args(target, false, "/bin/sh", &probe);
-    let Ok(out) = Command::new(&target.runtime).args(&args).output() else {
+    let Ok(out) = target.command().args(&args).output() else {
         return "/bin/sh".into();
     };
     if !out.status.success() {
@@ -808,12 +812,19 @@ fn stop_running(running: &RunningContainer, tx: &Sender<WorkerMsg>) -> Result<()
             args.push(f.to_string_lossy().into_owned());
         }
         args.push("stop".to_string());
-        run_streaming(&running.exec_target.runtime, &args, &running.compose_dir, tx)
+        run_streaming(
+            &running.exec_target.runtime,
+            &args,
+            &running.compose_dir,
+            &running.exec_target.host_env,
+            tx,
+        )
     } else {
         run_streaming(
             &running.exec_target.runtime,
             &["stop".to_string(), running.container_id.clone()],
             &running.compose_dir,
+            &running.exec_target.host_env,
             tx,
         )
     }
@@ -826,7 +837,7 @@ fn query_ports(rt: &Runtime, cid: &str, resolved: &ResolvedConfig) -> Vec<Forwar
         map.insert(p.container_port, (p.host_port, "tcp".to_string()));
     }
 
-    if let Ok(out) = Command::new(&rt.program).args(["port", cid]).output() {
+    if let Ok(out) = rt.command().args(["port", cid]).output() {
         if out.status.success() {
             let txt = String::from_utf8_lossy(&out.stdout);
             for line in txt.lines() {
@@ -875,6 +886,7 @@ fn run_host_lifecycle(
     hook_name: &str,
     cmd: &LifecycleCommand,
     cwd: &Path,
+    host_env: &BTreeMap<String, String>,
     tx: &Sender<WorkerMsg>,
 ) -> Result<(), String> {
     let _ = tx.send(WorkerMsg::Phase(
@@ -885,31 +897,32 @@ fn run_host_lifecycle(
 
     match cmd {
         LifecycleCommand::Shell(s) => {
-            run_streaming(Path::new("/bin/sh"), &["-c".into(), s.clone()], cwd, tx)
+            run_streaming(Path::new("/bin/sh"), &["-c".into(), s.clone()], cwd, host_env, tx)
         }
         LifecycleCommand::Args(argv) => {
             if argv.is_empty() {
                 return Ok(());
             }
-            run_streaming(Path::new(&argv[0]), &argv[1..], cwd, tx)
+            run_streaming(Path::new(&argv[0]), &argv[1..], cwd, host_env, tx)
         }
         LifecycleCommand::Parallel(map) => {
             run_parallel(map.len(), map.iter().map(|(label, sub)| {
                 let label = label.clone();
                 let sub = sub.clone();
                 let cwd = cwd.to_path_buf();
+                let host_env = host_env.clone();
                 let tx = tx.clone();
                 move || {
                     let _ = tx.send(WorkerMsg::Log(format!("[{label}] starting on host")));
                     match sub {
                         SingleCommand::Shell(s) => {
-                            run_streaming(Path::new("/bin/sh"), &["-c".into(), s], &cwd, &tx)
+                            run_streaming(Path::new("/bin/sh"), &["-c".into(), s], &cwd, &host_env, &tx)
                         }
                         SingleCommand::Args(argv) => {
                             if argv.is_empty() {
                                 Ok(())
                             } else {
-                                run_streaming(Path::new(&argv[0]), &argv[1..], &cwd, &tx)
+                                run_streaming(Path::new(&argv[0]), &argv[1..], &cwd, &host_env, &tx)
                             }
                         }
                     }
@@ -934,14 +947,26 @@ fn run_container_lifecycle(
     match cmd {
         LifecycleCommand::Shell(s) => {
             let args = exec_args(target, false, "/bin/sh", &["-c".into(), s.clone()]);
-            run_streaming(&target.runtime, &args, &target.path_map.host_root, tx)
+            run_streaming(
+                &target.runtime,
+                &args,
+                &target.path_map.host_root,
+                &target.host_env,
+                tx,
+            )
         }
         LifecycleCommand::Args(argv) => {
             if argv.is_empty() {
                 return Ok(());
             }
             let args = exec_args(target, false, &argv[0], &argv[1..]);
-            run_streaming(&target.runtime, &args, &target.path_map.host_root, tx)
+            run_streaming(
+                &target.runtime,
+                &args,
+                &target.path_map.host_root,
+                &target.host_env,
+                tx,
+            )
         }
         LifecycleCommand::Parallel(map) => {
             run_parallel(map.len(), map.iter().map(|(label, sub)| {
@@ -954,14 +979,26 @@ fn run_container_lifecycle(
                     match sub {
                         SingleCommand::Shell(s) => {
                             let args = exec_args(&target, false, "/bin/sh", &["-c".into(), s]);
-                            run_streaming(&target.runtime, &args, &target.path_map.host_root, &tx)
+                            run_streaming(
+                                &target.runtime,
+                                &args,
+                                &target.path_map.host_root,
+                                &target.host_env,
+                                &tx,
+                            )
                         }
                         SingleCommand::Args(argv) => {
                             if argv.is_empty() {
                                 Ok(())
                             } else {
                                 let args = exec_args(&target, false, &argv[0], &argv[1..]);
-                                run_streaming(&target.runtime, &args, &target.path_map.host_root, &tx)
+                                run_streaming(
+                                    &target.runtime,
+                                    &args,
+                                    &target.path_map.host_root,
+                                    &target.host_env,
+                                    &tx,
+                                )
                             }
                         }
                     }
@@ -994,9 +1031,15 @@ where
     }
 }
 
-fn run_capture(program: &Path, args: &[String], cwd: &Path) -> Result<String, String> {
+fn run_capture(
+    program: &Path,
+    args: &[String],
+    cwd: &Path,
+    host_env: &BTreeMap<String, String>,
+) -> Result<String, String> {
     let out = Command::new(program)
         .args(args)
+        .envs(host_env)
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("failed to run {}: {e}", program.display()))?;
@@ -1023,10 +1066,12 @@ fn run_streaming(
     program: &Path,
     args: &[String],
     cwd: &Path,
+    host_env: &BTreeMap<String, String>,
     tx: &Sender<WorkerMsg>,
 ) -> Result<(), String> {
     let mut child = Command::new(program)
         .args(args)
+        .envs(host_env)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
