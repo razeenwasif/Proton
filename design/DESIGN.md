@@ -131,7 +131,8 @@ Six ship, switchable live in Settings → Appearance:
 
 | Theme | Ground | Accent | |
 |---|---|---|---|
-| **Aura Dark** (default) | `#15141b` | `#a277ff` | Aura's ground and terminal with Gruvbox's syntax — one Zed setup, which Codex is drawn after |
+| **Antigravity Obsidian** (default) | `#0b0b0e` | `#ec6a88` | True dark-black elevation (`#070709` rail, `#09090c` sidebars/dock, `#0b0b0e` stage) with Proton crimson and Gruvbox syntax |
+| **Aura Dark** | `#15141b` | `#a277ff` | Aura's ground and terminal with Gruvbox's syntax — one Zed setup |
 | **Tokyo Night** | `#16161e` | `#7aa2f7` | The nvim standard; its blue-violet ground is the best fit for glass |
 | **One Dark** | `#282c34` | `#61afef` | The classic |
 | **Catppuccin Mocha** | `#1e1e2e` | `#89b4fa` | Softest contrast of the lot |
@@ -297,41 +298,30 @@ mode it still says `NORMAL`, and `d d` still deletes the selected clip.
 
 ---
 
-## Codex, drawn after Zed
+## Codex, drawn after Zed × Antigravity
 
-Codex is the first mode drawn to a second language: one Zed setup, reproduced
-— Aura Dark with Gruvbox syntax, JetBrains Mono for everything, and nothing
-that setup turns off. Chat and Data are drawn this way too; the other four
-keep the glass until they are, so every rule for it hangs off `data-mode` on
-`<html>` or the workspace it is for (the blocks near the end of
-`ui/styles.css`), never replacing a rule the glass relies on.
+Codex blends Proton's Zed/Neovim modal skeleton with Antigravity's obsidian-black elevation: `JetBrains Mono` throughout, Gruvbox syntax coloring, **Proton Crimson (`#ec6a88`)** accent, and **no visible lines splitting panes**. Every boundary is carried by subtle tonal steps (`#070709` right rail → `#09090c` Explorer & Dock → `#0b0b0e` Editor & Terminal → `#121216` floating composer & cards) rather than borders. Data and the other modes share the right-edge titlebar; the rules below hang off `data-mode` on `<html>` or the workspace in `ui/styles.css`.
 
 ```
 ╭──────────┬──────────────────────────────┬────────────────┬──────────┬───╮
-│ ▸ crates │ crates/proton-core/src/vim.rs│ ❯ cargo test   │ thread ⋯ │ ● │  ← darker
-│   src    │                              │                │          │ ● │
-│ ▣ vim.rs │  1  //! The modal input …    │                │ Thinking │ ● │
-│          │  2  //!                      │                │ Read file│ C │
-│          │                              │                │          │ o │
+│ Proton   │ crates/proton-core/src/vim.rs│ zsh        [×] │ thread   │ ● │  38px
+│ ▸ crates │                  ●rust 0e 42 │ ❯ cargo test   │ [A|T|G]⋯ │ ● │  datum
+│   src    │  1  //! The modal input …    │                │          │ ● │
+│ ▣ vim.rs │  2  //!                      │                │ Thinking │ C │
+│          │                              │                │ Read file│ o │
 │          │                              │                │          │ d │
-│ project  │  code                        │  terminal      │ agent    │ … │
-│          │                              │                │          │   │
-│          │                              │                │          │ ◫ │
-│          │                              │                │          │ ⚙ │
+│          │                              │                │ ┌──────┐ │ … │
+│          │                              │                │ │Ask… ↑│ │ ◫ │
+│          │                              │                │ └──────┘ │ ⚙ │
 ╰──────────┴──────────────────────────────┴────────────────┴──────────┴───╯
                                                                        40px
 ```
 
-No line in that diagram is drawn on screen. Every panel is the editor's
-colour, so the window reads as one surface broken only by space and by the
-agent's darker header.
+No dividing lines are drawn between panes. Explorer, Editor, Terminal, and Dock align on a shared **38px borderless top header datum**, with a quiet right-aligned micro-status cluster in the editor header (`● LSP`, diagnostic count, `Ln:Col`, modal badge) so status remains visible without adding a bottom statusline.
 
-**What the setup turns off stays off.** No rails, no file tabs, no statusline,
-no scrollbars, no git gutter, no current-line wash, no borders. What the rails
-held that Codex still needs moved to a title bar: the window controls, the
-modes as quiet words — mouse users need a way out of Codex, and ⌃1–9, ⌃0 and ⌃- are not
-discoverable — and the panel toggles a hidden statusline would otherwise have
-taken with it.
+**What the setup turns off stays off.** No rails, no file tabs by default, no bottom statusline, no scrollbars, no git gutter, no current-line wash, no pane borders. What the rails held that Codex still needs stays in the **40px right-edge vertical titlebar**: stacked traffic lights, workspace tiles, vertical mode labels, and bottom toggles. The active mode carries a `2px` inner accent bar on the rail.
+
+**The agent dock uses Antigravity's floating-card composer and trajectory styling**: user prompts sit in `#15151b` obsidian cards, staged diffs pin directly above the composer in a bordered card, command approvals sit in bordered `#121216` cards, and the composer is a bordered `#121216` card with focus accent and a circular send button. Compact `Agent | Tasks | Git` quick pills sit in the 38px dock header beside `+`, history clock, and `⋯` (which holds Debug, Visualizer, Device, and Dev Container).
 
 **The title bar stands on its end down the right edge**, 40px wide, which is
 where Codex parts from the setup on purpose: the code keeps the window's full
@@ -368,17 +358,7 @@ scrolling a coloured build log a line a frame, it cost 1.8 ms of the web
 process and 0.6 ms of WebKit's GPU process a frame against 4.7 ms and 3.5 ms
 for text, with memory the same; `tests/ui/terminal-bench.html` measures it.
 
-**The agent's header is Zed's**: the thread's name, fading where it runs long,
-then new, expand and `⋯`. Expand goes to the Chat tab, which is Claude Code,
-and `⋯` holds the panels that used to be a row of tabs, since
-one is open at a time and it is usually the agent. Tool calls read as lines —
-an icon, what it did, and to what — and the composer has no box: what you
-type is set like code, on a double line, under a placeholder in faded lilac.
-
-The numbers were measured off a screenshot of the setup at 1512pt: 16px code
-on 32px lines, 17.5px chrome, 32px tree rows stepping in 20px a level, a 39px
-agent header, a 12px traffic light every 20px. They scale with Interface text,
-as Zed's scale with its UI font size, and the code with Editor text.
+The header datum sits at 38px across Explorer, Editor, Terminal, and Dock; Codex uses 13px `JetBrains Mono` chrome, 28px tree rows, and 16px code by default (scaling with Interface text and Editor text in Settings).
 
 ---
 

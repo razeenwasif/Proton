@@ -53,7 +53,7 @@ const token = (name) => getComputedStyle(document.documentElement).getPropertyVa
    and nothing else. No rule below the palette block knows which one is
    active, which is why switching is instant and why adding another is a
    paste, not a port. */
-const THEMES = ["aura-dark", "tokyo-night", "one-dark", "catppuccin", "nord", "gruvbox-dark"];
+const THEMES = ["antigravity-obsidian", "aura-dark", "tokyo-night", "one-dark", "catppuccin", "nord", "gruvbox-dark"];
 
 /* Palettes a plugin brought, by id.
  *
@@ -613,6 +613,11 @@ function setDock(panel) {
   dockPanel = panel;
   panels.show("right", dock.closest(".workspace"));
   $$(".dock-tab", dock).forEach((t) => t.classList.toggle("on", t.dataset.dockpanel === panel));
+  $$("[data-dock-quick]", dock).forEach((q) => {
+    const on = q.dataset.dockQuick === panel;
+    q.classList.toggle("on", on);
+    q.setAttribute("aria-selected", String(on));
+  });
   $$(".dock-panel", dock).forEach((p) => {
     const on = p.dataset.panel === panel;
     p.classList.toggle("on", on);
@@ -649,6 +654,9 @@ function showDockMenu(on) {
 
 $$("#codex-dock .dock-tab").forEach((t) =>
   t.addEventListener("click", () => setDock(t.dataset.dockpanel)),
+);
+$$("#codex-dock [data-dock-quick]").forEach((q) =>
+  q.addEventListener("click", () => setDock(q.dataset.dockQuick)),
 );
 
 document.addEventListener("click", (e) => {
@@ -767,6 +775,7 @@ function splitHtml(view, focused) {
     // Zed's breadcrumb shows with its tab bar turned off.
     `<span class="crumbs" data-crumbs></span>` +
     `<span data-buffers></span>` +
+    `<span class="codex-microstatus" data-microstatus></span>` +
     actions +
     `</div>` +
     `<div class="scroll code" role="tabpanel" tabindex="0" id="editor-view-${view}" data-editor data-view="${view}"></div>` +
@@ -827,6 +836,7 @@ function renderSplits(views, focused, vertical) {
   // Which buffer each pane is showing, so its strip can mark the right tab.
   bufferBar.panes = views.map((v) => v.buffer);
   renderBufferBars();
+  syncCodexMicrostatus();
   requestAnimationFrame(drawPointerEdges);
 }
 
@@ -1038,6 +1048,7 @@ const focusedPane = () => paneState(view.focused);
  * diagnostic never has to wait for a redraw of the text, and a redraw of the
  * text never has to wait for a server. */
 const marks = { byLine: new Map(), errors: 0, warnings: 0 };
+let lastServerStates = [];
 
 /** Whether the popup is showing. The core is the authority; this mirrors it
  * so the keydown handler can suppress the browser default before the key
@@ -1929,6 +1940,11 @@ function renderRepo(event) {
     branch.textContent = event.branch ?? "no branch";
     branch.className = "chip" + (event.branch ? " accent" : "");
   }
+  const expBranch = $("[data-codex-branch]");
+  if (expBranch) {
+    expBranch.textContent = event.branch ?? "";
+    expBranch.hidden = !event.branch;
+  }
 
   const count = $("[data-git-count]");
   if (count) {
@@ -2527,6 +2543,7 @@ function toggleTerminal() {
 }
 
 $$("[data-term-toggle]").forEach((b) => b.addEventListener("click", toggleTerminal));
+$("[data-term-close]")?.addEventListener("click", () => showTerminal(false));
 
 /** How wide the terminal is, as asked for. The stylesheet caps it at half the
  *  stage, so a narrow window keeps the code readable without forgetting the
@@ -2662,6 +2679,11 @@ function renderWorkspaces(items, active) {
   const current = items[active];
   $("#sl-project").textContent = current?.name ?? "No workspace";
   $("#sl-project").title = current?.path ?? "";
+  const expProject = $("[data-codex-project]");
+  if (expProject) {
+    expProject.textContent = current?.name ?? "Proton";
+    expProject.title = current?.path ?? "";
+  }
   projectRoot = current?.path ?? "";
   renderBufferBars();
   // Every rail that lists them: the chrome rail's, and Codex's title bar.
@@ -2983,10 +3005,35 @@ function renderDiagnostics(event) {
           `<span class="w">${icon("d-warning", "solid")} ${event.warnings}</span>`
         : "";
   }
+  syncCodexMicrostatus();
   renderEditor();
 }
 
+function syncCodexMicrostatus() {
+  const slots = $$(".workspace[data-ws=\"codex\"] [data-microstatus]");
+  if (!slots.length) return;
+  const activeSrv = lastServerStates.find((s) => s.status === "busy" || s.status === "starting")
+    ?? lastServerStates.find((s) => s.status === "ready")
+    ?? lastServerStates[0];
+  const srvHtml = activeSrv
+    ? `<span class="ms-srv ${activeSrv.status === "busy" || activeSrv.status === "starting" ? "busy" : activeSrv.status === "ready" ? "" : "off"}" title="${escapeHtml(activeSrv.note ?? activeSrv.language)}">` +
+      `${icon(activeSrv.status === "busy" || activeSrv.status === "starting" ? "srv-busy" : activeSrv.status === "ready" ? "srv-ready" : "srv-off", activeSrv.status === "ready" ? "solid" : "")} ` +
+      `${escapeHtml(activeSrv.language)}</span>`
+    : "";
+  const diagClass = marks.errors ? " err" : marks.warnings ? " warn" : "";
+  const diagText = marks.errors ? `${marks.errors} err` : marks.warnings ? `${marks.warnings} warn` : "0 err";
+  const diagHtml = `<span class="ms-diag${diagClass}">${diagText}</span>`;
+  const at = focusedPane().cursor;
+  const posHtml = `<span class="ms-pos">Ln ${at.line + 1}:${at.column + 1}</span>`;
+  const modeLabel = view.vim || "NORMAL";
+  const modeClass = modeLabel === "INSERT" ? " insert" : modeLabel.startsWith("VISUAL") ? " visual" : "";
+  const modeHtml = `<span class="ms-mode${modeClass}">${escapeHtml(modeLabel)}</span>`;
+  const html = `${srvHtml}${diagHtml}${posHtml}${modeHtml}`;
+  slots.forEach((slot) => { slot.innerHTML = html; });
+}
+
 function renderServers(states) {
+  lastServerStates = states;
   const el = $("#sl-servers");
   if (!el) return;
   el.innerHTML = states
@@ -3006,6 +3053,7 @@ function renderServers(states) {
       return `<span class="off">${icon("srv-off")} ${escapeHtml(s.language)}</span>`;
     })
     .join(" ");
+  syncCodexMicrostatus();
 }
 
 /* Twelve LSP categories collapsed onto nine marks. Drawn at 11px in a
@@ -3192,6 +3240,7 @@ function renderVim(label) {
   // which mode you are in, and it belongs on the text rather than only in the
   // statusline nobody is looking at while they type.
   $$("[data-editor]").forEach((pane) => pane.classList.toggle("insert", label === "INSERT"));
+  syncCodexMicrostatus();
 }
 
 /**
@@ -3616,6 +3665,7 @@ function renderPosition() {
   if (el) el.textContent = `ln ${at.line + 1}, col ${at.column + 1}`;
   const total = focusedPane().totalLines;
   $("#sl-progress").textContent = total ? `${Math.min(100, Math.round((at.line + 1) / total * 100))}%` : "";
+  syncCodexMicrostatus();
 }
 
 /* ── the caret's blink ────────────────────────────────────────────────
@@ -4426,6 +4476,8 @@ function renderTasks(event) {
   // a mark that can be seen with the menu shut.
   const dot = $("[data-task-dot]");
   if (dot) dot.hidden = !event.tasks.length;
+  const quickDot = $("[data-task-quick-dot]");
+  if (quickDot) quickDot.hidden = !event.tasks.length;
   const box = $("[data-tasks]");
   if (!box) return;
 
