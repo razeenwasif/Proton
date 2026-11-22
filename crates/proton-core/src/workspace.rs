@@ -1234,6 +1234,9 @@ impl Workspace {
             Command::ContainerStop => self.stop_container(),
             Command::ContainerDetach => self.detach_container(),
             Command::ContainerInit { template } => self.init_container(&template),
+            Command::ContainerClone { url, branch } => {
+                self.clone_container(&url, branch.as_deref())
+            }
             Command::ContainerSelectConfig { path } => match self.container.select_config(&path) {
                 Ok(()) => vec![self.container_event()],
                 Err(why) => vec![notice(why, NoticeLevel::Warn), self.container_event()],
@@ -6669,6 +6672,17 @@ impl Workspace {
         }
     }
 
+    fn clone_container(&mut self, url: &str, branch: Option<&str>) -> Vec<Event> {
+        let runtime_pref = self.settings.string("container.runtime", "auto");
+        match self
+            .container
+            .clone_into_volume(url, branch, Some(&runtime_pref))
+        {
+            Ok(()) => vec![self.container_event()],
+            Err(why) => vec![notice(why, NoticeLevel::Error), self.container_event()],
+        }
+    }
+
     fn on_container_attached(&mut self, target: proton_container::ExecTarget) -> Vec<Event> {
         self.servers.set_container(Some(target.clone()));
         if self.mode.edits_text() {
@@ -6748,8 +6762,18 @@ impl Workspace {
                 return self.apply(Command::ContainerInit { template: tpl });
             }
         }
+        if let Some(rest) = trimmed.strip_prefix("clone ") {
+            let mut parts = rest.split_whitespace();
+            if let Some(url) = parts.next() {
+                let branch = parts.next().map(str::to_string);
+                return self.apply(Command::ContainerClone {
+                    url: url.to_string(),
+                    branch,
+                });
+            }
+        }
         vec![notice(
-            "usage: :container [start|rebuild|stop|detach|init [rust|python|node|cpp|go|base]]"
+            "usage: :container [start|rebuild|stop|detach|clone <url> [branch]|init [rust|python|node|cpp|go|base]]"
                 .into(),
             NoticeLevel::Warn,
         )]

@@ -3,11 +3,14 @@
 //! and host ↔ container path mapping.
 
 pub mod config;
+pub mod features;
 pub mod jsonc;
 pub mod manager;
 pub mod pathmap;
+pub mod ports;
 pub mod runtime;
 pub mod templates;
+pub mod volume;
 
 pub use config::{
     discover, BuildConfig, ContainerSource, DevContainerConfig, LifecycleCommand, LspOverride,

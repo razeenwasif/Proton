@@ -223,6 +223,12 @@ fn live_graviton_lifecycle_bind_mount_exec_reuse_restart_and_build() {
         "expected forwarded HTTP port 18091 to serve from_container.txt"
     );
 
+    let probed = proton_container::ports::probe_listening_ports(&target);
+    assert!(
+        probed.contains(&18091),
+        "expected probe_listening_ports to detect port 18091 in {probed:?}"
+    );
+
     // 4. Detach -> start reuses the running container (config_hash matches)
     assert!(mgr.detach());
     assert_eq!(mgr.phase(), ContainerPhase::Detected);
@@ -260,7 +266,23 @@ fn live_graviton_lifecycle_bind_mount_exec_reuse_restart_and_build() {
     };
     assert_eq!(restarted_target.container_id, cid_first);
 
-    // 6. Switch to Dockerfile build + rebuild=true (verifying injected DOCKER_BUILDKIT=0)
+    // 6. Switch to Dockerfile build + local Dev Container Feature + rebuild=true
+    let feat_dir = dc_dir.join("hello-feature");
+    fs::create_dir_all(&feat_dir).unwrap();
+    fs::write(
+        feat_dir.join("devcontainer-feature.json"),
+        r#"{
+          "id": "hello-feature",
+          "options": { "message": { "default": "default-msg" } },
+          "containerEnv": { "PROTON_FEAT_ENV": "yes" }
+        }"#,
+    )
+    .unwrap();
+    fs::write(
+        feat_dir.join("install.sh"),
+        "#!/bin/sh\nset -eu\necho \"${MESSAGE:-unset}\" > /etc/proton-feature-ok\n",
+    )
+    .unwrap();
     fs::write(
         dc_dir.join("Dockerfile"),
         "FROM alpine:3.22\nRUN echo built-ok > /etc/proton-built\n",
@@ -268,7 +290,8 @@ fn live_graviton_lifecycle_bind_mount_exec_reuse_restart_and_build() {
     .unwrap();
     let raw_build = r#"{
       "name": "Graviton Live Build",
-      "build": { "dockerfile": "Dockerfile", "context": "." }
+      "build": { "dockerfile": "Dockerfile", "context": "." },
+      "features": { "./hello-feature": { "message": "feature-ok" } }
     }"#;
     fs::write(&cfg_path, raw_build).unwrap();
 
@@ -284,17 +307,23 @@ fn live_graviton_lifecycle_bind_mount_exec_reuse_restart_and_build() {
         &rebuilt_target,
         false,
         "/bin/sh",
-        &["-c".into(), "cat /etc/proton-built".into()],
+        &[
+            "-c".into(),
+            "cat /etc/proton-built /etc/proton-feature-ok && echo \"$PROTON_FEAT_ENV\"".into(),
+        ],
     );
     let built_out = rebuilt_target
         .command()
         .args(&check_built)
         .output()
-        .expect("check /etc/proton-built");
+        .expect("check /etc/proton-built and feature output");
     assert!(
         built_out.status.success(),
         "exec in rebuilt container failed: {}",
         String::from_utf8_lossy(&built_out.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&built_out.stdout).trim(), "built-ok");
+    assert_eq!(
+        String::from_utf8_lossy(&built_out.stdout).trim(),
+        "built-ok\nfeature-ok\nyes"
+    );
 }

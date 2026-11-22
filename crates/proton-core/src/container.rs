@@ -34,6 +34,7 @@ pub struct ForwardedPortView {
     pub label: Option<String>,
     pub protocol: String,
     pub url: String,
+    pub auto_detected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -107,6 +108,7 @@ pub fn view(mgr: &proton_container::Manager) -> ContainerView {
                         label: p.label.clone(),
                         protocol: p.protocol.clone(),
                         url: format!("{scheme}://localhost:{}", p.host_port),
+                        auto_detected: p.auto_detected,
                     }
                 })
                 .collect()

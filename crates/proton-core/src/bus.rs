@@ -1093,6 +1093,10 @@ pub enum Command {
     ContainerInit {
         template: String,
     },
+    ContainerClone {
+        url: String,
+        branch: Option<String>,
+    },
     ContainerSelectConfig {
         path: String,
     },

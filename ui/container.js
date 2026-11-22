@@ -58,9 +58,10 @@ export function renderPortsHtml(ports) {
         ? String(p.hostPort)
         : `${p.hostPort} → ${p.containerPort}`;
       const label = p.label ? `<span class="dc-port-label">${esc(p.label)}</span>` : "";
+      const autoTag = p.autoDetected ? `<span class="chip">auto</span>` : "";
       return `<div class="dc-port-row">` +
         `<button class="dc-port-link" type="button" data-dc-port-url="${esc(p.url)}" title="Open ${esc(p.url)}">${esc(mapping)}/${esc(p.protocol)}</button>` +
-        `${label}` +
+        `${autoTag}${label}` +
         `</div>`;
     })
     .join("");

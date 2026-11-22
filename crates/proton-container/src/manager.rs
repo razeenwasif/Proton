@@ -9,16 +9,18 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::time::{Duration, Instant};
 
 use crate::config::{
-    discover, ContainerSource, DevContainerConfig, LifecycleCommand, PortSpec, ResolvedConfig,
-    ShutdownAction, SingleCommand,
+    discover, ContainerSource, DevContainerConfig, LifecycleCommand, PortAttributes, PortSpec,
+    ResolvedConfig, ShutdownAction, SingleCommand,
 };
-use crate::jsonc;
 use crate::pathmap::PathMap;
 use crate::runtime::{build_args, compose_base_args, exec_args, run_args, ExecTarget, Runtime};
+use crate::{features, jsonc, ports, volume};
 
 const MAX_LOGS: usize = 400;
+const PORT_PROBE_INTERVAL: Duration = Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContainerPhase {
@@ -45,6 +47,7 @@ pub struct ForwardedPort {
     pub host_port: u16,
     pub label: Option<String>,
     pub protocol: String,
+    pub auto_detected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +58,9 @@ pub struct RunningContainer {
     pub runtime_kind: String,
     pub exec_target: ExecTarget,
     pub ports: Vec<ForwardedPort>,
+    pub forward_ports: Vec<PortSpec>,
+    pub ports_attributes: BTreeMap<String, PortAttributes>,
+    pub other_ports_attributes: Option<PortAttributes>,
     pub shutdown_action: ShutdownAction,
     pub compose_files: Vec<PathBuf>,
     pub compose_dir: PathBuf,
@@ -78,6 +84,7 @@ enum WorkerMsg {
     Phase(ContainerPhase, String),
     Log(String),
     Attached(RunningContainer),
+    Cloned(String),
     Stopped,
     Failed(String),
 }
@@ -93,6 +100,8 @@ pub struct Manager {
     step_note: String,
     error: Option<String>,
     worker: Option<Receiver<WorkerMsg>>,
+    port_probe: Option<Receiver<Vec<ForwardedPort>>>,
+    last_port_probe: Option<Instant>,
 }
 
 impl Default for Manager {
@@ -107,6 +116,8 @@ impl Default for Manager {
             step_note: String::new(),
             error: None,
             worker: None,
+            port_probe: None,
+            last_port_probe: None,
         }
     }
 }
@@ -132,6 +143,8 @@ impl Manager {
             step_note: String::new(),
             error: None,
             worker: None,
+            port_probe: None,
+            last_port_probe: None,
         }
     }
 
@@ -274,6 +287,8 @@ impl Manager {
         }
         self.running = None;
         self.worker = None;
+        self.port_probe = None;
+        self.last_port_probe = None;
         self.error = None;
         self.step_note = "Detached from container".into();
         self.push_log("Detached from container (container kept running).".into());
@@ -285,6 +300,61 @@ impl Manager {
         true
     }
 
+    /// Clone a Git repository into a named container volume in the background.
+    pub fn clone_into_volume(
+        &mut self,
+        url: &str,
+        branch: Option<&str>,
+        runtime_pref: Option<&str>,
+    ) -> Result<(), String> {
+        if self.worker.is_some() {
+            return Err("container operation already in progress".into());
+        }
+        if self.running.is_some() {
+            return Err("detach or stop the running container before cloning into a volume".into());
+        }
+        let clean = url.trim().to_string();
+        if clean.is_empty() {
+            return Err("repository URL must not be empty".into());
+        }
+
+        self.error = None;
+        self.logs.clear();
+        self.phase = ContainerPhase::Starting;
+        self.step_note = format!("Cloning {clean} into volume…");
+
+        let root = self.root.clone();
+        let br = branch.map(str::to_string);
+        let pref = runtime_pref.map(str::to_string);
+        let (tx, rx) = mpsc::channel();
+        self.worker = Some(rx);
+
+        std::thread::Builder::new()
+            .name("proton-container-clone".into())
+            .spawn(move || {
+                let run = (|| -> Result<String, String> {
+                    let (rt, _) = Runtime::resolve_reachable(pref.as_deref())?;
+                    let (vol, folder) =
+                        volume::clone_into_volume(&rt, &clean, br.as_deref(), &root, |line| {
+                            let _ = tx.send(WorkerMsg::Log(line));
+                        })?;
+                    Ok(format!("Cloned into volume {vol} ({folder})"))
+                })();
+                match run {
+                    Ok(note) => {
+                        let _ = tx.send(WorkerMsg::Cloned(note));
+                    }
+                    Err(err) => {
+                        let _ = tx.send(WorkerMsg::Log(format!("error: {err}")));
+                        let _ = tx.send(WorkerMsg::Failed(err));
+                    }
+                }
+            })
+            .map_err(|e| format!("failed to spawn container clone worker: {e}"))?;
+
+        Ok(())
+    }
+
     /// Stop the running container in the background.
     pub fn stop(&mut self) -> Result<(), String> {
         if self.worker.is_some() {
@@ -294,6 +364,8 @@ impl Manager {
             return Err("no running container".into());
         };
 
+        self.port_probe = None;
+        self.last_port_probe = None;
         self.phase = ContainerPhase::Stopping;
         self.step_note = format!("Stopping {}…", running.container_name);
         let (tx, rx) = mpsc::channel();
@@ -318,6 +390,8 @@ impl Manager {
     /// Synchronous best-effort teardown when the workspace shuts down,
     /// honoring `shutdownAction`.
     pub fn shutdown(&mut self) {
+        self.port_probe = None;
+        self.last_port_probe = None;
         let Some(running) = self.running.take() else {
             return;
         };
@@ -333,82 +407,161 @@ impl Manager {
         };
     }
 
-    /// Drain background worker updates. Never blocks.
+    /// Drain background worker updates and periodic listening-port probes.
+    /// Never blocks.
     pub fn poll(&mut self) -> PollOutcome {
-        let Some(rx) = self.worker.take() else {
-            return PollOutcome::default();
-        };
-
         let mut outcome = PollOutcome::default();
-        let mut keep_rx = true;
 
-        loop {
-            match rx.try_recv() {
-                Ok(msg) => {
-                    outcome.changed = true;
-                    match msg {
-                        WorkerMsg::Phase(phase, note) => {
-                            self.phase = phase;
-                            self.step_note = note;
+        if let Some(rx) = self.worker.take() {
+            let mut keep_rx = true;
+
+            loop {
+                match rx.try_recv() {
+                    Ok(msg) => {
+                        outcome.changed = true;
+                        match msg {
+                            WorkerMsg::Phase(phase, note) => {
+                                self.phase = phase;
+                                self.step_note = note;
+                            }
+                            WorkerMsg::Log(line) => self.push_log(line),
+                            WorkerMsg::Attached(running) => {
+                                let target = running.exec_target.clone();
+                                self.running = Some(running);
+                                self.last_port_probe = Some(Instant::now());
+                                self.port_probe = None;
+                                self.phase = ContainerPhase::Running;
+                                self.error = None;
+                                self.step_note = "Connected".into();
+                                outcome.transition = Some(Transition::Attached(target));
+                                keep_rx = false;
+                                break;
+                            }
+                            WorkerMsg::Cloned(note) => {
+                                self.configs = scan_configs(&self.root);
+                                self.selected = 0;
+                                self.running = None;
+                                self.error = None;
+                                self.step_note = note.clone();
+                                self.push_log(note);
+                                self.phase = if self.configs.is_empty() {
+                                    ContainerPhase::Absent
+                                } else {
+                                    ContainerPhase::Detected
+                                };
+                                keep_rx = false;
+                                break;
+                            }
+                            WorkerMsg::Stopped => {
+                                self.running = None;
+                                self.port_probe = None;
+                                self.last_port_probe = None;
+                                self.error = None;
+                                self.step_note = "Stopped".into();
+                                self.phase = if self.configs.is_empty() {
+                                    ContainerPhase::Absent
+                                } else {
+                                    ContainerPhase::Detected
+                                };
+                                outcome.transition = Some(Transition::Detached);
+                                keep_rx = false;
+                                break;
+                            }
+                            WorkerMsg::Failed(err) => {
+                                self.running = None;
+                                self.port_probe = None;
+                                self.last_port_probe = None;
+                                self.phase = ContainerPhase::Error;
+                                self.step_note = "Failed".into();
+                                self.error = Some(err.clone());
+                                outcome.transition = Some(Transition::Failed(err));
+                                keep_rx = false;
+                                break;
+                            }
                         }
-                        WorkerMsg::Log(line) => self.push_log(line),
-                        WorkerMsg::Attached(running) => {
-                            let target = running.exec_target.clone();
-                            self.running = Some(running);
-                            self.phase = ContainerPhase::Running;
-                            self.error = None;
-                            self.step_note = "Connected".into();
-                            outcome.transition = Some(Transition::Attached(target));
-                            keep_rx = false;
-                            break;
-                        }
-                        WorkerMsg::Stopped => {
-                            self.running = None;
-                            self.error = None;
-                            self.step_note = "Stopped".into();
-                            self.phase = if self.configs.is_empty() {
-                                ContainerPhase::Absent
-                            } else {
-                                ContainerPhase::Detected
-                            };
-                            outcome.transition = Some(Transition::Detached);
-                            keep_rx = false;
-                            break;
-                        }
-                        WorkerMsg::Failed(err) => {
-                            self.running = None;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        keep_rx = false;
+                        if matches!(
+                            self.phase,
+                            ContainerPhase::Building
+                                | ContainerPhase::Starting
+                                | ContainerPhase::Stopping
+                        ) {
+                            let msg = "container worker exited unexpectedly".to_string();
                             self.phase = ContainerPhase::Error;
-                            self.step_note = "Failed".into();
-                            self.error = Some(err.clone());
-                            outcome.transition = Some(Transition::Failed(err));
-                            keep_rx = false;
-                            break;
+                            self.error = Some(msg.clone());
+                            outcome.changed = true;
+                            outcome.transition = Some(Transition::Failed(msg));
                         }
+                        break;
                     }
                 }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    keep_rx = false;
-                    if matches!(
-                        self.phase,
-                        ContainerPhase::Building
-                            | ContainerPhase::Starting
-                            | ContainerPhase::Stopping
-                    ) {
-                        let msg = "container worker exited unexpectedly".to_string();
-                        self.phase = ContainerPhase::Error;
-                        self.error = Some(msg.clone());
-                        outcome.changed = true;
-                        outcome.transition = Some(Transition::Failed(msg));
+            }
+
+            if keep_rx {
+                self.worker = Some(rx);
+            }
+        }
+
+        if self.phase == ContainerPhase::Running && self.worker.is_none() {
+            if let Some(rx) = self.port_probe.take() {
+                match rx.try_recv() {
+                    Ok(new_ports) => {
+                        if let Some(running) = &mut self.running {
+                            if running.ports != new_ports {
+                                running.ports = new_ports;
+                                outcome.changed = true;
+                            }
+                        }
                     }
-                    break;
+                    Err(TryRecvError::Empty) => {
+                        self.port_probe = Some(rx);
+                    }
+                    Err(TryRecvError::Disconnected) => {}
+                }
+            }
+
+            if self.port_probe.is_none()
+                && self
+                    .last_port_probe
+                    .is_none_or(|t| t.elapsed() >= PORT_PROBE_INTERVAL)
+            {
+                if let Some(running) = &self.running {
+                    self.last_port_probe = Some(Instant::now());
+                    let target = running.exec_target.clone();
+                    let cid = running.container_id.clone();
+                    let forward_ports = running.forward_ports.clone();
+                    let attrs = running.ports_attributes.clone();
+                    let other_attrs = running.other_ports_attributes.clone();
+                    let (tx, rx) = mpsc::channel();
+                    self.port_probe = Some(rx);
+                    let _ = std::thread::Builder::new()
+                        .name("proton-container-ports".into())
+                        .spawn(move || {
+                            let port_out = target
+                                .command()
+                                .args(["port", &cid])
+                                .output()
+                                .ok()
+                                .filter(|o| o.status.success())
+                                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                                .unwrap_or_default();
+                            let listening = ports::probe_listening_ports(&target);
+                            let merged = ports::merge_ports(
+                                &forward_ports,
+                                &port_out,
+                                &listening,
+                                &attrs,
+                                other_attrs.as_ref(),
+                            );
+                            let _ = tx.send(merged);
+                        });
                 }
             }
         }
 
-        if keep_rx {
-            self.worker = Some(rx);
-        }
         outcome
     }
 
@@ -538,22 +691,21 @@ fn run_start(
             if let Some(cmd) = &resolved.post_attach_command {
                 run_container_lifecycle("postAttachCommand", cmd, &target, tx)?;
             }
-            let ports = query_ports(&rt, &cid, &resolved);
-
-            let _ = tx.send(WorkerMsg::Attached(RunningContainer {
-                container_id: cid,
-                container_name: format!("{} ({service})", resolved.container_name),
-                image: format!("compose:{service}"),
-                runtime_kind: rt.kind.as_str().to_string(),
-                exec_target: target,
-                ports,
-                shutdown_action: resolved.shutdown_action,
-                compose_files: files.clone(),
-                compose_dir: root.to_path_buf(),
-            }));
+            let running = build_running(
+                &rt,
+                target,
+                cid,
+                format!("{} ({service})", resolved.container_name),
+                format!("compose:{service}"),
+                &resolved,
+                files.clone(),
+                root.to_path_buf(),
+            );
+            let _ = tx.send(WorkerMsg::Attached(running));
             Ok(())
         }
         ContainerSource::Image(_) | ContainerSource::Dockerfile { .. } => {
+            let mut resolved = resolved;
             let inspect = inspect_container(&rt, &resolved.container_name);
             let mut image_name = match &resolved.source {
                 ContainerSource::Image(img) => img.clone(),
@@ -574,18 +726,17 @@ fn run_start(
                             if let Some(cmd) = &resolved.post_attach_command {
                                 run_container_lifecycle("postAttachCommand", cmd, &target, tx)?;
                             }
-                            let ports = query_ports(&rt, &state.id, &resolved);
-                            let _ = tx.send(WorkerMsg::Attached(RunningContainer {
-                                container_id: state.id.clone(),
-                                container_name: resolved.container_name.clone(),
-                                image: image_name,
-                                runtime_kind: rt.kind.as_str().to_string(),
-                                exec_target: target,
-                                ports,
-                                shutdown_action: resolved.shutdown_action,
-                                compose_files: Vec::new(),
-                                compose_dir: root.to_path_buf(),
-                            }));
+                            let running = build_running(
+                                &rt,
+                                target,
+                                state.id.clone(),
+                                resolved.container_name.clone(),
+                                image_name,
+                                &resolved,
+                                Vec::new(),
+                                root.to_path_buf(),
+                            );
+                            let _ = tx.send(WorkerMsg::Attached(running));
                             return Ok(());
                         } else {
                             let _ = tx.send(WorkerMsg::Phase(
@@ -606,18 +757,17 @@ fn run_start(
                             if let Some(cmd) = &resolved.post_attach_command {
                                 run_container_lifecycle("postAttachCommand", cmd, &target, tx)?;
                             }
-                            let ports = query_ports(&rt, &state.id, &resolved);
-                            let _ = tx.send(WorkerMsg::Attached(RunningContainer {
-                                container_id: state.id.clone(),
-                                container_name: resolved.container_name.clone(),
-                                image: image_name,
-                                runtime_kind: rt.kind.as_str().to_string(),
-                                exec_target: target,
-                                ports,
-                                shutdown_action: resolved.shutdown_action,
-                                compose_files: Vec::new(),
-                                compose_dir: root.to_path_buf(),
-                            }));
+                            let running = build_running(
+                                &rt,
+                                target,
+                                state.id.clone(),
+                                resolved.container_name.clone(),
+                                image_name,
+                                &resolved,
+                                Vec::new(),
+                                root.to_path_buf(),
+                            );
+                            let _ = tx.send(WorkerMsg::Attached(running));
                             return Ok(());
                         }
                     }
@@ -642,13 +792,90 @@ fn run_start(
                 );
             }
 
-            if let Some(b_args) = build_args(&resolved) {
+            let vols = volume::extract_volume_names(
+                resolved.workspace_mount.as_deref(),
+                &resolved.mounts,
+            );
+            if !vols.is_empty() {
+                volume::ensure_volumes(&rt, &vols, root, |line| {
+                    let _ = tx.send(WorkerMsg::Log(line));
+                })?;
+            }
+
+            let has_features = !resolved.features.is_empty();
+            if let Some(mut b_args) = build_args(&resolved) {
+                let target_tag = if has_features {
+                    format!("{}-base", resolved.image_tag)
+                } else {
+                    resolved.image_tag.clone()
+                };
+                if has_features {
+                    replace_build_tag(&mut b_args, &target_tag);
+                }
                 let _ = tx.send(WorkerMsg::Phase(
                     ContainerPhase::Building,
-                    format!("Building {}…", resolved.image_tag),
+                    format!("Building {target_tag}…"),
                 ));
                 run_streaming(&rt.program, &b_args, root, &rt.host_env, tx)?;
+                image_name = target_tag;
+            }
+
+            let mut feature_on_create = Vec::new();
+            let mut feature_update_content = Vec::new();
+            let mut feature_post_create = Vec::new();
+            let mut feature_post_start = Vec::new();
+            let mut feature_post_attach = Vec::new();
+
+            if has_features {
+                let _ = tx.send(WorkerMsg::Phase(
+                    ContainerPhase::Building,
+                    "Applying Dev Container Features…".into(),
+                ));
+                let prep = features::prepare(&resolved, &image_name, |line| {
+                    let _ = tx.send(WorkerMsg::Log(line));
+                })?;
+                let feat_build = vec![
+                    "build".to_string(),
+                    "-f".to_string(),
+                    prep.dockerfile.to_string_lossy().into_owned(),
+                    "-t".to_string(),
+                    resolved.image_tag.clone(),
+                    prep.context_dir.to_string_lossy().into_owned(),
+                ];
+                run_streaming(&rt.program, &feat_build, root, &rt.host_env, tx)?;
                 image_name = resolved.image_tag.clone();
+
+                for (k, v) in &prep.container_env {
+                    resolved
+                        .container_env
+                        .entry(k.clone())
+                        .or_insert_with(|| v.clone());
+                }
+                let feat_vols = volume::extract_volume_names(None, &prep.mounts);
+                if !feat_vols.is_empty() {
+                    volume::ensure_volumes(&rt, &feat_vols, root, |line| {
+                        let _ = tx.send(WorkerMsg::Log(line));
+                    })?;
+                }
+                resolved.mounts.extend(prep.mounts.clone());
+                for c in &prep.cap_add {
+                    if !resolved.cap_add.contains(c) {
+                        resolved.cap_add.push(c.clone());
+                    }
+                }
+                for s in &prep.security_opt {
+                    if !resolved.security_opt.contains(s) {
+                        resolved.security_opt.push(s.clone());
+                    }
+                }
+                resolved.privileged |= prep.privileged;
+                resolved.init |= prep.init;
+                feature_on_create = prep.on_create_commands.clone();
+                feature_update_content = prep.update_content_commands.clone();
+                feature_post_create = prep.post_create_commands.clone();
+                feature_post_start = prep.post_start_commands.clone();
+                feature_post_attach = prep.post_attach_commands.clone();
+                drop(prep);
             }
 
             let _ = tx.send(WorkerMsg::Phase(
@@ -669,36 +896,86 @@ fn run_start(
 
             let target = build_exec_target(&rt, &cid, &resolved, tx)?;
 
+            for cmd in &feature_on_create {
+                run_container_lifecycle("feature onCreateCommand", cmd, &target, tx)?;
+            }
             if let Some(cmd) = &resolved.on_create_command {
                 run_container_lifecycle("onCreateCommand", cmd, &target, tx)?;
+            }
+            for cmd in &feature_update_content {
+                run_container_lifecycle("feature updateContentCommand", cmd, &target, tx)?;
             }
             if let Some(cmd) = &resolved.update_content_command {
                 run_container_lifecycle("updateContentCommand", cmd, &target, tx)?;
             }
+            for cmd in &feature_post_create {
+                run_container_lifecycle("feature postCreateCommand", cmd, &target, tx)?;
+            }
             if let Some(cmd) = &resolved.post_create_command {
                 run_container_lifecycle("postCreateCommand", cmd, &target, tx)?;
             }
+            for cmd in &feature_post_start {
+                run_container_lifecycle("feature postStartCommand", cmd, &target, tx)?;
+            }
             if let Some(cmd) = &resolved.post_start_command {
                 run_container_lifecycle("postStartCommand", cmd, &target, tx)?;
+            }
+            for cmd in &feature_post_attach {
+                run_container_lifecycle("feature postAttachCommand", cmd, &target, tx)?;
             }
             if let Some(cmd) = &resolved.post_attach_command {
                 run_container_lifecycle("postAttachCommand", cmd, &target, tx)?;
             }
 
-            let ports = query_ports(&rt, &cid, &resolved);
-            let _ = tx.send(WorkerMsg::Attached(RunningContainer {
-                container_id: cid,
-                container_name: resolved.container_name.clone(),
-                image: image_name,
-                runtime_kind: rt.kind.as_str().to_string(),
-                exec_target: target,
-                ports,
-                shutdown_action: resolved.shutdown_action,
-                compose_files: Vec::new(),
-                compose_dir: root.to_path_buf(),
-            }));
+            let running = build_running(
+                &rt,
+                target,
+                cid,
+                resolved.container_name.clone(),
+                image_name,
+                &resolved,
+                Vec::new(),
+                root.to_path_buf(),
+            );
+            let _ = tx.send(WorkerMsg::Attached(running));
             Ok(())
         }
+    }
+}
+
+fn replace_build_tag(args: &mut [String], new_tag: &str) {
+    if let Some(pos) = args.iter().position(|a| a == "-t") {
+        if let Some(val) = args.get_mut(pos + 1) {
+            *val = new_tag.to_string();
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_running(
+    rt: &Runtime,
+    target: ExecTarget,
+    container_id: String,
+    container_name: String,
+    image: String,
+    resolved: &ResolvedConfig,
+    compose_files: Vec<PathBuf>,
+    compose_dir: PathBuf,
+) -> RunningContainer {
+    let ports = query_ports(rt, &target, &container_id, resolved);
+    RunningContainer {
+        container_id,
+        container_name,
+        image,
+        runtime_kind: rt.kind.as_str().to_string(),
+        exec_target: target,
+        ports,
+        forward_ports: resolved.forward_ports.clone(),
+        ports_attributes: resolved.ports_attributes.clone(),
+        other_ports_attributes: resolved.other_ports_attributes.clone(),
+        shutdown_action: resolved.shutdown_action,
+        compose_files,
+        compose_dir,
     }
 }
 
@@ -830,56 +1107,28 @@ fn stop_running(running: &RunningContainer, tx: &Sender<WorkerMsg>) -> Result<()
     }
 }
 
-fn query_ports(rt: &Runtime, cid: &str, resolved: &ResolvedConfig) -> Vec<ForwardedPort> {
-    let mut map: BTreeMap<u16, (u16, String)> = BTreeMap::new();
-
-    for p in &resolved.forward_ports {
-        map.insert(p.container_port, (p.host_port, "tcp".to_string()));
-    }
-
-    if let Ok(out) = rt.command().args(["port", cid]).output() {
-        if out.status.success() {
-            let txt = String::from_utf8_lossy(&out.stdout);
-            for line in txt.lines() {
-                if let Some((c_port, h_port, proto)) = parse_port_line(line) {
-                    map.insert(c_port, (h_port, proto));
-                }
-            }
-        }
-    }
-
-    map.into_iter()
-        .map(|(container_port, (host_port, proto))| {
-            let attr = resolved
-                .ports_attributes
-                .get(&container_port.to_string());
-            let label = attr.and_then(|a| a.label.clone());
-            let protocol = attr
-                .and_then(|a| a.protocol.clone())
-                .unwrap_or(proto);
-            ForwardedPort {
-                container_port,
-                host_port,
-                label,
-                protocol,
-            }
-        })
-        .collect()
-}
-
-fn parse_port_line(line: &str) -> Option<(u16, u16, String)> {
-    // Format: `3000/tcp -> 0.0.0.0:3000` or `80/tcp -> [::]:8080`
-    let (left, right) = line.split_once("->")?;
-    let left = left.trim();
-    let (c_str, proto) = match left.split_once('/') {
-        Some((p, pr)) => (p.trim(), pr.trim().to_string()),
-        None => (left, "tcp".to_string()),
-    };
-    let container_port: u16 = c_str.parse().ok()?;
-    let host_part = right.trim().lines().next()?.trim();
-    let (_, h_str) = host_part.rsplit_once(':')?;
-    let host_port: u16 = h_str.trim().parse().ok()?;
-    Some((container_port, host_port, proto))
+fn query_ports(
+    rt: &Runtime,
+    target: &ExecTarget,
+    cid: &str,
+    resolved: &ResolvedConfig,
+) -> Vec<ForwardedPort> {
+    let port_out = rt
+        .command()
+        .args(["port", cid])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let listening = ports::probe_listening_ports(target);
+    ports::merge_ports(
+        &resolved.forward_ports,
+        &port_out,
+        &listening,
+        &resolved.ports_attributes,
+        resolved.other_ports_attributes.as_ref(),
+    )
 }
 
 fn run_host_lifecycle(
@@ -1134,13 +1383,13 @@ mod tests {
     #[test]
     fn parses_docker_port_mappings() {
         assert_eq!(
-            parse_port_line("3000/tcp -> 0.0.0.0:3000"),
+            ports::parse_docker_port_line("3000/tcp -> 0.0.0.0:3000"),
             Some((3000, 3000, "tcp".into()))
         );
         assert_eq!(
-            parse_port_line("80/tcp -> [::]:8080"),
+            ports::parse_docker_port_line("80/tcp -> [::]:8080"),
             Some((80, 8080, "tcp".into()))
         );
-        assert_eq!(parse_port_line("garbage"), None);
+        assert_eq!(ports::parse_docker_port_line("garbage"), None);
     }
 }

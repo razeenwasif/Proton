@@ -48,12 +48,15 @@ editor.update({type: 'notice', text: 'hello', level: 'info'});
 
 dispatch({type: 'containerStart', config: null});
 dispatch({type: 'containerInit', template: 'rust'});
+dispatch({type: 'containerClone', url: 'https://github.com/org/repo.git', branch: 'main'});
 // @ts-expect-error containerInit requires a template id string.
 dispatch({type: 'containerInit'});
 declare const containerEv: Extract<WireEvent, {type: 'container'}>;
 const _containerPhase: string = containerEv.state.phase;
 const _portUrls: string[] = containerEv.state.ports.map((p) => p.url);
+const _portAuto: boolean[] = containerEv.state.ports.map((p) => p.autoDetected);
 void _containerPhase;
 void _portUrls;
+void _portAuto;
 // @ts-expect-error ContainerView exposes suggestedTemplate, not defaultTemplate.
 containerEv.state.defaultTemplate;

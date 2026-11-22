@@ -412,7 +412,7 @@ export function createPreview(deliver) {
           phase: "running",
           containerId: "a1b2c3d4e5f6",
           stepNote: null,
-          ports: [{ containerPort: 3000, hostPort: 3000, label: "App", protocol: "tcp", url: "http://127.0.0.1:3000" }],
+          ports: [{ containerPort: 3000, hostPort: 3000, label: "App", protocol: "tcp", url: "http://127.0.0.1:3000", autoDetected: false }],
           logs: [...containerState.logs, "Container attached (a1b2c3d4e5f6)"],
         };
         deliver(containerEvent());

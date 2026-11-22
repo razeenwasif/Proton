@@ -257,6 +257,8 @@ pub struct PortAttributes {
     pub label: Option<String>,
     #[serde(default)]
     pub protocol: Option<String>,
+    #[serde(default)]
+    pub on_auto_forward: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -371,6 +373,20 @@ pub struct DevContainerConfig {
     #[serde(default)]
     pub ports_attributes: BTreeMap<String, PortAttributes>,
     #[serde(default)]
+    pub other_ports_attributes: Option<PortAttributes>,
+    #[serde(default)]
+    pub features: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub override_feature_install_order: Vec<String>,
+    #[serde(default)]
+    pub cap_add: Vec<String>,
+    #[serde(default)]
+    pub security_opt: Vec<String>,
+    #[serde(default)]
+    pub privileged: bool,
+    #[serde(default)]
+    pub init: bool,
+    #[serde(default)]
     pub initialize_command: Option<LifecycleCommand>,
     #[serde(default)]
     pub on_create_command: Option<LifecycleCommand>,
@@ -423,6 +439,13 @@ pub struct ResolvedConfig {
     pub effective_user: Option<String>,
     pub forward_ports: Vec<PortSpec>,
     pub ports_attributes: BTreeMap<String, PortAttributes>,
+    pub other_ports_attributes: Option<PortAttributes>,
+    pub features: BTreeMap<String, serde_json::Value>,
+    pub override_feature_install_order: Vec<String>,
+    pub cap_add: Vec<String>,
+    pub security_opt: Vec<String>,
+    pub privileged: bool,
+    pub init: bool,
     pub initialize_command: Option<LifecycleCommand>,
     pub on_create_command: Option<LifecycleCommand>,
     pub update_content_command: Option<LifecycleCommand>,
@@ -593,6 +616,47 @@ impl ResolvedConfig {
             );
         };
 
+        let features: BTreeMap<String, serde_json::Value> = cfg
+            .features
+            .into_iter()
+            .map(|(k, v)| (ctx.expand(&k), expand_json_value(&ctx, v)))
+            .collect();
+        let override_feature_install_order: Vec<String> = cfg
+            .override_feature_install_order
+            .into_iter()
+            .map(|s| ctx.expand(&s))
+            .collect();
+        let cap_add: Vec<String> = cfg.cap_add.into_iter().map(|s| ctx.expand(&s)).collect();
+        let security_opt: Vec<String> = cfg
+            .security_opt
+            .into_iter()
+            .map(|s| ctx.expand(&s))
+            .collect();
+
+        config_hasher.update(b"\0features\0");
+        if let Ok(bytes) = serde_json::to_vec(&(
+            &features,
+            &override_feature_install_order,
+            &cap_add,
+            &security_opt,
+            cfg.privileged,
+            cfg.init,
+        )) {
+            config_hasher.update(&bytes);
+        }
+        for feat_key in features.keys() {
+            if feat_key.starts_with("./") || feat_key.starts_with("../") {
+                let fdir = resolve_rel(config_dir, feat_key);
+                for fname in ["devcontainer-feature.json", "install.sh"] {
+                    if let Ok(bytes) = std::fs::read(fdir.join(fname)) {
+                        config_hasher.update(b"\0local-feature\0");
+                        config_hasher.update(feat_key.as_bytes());
+                        config_hasher.update(&bytes);
+                    }
+                }
+            }
+        }
+
         let config_hash = hex_encode(&config_hasher.finalize())[..16].to_string();
 
         let default_shutdown = match &source {
@@ -642,6 +706,13 @@ impl ResolvedConfig {
             effective_user: cfg.remote_user.or(cfg.container_user),
             forward_ports: cfg.forward_ports,
             ports_attributes: cfg.ports_attributes,
+            other_ports_attributes: cfg.other_ports_attributes,
+            features,
+            override_feature_install_order,
+            cap_add,
+            security_opt,
+            privileged: cfg.privileged,
+            init: cfg.init,
             initialize_command: cfg.initialize_command.map(|c| c.expand(&ctx)),
             on_create_command: cfg.on_create_command.map(|c| c.expand(&ctx)),
             update_content_command: cfg.update_content_command.map(|c| c.expand(&ctx)),
@@ -657,6 +728,21 @@ impl ResolvedConfig {
             config_hash,
             devcontainer_id,
         })
+    }
+}
+
+fn expand_json_value(ctx: &ExpandCtx, value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(s) => serde_json::Value::String(ctx.expand(&s)),
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(|v| expand_json_value(ctx, v)).collect())
+        }
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.into_iter()
+                .map(|(k, v)| (k, expand_json_value(ctx, v)))
+                .collect(),
+        ),
+        other => other,
     }
 }
 

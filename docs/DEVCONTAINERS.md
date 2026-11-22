@@ -26,8 +26,9 @@ Proton discovers configuration files (`crates/proton-container/src/config.rs`) i
 Files are parsed as JSONC (comments and trailing commas allowed). Supported fields include:
 
 - **Container source:** `image`, `build` (`dockerfile` / `dockerFile`, `context`, `args`, `target`, `cacheFrom`), `dockerComposeFile` + `service` (+ optional `runServices`)
-- **Workspace & environment:** `name`, `workspaceFolder`, `workspaceMount`, `mounts`, `containerEnv`, `remoteEnv`, `remoteUser`, `containerUser`, `runArgs`, `overrideCommand`, `shutdownAction`
-- **Ports:** `forwardPorts` (port number or `"host:container"`), `portsAttributes` (`label`, `protocol`)
+- **Features & security:** `features` (OCI registry `<registry>/<repo>[:<tag>]` and local `./` / `../` paths), `overrideFeatureInstallOrder`, `capAdd`, `securityOpt`, `privileged`, `init`
+- **Workspace & environment:** `name`, `workspaceFolder`, `workspaceMount` (bind or `type=volume`), `mounts` (named volumes created automatically), `containerEnv`, `remoteEnv`, `remoteUser`, `containerUser`, `runArgs`, `overrideCommand`, `shutdownAction`
+- **Ports:** `forwardPorts` (port number or `"host:container"`), dynamic `/proc/net/tcp{,6}` listening-port auto-detection, `portsAttributes` / `otherPortsAttributes` (`label`, `protocol`, `onAutoForward`)
 - **Lifecycle hooks:** `initializeCommand`, `onCreateCommand`, `updateContentCommand`, `postCreateCommand`, `postStartCommand`, `postAttachCommand` (string, argv array, or named parallel/object map)
 - **Proton customizations:** `customizations.proton.shell` and per-server overrides under `customizations.proton.lsp.<lang>`
 
@@ -70,6 +71,7 @@ The native macOS workspace root and the container's `workspaceFolder` are bridge
 - `:container stop` / `:container down`
 - `:container detach`
 - `:container refresh`
+- `:container clone <git-url> [branch]` — clones a repository into a deterministic named volume and creates `.devcontainer/devcontainer.json` if absent
 - `:container init [rust|python|node|cpp|go|base]` (`:devcontainer` is an alias)
 
 ## Built-in templates

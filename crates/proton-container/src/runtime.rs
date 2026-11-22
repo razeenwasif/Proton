@@ -502,6 +502,25 @@ pub fn run_args(resolved: &ResolvedConfig, image: &str) -> Vec<String> {
         out.push(format!("{}:{}", p.host_port, p.container_port));
     }
 
+    if resolved.init {
+        out.push("--init".to_string());
+    }
+    if resolved.privileged {
+        out.push("--privileged".to_string());
+    }
+    for cap in &resolved.cap_add {
+        if !cap.trim().is_empty() {
+            out.push("--cap-add".to_string());
+            out.push(cap.clone());
+        }
+    }
+    for opt in &resolved.security_opt {
+        if !opt.trim().is_empty() {
+            out.push("--security-opt".to_string());
+            out.push(opt.clone());
+        }
+    }
+
     out.extend(resolved.run_args.iter().cloned());
     out.push(image.to_string());
 

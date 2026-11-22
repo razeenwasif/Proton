@@ -50,12 +50,13 @@ test("statusSummary covers each container lifecycle phase", () => {
 test("renderPortsHtml formats identical and remapped ports safely", () => {
   assert.equal(renderPortsHtml([]), "");
   const html = renderPortsHtml([
-    { hostPort: 3000, containerPort: 3000, label: "Web <UI>", protocol: "tcp", url: "http://127.0.0.1:3000" },
-    { hostPort: 8081, containerPort: 8080, label: null, protocol: "tcp", url: "http://127.0.0.1:8081" },
+    { hostPort: 3000, containerPort: 3000, label: "Web <UI>", protocol: "tcp", url: "http://127.0.0.1:3000", autoDetected: false },
+    { hostPort: 8081, containerPort: 8080, label: null, protocol: "tcp", url: "http://127.0.0.1:8081", autoDetected: true },
   ]);
   assert.match(html, /3000\/tcp/);
   assert.match(html, /8081 → 8080\/tcp/);
   assert.match(html, /Web &lt;UI&gt;/);
+  assert.match(html, /<span class="chip">auto<\/span>/);
   assert.doesNotMatch(html, /<UI>/);
 });
 
@@ -82,7 +83,7 @@ test("renderContainerHtml renders detected, building, running, and error states"
     makeState({
       phase: "running",
       containerId: "deadbeef1234",
-      ports: [{ hostPort: 5173, containerPort: 5173, label: "Vite", protocol: "tcp", url: "http://127.0.0.1:5173" }],
+      ports: [{ hostPort: 5173, containerPort: 5173, label: "Vite", protocol: "tcp", url: "http://127.0.0.1:5173", autoDetected: false }],
       logs: ["line 1", "line <2>"],
     }),
   );
