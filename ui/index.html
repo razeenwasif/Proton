@@ -107,6 +107,7 @@
     <symbol id="i-logic" viewBox="0 0 24 24"><path d="M6 4.5v15M6 9.5h12M6 14.5h12"/></symbol>
     <symbol id="i-cad" viewBox="0 0 24 24"><path d="M12 3.5l7.5 4.25v8.5L12 20.5l-7.5-4.25v-8.5zM12 12l7.5-4.25M12 12v8.5M12 12L4.5 7.75"/></symbol>
     <symbol id="i-container" viewBox="0 0 24 24"><path d="M3.5 7.5L12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5L12 12l8.5-4.5M12 12v9M7.8 5.2l8.4 4.5"/></symbol>
+    <symbol id="i-remote" viewBox="0 0 24 24"><path d="M4.5 7.5L10.5 12l-6 4.5"/><path d="M19.5 16.5L13.5 12l6-4.5"/></symbol>
     <symbol id="i-sketch" viewBox="0 0 24 24"><path d="M4.5 19.5h15M6.5 17l9.5-9.5 2.5 2.5L9 19.5H6.5z"/></symbol>
     <symbol id="i-extrude" viewBox="0 0 24 24"><path d="M5 15.5l7 3.5 7-3.5M5 15.5V9l7-3.5L19 9v6.5M12 12v7M12 12L5 9M12 12l7-3"/></symbol>
     <symbol id="i-fillet" viewBox="0 0 24 24"><path d="M4 20V11a7 7 0 0 1 7-7h9"/><path d="M4 4h4M4 4v4" opacity=".5"/></symbol>
@@ -1201,6 +1202,7 @@
     <div class="tb-actions">
       <button class="tb-btn" data-panel-toggle="left" title="Hide sidebar" aria-label="Hide sidebar" aria-expanded="true"><svg class="i"><use href="#i-panel-left"/></svg></button>
       <button class="tb-btn" data-term-toggle title="Terminal  ⌃`" aria-label="Terminal" aria-pressed="false"><svg class="i"><use href="#i-term"/></svg></button>
+      <button class="tb-btn tb-remote" data-remote-tb title="Connect to SSH host  ⌘⇧O · :ssh mini" aria-label="Remote SSH"><svg class="i"><use href="#i-remote"/></svg></button>
       <button class="tb-btn" data-dock="container" data-container-tb title="Dev Container  ␣ku" aria-label="Dev Container"><svg class="i"><use href="#i-container"/></svg><span class="tb-dot" data-container-tb-dot hidden></span></button>
       <button class="tb-btn" data-panel-toggle="right" title="Hide right panel" aria-label="Hide right panel" aria-expanded="true"><svg class="i"><use href="#i-panel-right"/></svg></button>
       <button class="tb-btn" data-open="settings" title="Settings  ⌘," aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></button>
@@ -1210,6 +1212,7 @@
   <!-- ══ statusline ══════════════════════════════════════════════ -->
   <footer class="statusline">
     <div class="sl sl-mode" id="sl-mode">NORMAL</div>
+    <div class="sl" id="sl-remote" role="button" tabindex="0" title="Connect to SSH host (⌘⇧O · :ssh mini)"></div>
     <div class="sl project" id="sl-project">—</div>
     <div class="sl git" id="sl-git" hidden></div>
     <div class="sl" id="sl-path">—</div>
@@ -1259,8 +1262,10 @@
 
 <div class="overlay float" id="cmdline">
   <span class="caret" id="cmdline-prompt">:</span><span id="cmdline-text"></span><span class="cursor"></span>
-  <span class="chip" style="margin-left:auto">:w · :e · :cd · :vs · :q</span>
+  <span class="chip" style="margin-left:auto">:w · :e · :cd · :ssh · :q</span>
 </div>
+
+<div class="overlay float" id="remote-modal" role="dialog" aria-modal="true" aria-label="Connect to SSH Host" tabindex="-1"></div>
 
 <div class="overlay float" id="settings" role="dialog" aria-modal="true" aria-label="Settings" tabindex="-1">
   <header style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--edge)">
@@ -1501,7 +1506,7 @@
         </div>
         <div class="setting">
           <h4>Environment routing</h4>
-          <p>When a dev container is attached, Codex terminals, language servers, debuggers, formatters, and approved agent commands run inside the container with workspace paths mapped between host and container.</p>
+          <p>When a dev container is attached, Codex terminals, language servers, debuggers, formatters, Data mode Jupyter kernels, and approved agent commands run inside the container with workspace paths mapped between host and container.</p>
           <label class="st-toggle"><input type="checkbox" data-set-bool="container.autoAttach"> Auto-attach when opening a project with <code>devcontainer.json</code></label>
         </div>
       </div>

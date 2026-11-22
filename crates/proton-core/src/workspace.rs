@@ -6690,7 +6690,8 @@ impl Workspace {
                 self.servers.sync(buf);
             }
         }
-        self.debugger.set_container(Some(target));
+        self.debugger.set_container(Some(target.clone()));
+        self.data.set_container(Some(target));
 
         let had_term = self.terminal.take().is_some();
         self.term_sent.clear();
@@ -6699,10 +6700,13 @@ impl Workspace {
             self.servers_event(),
             self.diagnostics_event(),
             notice(
-                "Dev container attached — terminal & LSP now run inside the container".into(),
+                "Dev container attached — terminal, LSP, debugger & Data kernels now run inside the container".into(),
                 NoticeLevel::Info,
             ),
         ];
+        if self.data.is_open() {
+            events.push(self.notebook_event());
+        }
         if had_term {
             let (rows, cols) = self.term_size;
             if let Some(target) = self.container.exec_target() {
@@ -6720,6 +6724,7 @@ impl Workspace {
         self.servers.set_container(None);
         self.resync();
         self.debugger.set_container(None);
+        self.data.set_container(None);
 
         let had_term = self.terminal.take().is_some();
         self.term_sent.clear();
@@ -6729,6 +6734,9 @@ impl Workspace {
             self.diagnostics_event(),
             notice(message.into(), NoticeLevel::Info),
         ];
+        if self.data.is_open() {
+            events.push(self.notebook_event());
+        }
         if had_term {
             events.push(self.terminal_event());
         }
@@ -7886,6 +7894,7 @@ esac
             std::thread::sleep(std::time::Duration::from_millis(15));
         }
         assert!(attached, "workspace did not transition to Running");
+        assert!(ws.data.in_container(), "Data kernel should route to attached container");
 
         // `start_command` routes approved commands into the container via `exec -i ... /bin/sh -lc ...`
         let running = start_command(&canon, "cargo check", ws.container.exec_target()).unwrap();
@@ -7906,6 +7915,7 @@ esac
             e,
             Event::Container { state } if state.phase == crate::container::ContainerPhase::Detected
         )));
+        assert!(!ws.data.in_container(), "Data kernel should return to host after detach");
 
         // Enabling `container.autoAttach` attaches once on initial Sync, and does not re-attach after detach.
         std::fs::create_dir_all(canon.join(".proton")).unwrap();

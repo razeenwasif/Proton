@@ -226,6 +226,12 @@ pub struct Data {
     /// note — and by key rather than position, or a cell added or deleted
     /// above one that is running sends its output to a neighbour.
     running: HashMap<String, u64>,
+    /// Requests whose `execute_reply` has arrived on shell (holding the
+    /// `execution_count`), waiting for `iopub` `status: idle` before finalizing.
+    replied: HashMap<String, Option<i64>>,
+    /// Requests whose `status: idle` has arrived on `iopub`, waiting for
+    /// `execute_reply` if `iopub` won the TCP race.
+    idled: std::collections::HashSet<String>,
     /// Output collected for a cell since it started, in arrival order.
     collected: HashMap<u64, Vec<Output>>,
     /// A key for each cell, in order, kept in step as cells are added,
@@ -262,6 +268,9 @@ pub struct Data {
     /// yanked line into a notebook as a cell, would be a worse answer than
     /// keeping them apart.
     yanked: Option<(CellKind, String)>,
+    /// Attached Dev Container target, when active: Jupyter kernels start
+    /// inside this container via `proton_data::Kernel::start_remote`.
+    container: Option<proton_container::ExecTarget>,
 }
 
 impl std::fmt::Debug for Data {
@@ -311,6 +320,8 @@ impl Data {
         self.notebook = Some(notebook);
         self.path = Some(path.to_path_buf());
         self.running.clear();
+        self.replied.clear();
+        self.idled.clear();
         self.collected.clear();
         self.keys = (0..count).map(|_| self.fresh_key()).collect();
         self.drawn.borrow_mut().clear();
@@ -341,7 +352,26 @@ impl Data {
     }
 
     pub fn close(&mut self) {
+        let container = self.container.take();
         *self = Data::default();
+        self.container = container;
+    }
+
+    /// Route future Data Jupyter kernels into `target` (or back to the host
+    /// when `None`), stopping any active kernel when the execution target changes.
+    pub fn set_container(&mut self, target: Option<proton_container::ExecTarget>) {
+        if self.container == target {
+            return;
+        }
+        self.shutdown();
+        self.problem = None;
+        self.python = None;
+        self.container = target;
+    }
+
+    /// Whether new Data kernels are configured to run inside an attached container.
+    pub fn in_container(&self) -> bool {
+        self.container.is_some()
     }
 
     /// Proton is going: the kernel is stopped, with everything it started,
@@ -350,6 +380,8 @@ impl Data {
     pub fn shutdown(&mut self) {
         self.kernel = None;
         self.running.clear();
+        self.replied.clear();
+        self.idled.clear();
     }
 
     /// What the panel draws.
@@ -796,13 +828,17 @@ impl Data {
         };
         // Asked before the kernel is dropped — this is its stderr, and it is
         // the only place the real reason is written down.
-        let why = explain(&kernel.said(), self.python.as_deref());
+        let resolved_py = kernel.resolved_python().map(PathBuf::from);
+        let python = resolved_py.as_deref().or(self.python.as_deref());
+        let why = explain(&kernel.said(), python, self.container.is_some());
         self.kernel = None;
         self.problem = Some(why.clone());
         self.complaint = Some(why);
         // Nothing is coming for these. Leaving them spinning would say to
         // keep waiting for an answer that was never sent.
         self.running.clear();
+        self.replied.clear();
+        self.idled.clear();
         true
     }
 
@@ -822,6 +858,37 @@ impl Data {
     fn start(&mut self, cwd: &Path) -> Result<(), String> {
         if self.kernel.as_mut().is_some_and(Kernel::is_alive) {
             return Ok(());
+        }
+        if let Some(target) = self.container.clone() {
+            let container_cwd = target
+                .path_map
+                .host_to_container(cwd)
+                .unwrap_or_else(|| target.workdir.clone());
+            self.python = target.python.as_ref().map(PathBuf::from);
+            let launch = proton_data::RemoteLaunch {
+                runtime: target.runtime.clone(),
+                host_env: target.host_env_pairs(),
+                exec_prefix: proton_container::runtime::exec_prefix_in(
+                    &target,
+                    &container_cwd,
+                    false,
+                ),
+                python: target.python.clone(),
+            };
+            return match Kernel::start_remote(&launch) {
+                Ok(kernel) => {
+                    if let Some(py) = kernel.resolved_python() {
+                        self.python = Some(PathBuf::from(py));
+                    }
+                    self.kernel = Some(kernel);
+                    self.problem = None;
+                    Ok(())
+                }
+                Err(why) => {
+                    self.problem = Some(why.clone());
+                    Err(why)
+                }
+            };
         }
         let kernel = self.notebook.as_ref().and_then(Notebook::kernel);
         let python = python_for(cwd, kernel).ok_or_else(|| NO_PYTHON.to_string())?;
@@ -921,8 +988,23 @@ impl Data {
                         });
                 }
                 "execute_reply" => {
-                    finished.push((index, message.content["execution_count"].as_i64()));
-                    self.running.remove(parent);
+                    self.replied.insert(
+                        parent.to_string(),
+                        message.content["execution_count"].as_i64(),
+                    );
+                    if self.idled.remove(parent) {
+                        let count = self.replied.remove(parent).flatten();
+                        finished.push((index, count));
+                        self.running.remove(parent);
+                    }
+                }
+                "status" if message.content["execution_state"] == "idle" => {
+                    if let Some(count) = self.replied.remove(parent) {
+                        finished.push((index, count));
+                        self.running.remove(parent);
+                    } else {
+                        self.idled.insert(parent.to_string());
+                    }
                 }
                 _ => {}
             }
@@ -971,7 +1053,16 @@ pub const NO_PYTHON: &str = "no python to run a notebook with — set PROTON_PYT
 /// What a kernel that stopped said, and what to do about it. A Python
 /// without ipykernel is the usual reason by far, and its own words for it —
 /// `No module named ipykernel_launcher` — name the module and not the fix.
-fn explain(said: &str, python: Option<&Path>) -> String {
+fn explain(said: &str, python: Option<&Path>, in_container: bool) -> String {
+    if in_container && said.contains("No module named ipykernel") {
+        let who = python
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "container python".to_string());
+        return format!(
+            "{who} inside the dev container has no ipykernel. Install it inside the container \
+             (`pip install ipykernel`) or set `customizations.proton.python` in devcontainer.json"
+        );
+    }
     match python {
         Some(python) if said.contains("No module named ipykernel") => {
             let python = python.display();
@@ -1248,9 +1339,23 @@ mod tests {
     #[test]
     fn a_python_without_ipykernel_is_told_how_to_get_it() {
         let said = "/Applications/Xcode.app/Contents/Developer/usr/bin/python3: No module named ipykernel_launcher";
-        let why = explain(said, Some(Path::new("/usr/bin/python3")));
+        let why = explain(said, Some(Path::new("/usr/bin/python3")), false);
         assert!(why.contains("`/usr/bin/python3 -m pip install ipykernel`"), "{why}");
-        assert_eq!(explain("Segmentation fault", None), "the kernel exited: Segmentation fault");
+        assert_eq!(
+            explain("Segmentation fault", None, false),
+            "the kernel exited: Segmentation fault"
+        );
+
+        let container_why = explain(
+            "python3: No module named ipykernel_launcher",
+            Some(Path::new("/workspaces/app/.venv/bin/python")),
+            true,
+        );
+        assert!(
+            container_why.contains("inside the dev container")
+                && container_why.contains("customizations.proton.python"),
+            "{container_why}"
+        );
     }
 
     #[test]
@@ -1399,6 +1504,79 @@ mod tests {
         data.open(&file).unwrap();
         assert_eq!(data.language(), "R");
         assert_eq!(data.notebook.as_ref().and_then(Notebook::kernel), Some("ir"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn container_target_routes_notebook_kernel_launch_and_clears_on_detach() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+
+        let dir = scratch("container-route");
+        let sub = dir.join("notebooks");
+        std::fs::create_dir_all(&sub).unwrap();
+        let nb_path = sub.join("n.ipynb");
+        std::fs::write(
+            &nb_path,
+            r#"{"cells": [{"cell_type": "code", "execution_count": null, "metadata": {}, "outputs": [], "source": ["1 + 1"]}],
+                "metadata": {}, "nbformat": 4, "nbformat_minor": 4}"#,
+        )
+        .unwrap();
+
+        let fake_docker = dir.join("fake-docker");
+        let args_tmp = dir.join("exec.part");
+        let args_log = dir.join("exec.args");
+        std::fs::write(
+            &fake_docker,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}\" && mv \"{}\" \"{}\"\nsleep 30\n",
+                args_tmp.display(),
+                args_tmp.display(),
+                args_log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_docker, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("FOO".to_string(), "bar".to_string());
+        let mut host_env = std::collections::BTreeMap::new();
+        host_env.insert("DOCKER_BUILDKIT".to_string(), "0".to_string());
+
+        let target = proton_container::ExecTarget {
+            runtime: fake_docker,
+            host_env,
+            container_id: "cid-nb-1".into(),
+            workdir: "/workspaces/proj".into(),
+            user: Some("vscode".into()),
+            env,
+            shell: "/bin/sh".into(),
+            python: Some("/opt/venv/bin/python".into()),
+            path_map: proton_container::PathMap::new(&dir, "/workspaces/proj"),
+            lsp_overrides: std::collections::BTreeMap::new(),
+        };
+
+        let mut data = Data::default();
+        data.open(&nb_path).unwrap();
+        assert!(!data.in_container());
+        data.set_container(Some(target));
+        assert!(data.in_container());
+
+        data.run(0, &sub).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !args_log.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let captured = std::fs::read_to_string(&args_log).expect("exec args captured");
+        assert!(captured.contains("exec\n-i\n-u\nvscode\n-w\n/workspaces/proj/notebooks\n"), "{captured}");
+        assert!(captured.contains("FOO=bar\ncid-nb-1\n/bin/sh\n-c\n"), "{captured}");
+        assert!(captured.contains("/opt/venv/bin/python"), "{captured}");
+
+        // Detaching stops the running container kernel and preserves notebook state.
+        data.set_container(None);
+        assert!(!data.in_container());
+        assert!(data.is_open());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

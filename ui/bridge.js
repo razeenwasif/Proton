@@ -30,12 +30,96 @@ const ready = Promise.resolve().then(() => {
 const transport = createTransport({send: command => send(command), ready, ordered: HAS_SHELL});
 export const dispatch = transport.dispatch;
 export const dispatchMany = transport.dispatchMany;
+export const resetTransport = () => transport.reset();
 export const onEvents = transport.onEvents;
 export const onCommand = transport.onCommand;
 /** @param {(event: import('./protocol').WireEvent) => void} listener */
 export function onEvent(listener) { return onEvents(events => events.forEach(listener)); }
 /** @param {Event} event */
 function deliver(event) { transport.deliver([event]); }
+
+/** Current SSH remote status for this window. @returns {Promise<import('./native-api').RemoteStatus>} */
+export async function remoteStatus() {
+  if (!tauri) {
+    return {
+      connected: false,
+      host: null,
+      folder: null,
+      remoteHostname: null,
+      remoteHome: null,
+      error: null,
+      forwardedPorts: [],
+    };
+  }
+  return tauri.core.invoke('remote_status');
+}
+
+/** Discovered SSH hosts from ~/.ssh/config and recent remote folders. @returns {Promise<import('./native-api').RemoteCatalog>} */
+export async function remoteHosts() {
+  if (!tauri) {
+    return {
+      hosts: [{ alias: 'mini', hostName: '100.97.247.34', user: 'razeenwasif', port: 22 }],
+      recents: [{ host: 'mini', folder: '~/Github/Applications/Proton' }],
+    };
+  }
+  return tauri.core.invoke('remote_hosts');
+}
+
+/** Browse git/dev repos on a remote SSH host.
+ *  @param {string} host
+ *  @param {string | null} [path]
+ *  @returns {Promise<import('./native-api').RemoteDirEntry[]>} */
+export async function remoteBrowse(host, path = null) {
+  if (!tauri) {
+    return [
+      { name: 'Applications/Proton', path: '~/Github/Applications/Proton', isRepo: true, hasDevcontainer: true },
+      { name: 'Applications/Graviton', path: '~/Github/Applications/Graviton', isRepo: true, hasDevcontainer: false },
+    ];
+  }
+  return tauri.core.invoke('remote_browse', { host, path });
+}
+
+/** Connect to an SSH host (in a new window or by replacing this window's session).
+ *  @param {string} host
+ *  @param {string | null} [folder]
+ *  @param {boolean} [newWindow]
+ *  @returns {Promise<import('./native-api').RemoteStatus>} */
+export async function remoteConnect(host, folder = null, newWindow = true) {
+  if (!tauri) throw new Error('Remote-SSH requires the Proton desktop app');
+  return tauri.core.invoke('remote_connect', { host, folder, newWindow });
+}
+
+/** Disconnect this window from SSH back to a local session.
+ *  @returns {Promise<import('./native-api').RemoteStatus>} */
+export async function remoteDisconnect() {
+  if (!tauri) throw new Error('Remote-SSH requires the Proton desktop app');
+  return tauri.core.invoke('remote_disconnect');
+}
+
+/** Manually forward a TCP port over the window's active SSH ControlMaster tunnel.
+ *  @param {number} localPort
+ *  @param {number | null} [remotePort]
+ *  @returns {Promise<import('./native-api').RemoteStatus>} */
+export async function remoteForwardPort(localPort, remotePort = null) {
+  if (!tauri) throw new Error('Remote-SSH requires the Proton desktop app');
+  return tauri.core.invoke('remote_forward_port', { localPort, remotePort });
+}
+
+/** Subscribe to remote SSH status push updates for this window.
+ *  @param {(status: import('./native-api').RemoteStatus) => void} listener */
+export function onRemoteStatus(listener) {
+  if (!tauri?.event?.listen) return Promise.resolve(() => {});
+  const label = tauri.window?.getCurrentWindow().label ?? 'main';
+  return tauri.event.listen(`proton://remote-status/${label}`, ({ payload }) => listener(payload));
+}
+
+/** Subscribe to native File -> Connect to Host (SSH) menu requests for this window.
+ *  @param {() => void} listener */
+export function onOpenRemote(listener) {
+  if (!tauri?.event?.listen) return Promise.resolve(() => {});
+  const label = tauri.window?.getCurrentWindow().label ?? 'main';
+  return tauri.event.listen(`proton://open-remote/${label}`, () => listener());
+}
 
 /** The bytes of a file the page renders itself — a PDF, so far.
  *

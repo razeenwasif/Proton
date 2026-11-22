@@ -43,6 +43,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
+use crate::bridge::{Bridge, RemoteLaunch};
 use crate::connection::{connection_dir, connection_file, Connection};
 #[cfg(target_vendor = "apple")]
 use crate::spawn::Process;
@@ -54,9 +55,20 @@ use crate::wire::{Message, Signer};
 /// feel immediate, slow enough that an idle kernel costs nothing.
 const BEAT: Duration = Duration::from_millis(50);
 
+enum KernelBackend {
+    Local {
+        child: Process,
+        file: PathBuf,
+        reaped: bool,
+    },
+    Remote {
+        bridge: Bridge,
+    },
+}
+
 /// A kernel, and the two channels it speaks through.
 pub struct Kernel {
-    child: Process,
+    backend: KernelBackend,
     session: String,
     signer: Signer,
     /// Requests bound for the shell socket, which the shell thread owns.
@@ -64,12 +76,8 @@ pub struct Kernel {
     /// Everything either thread has read.
     incoming: Receiver<Message>,
     connection: Connection,
-    file: std::path::PathBuf,
     next: u64,
     alive: bool,
-    /// Waited for, so that its pid — and its group's id with it — may be
-    /// somebody else's by now.
-    reaped: bool,
     /// Whether a broadcast has been heard: the iopub subscription is live,
     /// and what the kernel publishes from now on will arrive. See the slow
     /// joiner, above.
@@ -93,15 +101,17 @@ impl std::fmt::Debug for Kernel {
 
 impl Drop for Kernel {
     fn drop(&mut self) {
-        // Its whole group, and before it is waited for: until then its pid,
-        // and so its group's id, can be nobody else's.
-        if !self.reaped {
-            stop_group(self.child.id());
+        if let KernelBackend::Local { child, file, reaped } = &mut self.backend {
+            // Its whole group, and before it is waited for: until then its pid,
+            // and so its group's id, can be nobody else's.
+            if !*reaped {
+                stop_group(child.id());
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            // The connection file names a signing key. It dies with the kernel.
+            let _ = std::fs::remove_file(file);
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        // The connection file names a signing key. It dies with the kernel.
-        let _ = std::fs::remove_file(&self.file);
     }
 }
 
@@ -156,16 +166,18 @@ impl Kernel {
         // dropped — the kernel stopped, its file removed — rather than left
         // running with nothing to talk to it.
         let kernel = Kernel {
-            child,
+            backend: KernelBackend::Local {
+                child,
+                file,
+                reaped: false,
+            },
             session,
             signer: signer.clone(),
             outgoing,
             incoming,
             connection,
-            file,
             next: 0,
             alive: true,
-            reaped: false,
             heard: false,
             held: Vec::new(),
             asked: Instant::now(),
@@ -185,6 +197,52 @@ impl Kernel {
         Ok(kernel)
     }
 
+    /// Start a Python Jupyter kernel inside a dev container using a framed
+    /// TCP-over-stdio multiplexer.
+    pub fn start_remote(launch: &RemoteLaunch) -> Result<Kernel, String> {
+        let session = id();
+        let key = id();
+        let (connection, bridge) = Bridge::start(launch, &session, &key)?;
+
+        let signer = Signer::new(&key);
+        let (found, incoming) = mpsc::channel::<Message>();
+        let (outgoing, to_send) = mpsc::channel::<Message>();
+
+        let kernel = Kernel {
+            backend: KernelBackend::Remote { bridge },
+            session,
+            signer: signer.clone(),
+            outgoing,
+            incoming,
+            connection,
+            next: 0,
+            alive: true,
+            heard: false,
+            held: Vec::new(),
+            asked: Instant::now(),
+        };
+
+        let context = zmq::Context::new();
+        spawn_shell(
+            &context,
+            &kernel.connection,
+            signer.clone(),
+            to_send,
+            found.clone(),
+        )?;
+        spawn_iopub(&context, &kernel.connection, signer, found)?;
+        let mut kernel = kernel;
+        kernel.ask();
+        Ok(kernel)
+    }
+
+    pub fn resolved_python(&self) -> Option<String> {
+        match &self.backend {
+            KernelBackend::Local { .. } => None,
+            KernelBackend::Remote { bridge } => bridge.resolved_python(),
+        }
+    }
+
     /// Ask the kernel what it is: a request whose `status` broadcast, once
     /// heard, says the subscription is live.
     fn ask(&mut self) {
@@ -197,13 +255,22 @@ impl Kernel {
 
     /// Whether the kernel process is still there.
     pub fn is_alive(&mut self) -> bool {
-        if !self.reaped && matches!(self.child.try_wait(), Ok(Some(_))) {
-            self.reaped = true;
-            self.alive = false;
-            // What it started goes with it — the last that could hold its
-            // stderr open, which `said` reads to the end. While anything is
-            // left in the group, the group's id is still its own.
-            stop_group(self.child.id());
+        match &mut self.backend {
+            KernelBackend::Local { child, reaped, .. } => {
+                if !*reaped && matches!(child.try_wait(), Ok(Some(_))) {
+                    *reaped = true;
+                    self.alive = false;
+                    // What it started goes with it — the last that could hold its
+                    // stderr open, which `said` reads to the end. While anything is
+                    // left in the group, the group's id is still its own.
+                    stop_group(child.id());
+                }
+            }
+            KernelBackend::Remote { bridge } => {
+                if !bridge.is_alive() {
+                    self.alive = false;
+                }
+            }
         }
         self.alive
     }
@@ -313,19 +380,24 @@ impl Kernel {
     /// without this the only symptom is a timeout — which says nothing about
     /// the missing module that actually caused it.
     pub fn said(&mut self) -> String {
-        let mut text = String::new();
-        if let Some(err) = self.child.stderr.as_mut() {
-            let _ = err.read_to_string(&mut text);
-        }
-        let trimmed = text.trim();
-        match trimmed.is_empty() {
-            true => "it printed nothing".into(),
-            false => trimmed
-                .lines()
-                .rev()
-                .take(6)
-                .collect::<Vec<_>>()
-                .join(" | "),
+        match &mut self.backend {
+            KernelBackend::Local { child, .. } => {
+                let mut text = String::new();
+                if let Some(err) = child.stderr.as_mut() {
+                    let _ = err.read_to_string(&mut text);
+                }
+                let trimmed = text.trim();
+                match trimmed.is_empty() {
+                    true => "it printed nothing".into(),
+                    false => trimmed
+                        .lines()
+                        .rev()
+                        .take(6)
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                }
+            }
+            KernelBackend::Remote { bridge } => bridge.said(),
         }
     }
 
@@ -704,15 +776,22 @@ mod tests {
     /// then, since what it said is read to the end.
     fn fate(kernel: &mut Kernel) -> String {
         let running = kernel.is_alive();
+        let pid = match &kernel.backend {
+            KernelBackend::Local { child, .. } => child.id(),
+            KernelBackend::Remote { .. } => return format!("remote kernel: {}", kernel.said()),
+        };
         if running {
-            stop_group(kernel.child.id());
+            stop_group(pid);
             while kernel.is_alive() {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
-        let ended = match kernel.child.try_wait() {
-            Ok(Some(status)) => status.to_string(),
-            other => format!("{other:?}"),
+        let ended = match &mut kernel.backend {
+            KernelBackend::Local { child, .. } => match child.try_wait() {
+                Ok(Some(status)) => status.to_string(),
+                other => format!("{other:?}"),
+            },
+            KernelBackend::Remote { .. } => unreachable!(),
         };
         let how = if running { "was still running, so was stopped" } else { "had ended" };
         format!("it {how} ({ended}), and said: {}", kernel.said())
@@ -745,7 +824,11 @@ mod tests {
         let mut kernel = kernel(&dir, "wait");
         let (pid, started) = pids(&dir)
             .unwrap_or_else(|| panic!("the kernel never said what it started: {}", fate(&mut kernel)));
-        assert_eq!(pid, kernel.child.id());
+        let (child_pid, file) = match &kernel.backend {
+            KernelBackend::Local { child, file, .. } => (child.id(), file.clone()),
+            KernelBackend::Remote { .. } => unreachable!(),
+        };
+        assert_eq!(pid, child_pid);
         // It leads a session of its own, so no terminal can stop it.
         // SAFETY: getsid only asks.
         assert_eq!(
@@ -754,18 +837,17 @@ mod tests {
             "the kernel does not lead a session"
         );
         // Its file names it and what started it, and nobody else can read it.
-        let named = Connection::read(&kernel.file).unwrap();
+        let named = Connection::read(&file).unwrap();
         assert_eq!(
             (named.pid, named.parent),
             (Some(pid), Some(std::process::id()))
         );
-        let mode = std::fs::metadata(&kernel.file)
+        let mode = std::fs::metadata(&file)
             .unwrap()
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
 
-        let file = kernel.file.clone();
         drop(kernel);
         assert!(gone(pid), "the kernel outlived being let go of");
         assert!(gone(started), "what the kernel started outlived it");

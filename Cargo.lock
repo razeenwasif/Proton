@@ -4545,6 +4545,7 @@ dependencies = [
 name = "proton-shell"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "objc2",
  "proton-claude",
  "proton-core",

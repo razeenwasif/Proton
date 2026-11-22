@@ -1,5 +1,45 @@
 import type {EventBatch, WireCommand} from './protocol';
 
+export interface ForwardedTunnel {
+  localPort: number;
+  remotePort: number;
+  auto: boolean;
+}
+
+export interface RemoteStatus {
+  connected: boolean;
+  host: string | null;
+  folder: string | null;
+  remoteHostname: string | null;
+  remoteHome: string | null;
+  error: string | null;
+  forwardedPorts: ForwardedTunnel[];
+}
+
+export interface SshHostEntry {
+  alias: string;
+  hostName: string | null;
+  user: string | null;
+  port: number | null;
+}
+
+export interface RecentRemote {
+  host: string;
+  folder: string;
+}
+
+export interface RemoteCatalog {
+  hosts: SshHostEntry[];
+  recents: RecentRemote[];
+}
+
+export interface RemoteDirEntry {
+  name: string;
+  path: string;
+  isRepo: boolean;
+  hasDevcontainer: boolean;
+}
+
 /** The subset of Tauri's injected API used by Proton. */
 export interface NativeApi {
   core: {
@@ -13,9 +53,17 @@ export interface NativeApi {
     invoke(name: 'set_backdrop', args: {material: string}): Promise<string>;
     invoke(name: 'set_opaque', args: {color: string | null}): Promise<void>;
     invoke(name: 'quit', args: {save: boolean}): Promise<void>;
+    invoke(name: 'remote_status'): Promise<RemoteStatus>;
+    invoke(name: 'remote_hosts'): Promise<RemoteCatalog>;
+    invoke(name: 'remote_browse', args: {host: string; path: string | null}): Promise<RemoteDirEntry[]>;
+    invoke(name: 'remote_connect', args: {host: string; folder: string | null; newWindow: boolean}): Promise<RemoteStatus>;
+    invoke(name: 'remote_disconnect'): Promise<RemoteStatus>;
+    invoke(name: 'remote_forward_port', args: {localPort: number; remotePort: number | null}): Promise<RemoteStatus>;
   };
   event?: {
     listen(name: `proton://events/${string}`, listener: (event: {payload: EventBatch}) => unknown): Promise<() => void>;
+    listen(name: `proton://remote-status/${string}`, listener: (event: {payload: RemoteStatus}) => unknown): Promise<() => void>;
+    listen(name: `proton://open-remote/${string}`, listener: (event: {payload: unknown}) => unknown): Promise<() => void>;
   };
   window?: {getCurrentWindow(): {
     label: string;

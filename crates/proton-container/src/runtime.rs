@@ -363,8 +363,8 @@ fn find_executable(name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Everything needed by terminals, LSP servers, DAP debuggers, formatters, and
-/// agent commands to execute processes inside an attached container.
+/// Everything needed by terminals, LSP servers, DAP debuggers, formatters,
+/// Jupyter kernels, and agent commands to execute processes inside an attached container.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecTarget {
     pub runtime: PathBuf,
@@ -374,6 +374,7 @@ pub struct ExecTarget {
     pub user: Option<String>,
     pub env: BTreeMap<String, String>,
     pub shell: String,
+    pub python: Option<String>,
     pub path_map: PathMap,
     pub lsp_overrides: BTreeMap<String, LspOverride>,
 }
@@ -396,8 +397,8 @@ impl ExecTarget {
     }
 }
 
-/// Build arguments for `<runtime> exec` inside `target`.
-pub fn exec_args(target: &ExecTarget, tty: bool, program: &str, args: &[String]) -> Vec<String> {
+/// Build `<runtime> exec ... <container_id>` prefix with an explicit working directory.
+pub fn exec_prefix_in(target: &ExecTarget, workdir: &str, tty: bool) -> Vec<String> {
     let mut out = vec![
         "exec".to_string(),
         if tty { "-it" } else { "-i" }.to_string(),
@@ -409,12 +410,18 @@ pub fn exec_args(target: &ExecTarget, tty: bool, program: &str, args: &[String])
         }
     }
     out.push("-w".to_string());
-    out.push(target.workdir.clone());
+    out.push(workdir.to_string());
     for (k, v) in &target.env {
         out.push("-e".to_string());
         out.push(format!("{k}={v}"));
     }
     out.push(target.container_id.clone());
+    out
+}
+
+/// Build arguments for `<runtime> exec` inside `target`.
+pub fn exec_args(target: &ExecTarget, tty: bool, program: &str, args: &[String]) -> Vec<String> {
+    let mut out = exec_prefix_in(target, &target.workdir, tty);
     out.push(program.to_string());
     out.extend(args.iter().cloned());
     out
@@ -567,6 +574,7 @@ mod tests {
             user: Some("vscode".to_string()),
             env,
             shell: "/bin/bash".to_string(),
+            python: None,
             path_map: PathMap::new("/Users/me/app", "/workspaces/app"),
             lsp_overrides: BTreeMap::new(),
         };

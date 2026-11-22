@@ -15,7 +15,8 @@
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
 import { HAS_SHELL, applyBackdrop, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, readLab, sendKey, setBackdrop, setOpaque,
-  setMode as coreSetMode, sync, wireWindowChrome, quitApp } from "./bridge.js";
+  setMode as coreSetMode, sync, wireWindowChrome, quitApp,
+  resetTransport, remoteStatus, remoteHosts, remoteBrowse, remoteConnect, remoteDisconnect, remoteForwardPort, onRemoteStatus, onOpenRemote } from "./bridge.js";
 import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, saveDocument, zoomDocument } from "./document.js";
 import { createOverlays } from "./overlays.js";
 import { createPanels } from "./panels.js";
@@ -34,6 +35,7 @@ import { createCircuit } from "./circuit.js";
 import { createLogic } from "./logic.js";
 import { createCad } from "./cad.js";
 import { createContainer } from "./container.js";
+import { createRemote, parseSshCommand } from "./remote.js";
 import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
 import { markdown } from "./markdown.js";
@@ -945,7 +947,7 @@ $("#sl-container")?.addEventListener("keydown", (e) => {
 });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
-const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
+const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings", "remote-modal"];
 const overlays = createOverlays(document, OVERLAYS);
 
 function closeAll() {
@@ -953,11 +955,33 @@ function closeAll() {
 }
 
 async function dismissOverlay() {
-  const coreOwned = pickerOpen || (overlays.active && overlays.active !== "settings");
+  const coreOwned = pickerOpen || (overlays.active && overlays.active !== "settings" && overlays.active !== "remote-modal");
   pickerOpen = false;
   closeAll();
   if (coreOwned) await sendKey({ key: "Escape" });
 }
+
+/* Remote-SSH: connect to remote hosts (e.g. mini) over SSH NDJSON. */
+const remoteUi = createRemote({
+  root: document,
+  hasShell: HAS_SHELL,
+  openOverlay: async () => {
+    if (overlays.active === "remote-modal") return;
+    await open("remote-modal");
+  },
+  closeOverlay: dismissOverlay,
+  resetTransport,
+  dispatch,
+  remoteStatus,
+  remoteHosts,
+  remoteBrowse,
+  remoteConnect,
+  remoteDisconnect,
+  remoteForwardPort,
+  onRemoteStatus,
+  onOpenRemote,
+  flashMessage,
+});
 
 /**
  * Toggle an overlay. For buttons: clicking Settings twice closes it.
@@ -3341,6 +3365,10 @@ function renderEvent(event) {
       break;
 
     case "cmdlineRun": {
+      if (parseSshCommand(event.text)) {
+        void remoteUi.runEx(event.text);
+        break;
+      }
       // The core hands back the line it collected; the front end decides what
       // Only what the core did not recognise arrives here. It owns `:w`,
       // `:e`, `:q` and the splits now, so what is left is genuinely unknown —
@@ -3740,8 +3768,8 @@ document.addEventListener("focusin", (e) => {
 document.addEventListener("keydown", (e) => {
   // Modal controls own input before either the terminal or the Vim engine.
   if (e.defaultPrevented) return;
-  if (overlays.active === "settings") {
-    if (e.key === "Escape" || (e.metaKey && e.key === ",")) {
+  if (overlays.active === "settings" || overlays.active === "remote-modal") {
+    if (e.key === "Escape" || (overlays.active === "settings" && e.metaKey && e.key === ",")) {
       e.preventDefault();
       dismissOverlay();
     } else overlays.tab(e);
@@ -3828,6 +3856,12 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey && e.key.toLowerCase() === "k") {
     e.preventDefault();
     open("telescope");
+    return;
+  }
+
+  if (e.metaKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "o") {
+    e.preventDefault();
+    void remoteUi.openModal();
     return;
   }
 
@@ -4156,7 +4190,7 @@ applyBackdrop().then((applied) => {
   renderBackdrop(applied);
   requestAnimationFrame(drawPointerEdges);
 });
-sync();
+void sync().then(() => remoteUi.refresh());
 drawPointerEdges();
 
 // The terminal pane as it was left: open unless somebody shut it, because a

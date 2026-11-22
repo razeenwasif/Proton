@@ -323,6 +323,8 @@ pub struct ProtonCustomizations {
     #[serde(default)]
     pub shell: Option<String>,
     #[serde(default)]
+    pub python: Option<String>,
+    #[serde(default)]
     pub lsp: BTreeMap<String, LspOverride>,
 }
 
@@ -455,6 +457,7 @@ pub struct ResolvedConfig {
     pub shutdown_action: ShutdownAction,
     pub override_command: bool,
     pub shell: Option<String>,
+    pub python: Option<String>,
     pub lsp_overrides: BTreeMap<String, LspOverride>,
     pub container_name: String,
     pub image_tag: String,
@@ -722,6 +725,7 @@ impl ResolvedConfig {
             shutdown_action,
             override_command,
             shell: proton.shell.map(|s| ctx.expand(&s)),
+            python: proton.python.map(|p| ctx.expand(&p)),
             lsp_overrides,
             container_name,
             image_tag,

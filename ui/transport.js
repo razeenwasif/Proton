@@ -168,6 +168,16 @@ export function createTransport({send, ready = Promise.resolve(), ordered = true
   }
   return {
     receive, deliver, dispatchMany,
+    /** Drop sequence state when an in-place window switches between local & SSH hosts. */
+    reset() {
+      pending.clear();
+      for (const resolvers of waiting.values()) {
+        resolvers.forEach((done) => done());
+      }
+      waiting.clear();
+      applied = null;
+      generation++;
+    },
     /** @param {Command} command */
     dispatch: command => dispatchMany([command]),
     /** @param {(events: Event[]) => void} listener */

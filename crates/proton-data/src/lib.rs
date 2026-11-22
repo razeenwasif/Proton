@@ -6,6 +6,7 @@
 //! arranged the way every other foreign process here is: two threads and a
 //! channel, drained on the core's heartbeat.
 
+pub mod bridge;
 pub mod connection;
 pub mod kernel;
 pub mod notebook;
@@ -15,6 +16,7 @@ pub mod wire;
 #[cfg(target_vendor = "apple")]
 mod spawn;
 
+pub use bridge::RemoteLaunch;
 pub use connection::Connection;
 pub use kernel::Kernel;
 pub use notebook::{Cell, CellKind, Notebook, Output};

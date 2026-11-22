@@ -1,6 +1,6 @@
 # Dev Containers in Proton
 
-Proton supports VS Code–style `devcontainer.json` development containers without requiring the host editor to live inside Docker. The Proton UI, rope buffers, tree-sitter syntax engine, and host files stay native on macOS, while interactive terminals, language servers, formatters, debuggers, and agent shell commands route transparently into the attached Linux container.
+Proton supports VS Code–style `devcontainer.json` development containers without requiring the host editor to live inside Docker. The Proton UI, rope buffers, tree-sitter syntax engine, and host files stay native on macOS, while interactive terminals, language servers, formatters, debuggers, Data mode Jupyter kernels, and agent shell commands route transparently into the attached Linux container.
 
 ## Quick start
 
@@ -12,7 +12,7 @@ Proton supports VS Code–style `devcontainer.json` development containers witho
 5. Once attached:
    - Status line shows `Container: <name>` and the container badge appears in the terminal header.
    - New terminals open inside the container shell (`customizations.proton.shell` or `/bin/sh`).
-   - Language servers (`proton-lsp`), formatters (`formatters::start_in_container`), debug adapters (`proton-dap`), and agent `run_command` executions run inside the container with automatic host ↔ container path translation.
+   - Language servers (`proton-lsp`), formatters (`formatters::start_in_container`), debug adapters (`proton-dap`), Data mode Python/Jupyter kernels (`proton-data::bridge`), and agent `run_command` executions run inside the container with automatic host ↔ container path translation.
 
 ## `devcontainer.json` discovery & configuration
 
@@ -30,7 +30,7 @@ Files are parsed as JSONC (comments and trailing commas allowed). Supported fiel
 - **Workspace & environment:** `name`, `workspaceFolder`, `workspaceMount` (bind or `type=volume`), `mounts` (named volumes created automatically), `containerEnv`, `remoteEnv`, `remoteUser`, `containerUser`, `runArgs`, `overrideCommand`, `shutdownAction`
 - **Ports:** `forwardPorts` (port number or `"host:container"`), dynamic `/proc/net/tcp{,6}` listening-port auto-detection, `portsAttributes` / `otherPortsAttributes` (`label`, `protocol`, `onAutoForward`)
 - **Lifecycle hooks:** `initializeCommand`, `onCreateCommand`, `updateContentCommand`, `postCreateCommand`, `postStartCommand`, `postAttachCommand` (string, argv array, or named parallel/object map)
-- **Proton customizations:** `customizations.proton.shell` and per-server overrides under `customizations.proton.lsp.<lang>`
+- **Proton customizations:** `customizations.proton.shell`, `customizations.proton.python` (explicit Python interpreter for Data notebooks inside the container, overriding `.venv`/`venv`/`python3` auto-detection), and per-server overrides under `customizations.proton.lsp.<lang>`
 
 ## Container runtimes
 
@@ -51,6 +51,7 @@ The native macOS workspace root and the container's `workspaceFolder` are bridge
 
 - **LSP (`proton-lsp`):** Outgoing URIs/paths (open buffers, diagnostics, go-to-definition, references, hover, rename, code actions) are rewritten from host paths to container `file://` URIs, and incoming container URIs/edits are mapped back to host files (`Client::spawn_with_map`). Canonicalization differences such as macOS `/var` ↔ `/private/var` are handled automatically.
 - **DAP (`proton-dap`):** `Client::launch_mapped` maps breakpoint source paths on the way into the container adapter and stack frames / breakpoint events on the way back out.
+- **Data / Jupyter (`proton-data`):** When a Dev Container is attached, notebook kernels start inside the container in the mapped working directory (`PathMap::host_to_container`). A stdlib Python TCP-over-stdio multiplexer bridges all five Jupyter ZMQ sockets over `<runtime> exec -i` so notebooks run inside Graviton/Docker containers without requiring manual `-p` port configuration.
 
 ## Keyboard shortcuts & Ex commands
 

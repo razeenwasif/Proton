@@ -1036,6 +1036,7 @@ fn build_exec_target(
         user: resolved.effective_user.clone(),
         env: merged_env,
         shell: resolved.shell.clone().unwrap_or_else(|| "/bin/sh".into()),
+        python: resolved.python.clone(),
         path_map: PathMap::new(&resolved.host_root, &resolved.workspace_folder),
         lsp_overrides: resolved.lsp_overrides.clone(),
     };

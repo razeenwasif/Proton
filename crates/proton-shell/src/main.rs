@@ -5,17 +5,23 @@
 
 mod backdrop;
 mod pasteboard;
+mod remote_client;
+mod remote_protocol;
+mod remote_server;
 mod transport;
 mod window;
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use backdrop::Backdrop;
 use proton_core::{Command, Session};
-use transport::{BridgeSession, EventBatch};
+use remote_client::RemoteClient;
+use remote_protocol::{RemoteCatalog, RemoteDirEntry, RemoteStatus};
+use transport::{cadence, held, BridgeSession, EventBatch, Heartbeat, FAST};
 use tauri::{Emitter, Manager, State};
 
 /// The channel language servers arrive on. Distinct from the `dispatch` reply
@@ -24,10 +30,147 @@ use tauri::{Emitter, Manager, State};
 /// has its own, `proton://events/<label>`: a page's `listen` hears every
 /// window's events whatever they are sent to, so they are told apart by name.
 const PUSHED: &str = "proton://events";
+const REMOTE_STATUS_EVENT: &str = "proton://remote-status";
+const OPEN_REMOTE_EVENT: &str = "proton://open-remote";
 
 /// The channel a window's pushed events go on.
 fn channel(label: &str) -> String {
     format!("{PUSHED}/{label}")
+}
+
+fn remote_status_channel(label: &str) -> String {
+    format!("{REMOTE_STATUS_EVENT}/{label}")
+}
+
+fn open_remote_channel(label: &str) -> String {
+    format!("{OPEN_REMOTE_EVENT}/{label}")
+}
+
+/// Each window's session: either an in-process local [`BridgeSession`] or a
+/// [`RemoteClient`] streaming NDJSON over SSH from a remote machine.
+enum WindowSession {
+    Local(Mutex<BridgeSession>),
+    Remote(Arc<RemoteClient>),
+}
+
+impl WindowSession {
+    fn new_local(session: Session) -> Self {
+        Self::Local(Mutex::new(BridgeSession::new(session)))
+    }
+
+    fn apply(&self, command: Command) -> Result<EventBatch, String> {
+        match self {
+            Self::Local(local) => Ok(held(local).apply(command)),
+            Self::Remote(remote) => remote.dispatch(command),
+        }
+    }
+
+    fn is_remote(&self) -> bool {
+        matches!(self, Self::Remote(_))
+    }
+
+    fn poll_local(&self) -> Option<EventBatch> {
+        match self {
+            Self::Local(local) => Some(held(local).apply(Command::Poll)),
+            Self::Remote(_) => None,
+        }
+    }
+
+    fn remote_status(&self) -> RemoteStatus {
+        match self {
+            Self::Local(_) => RemoteStatus::default(),
+            Self::Remote(remote) => remote.status(),
+        }
+    }
+
+    fn save_unsaved(&self) -> Result<Vec<String>, String> {
+        match self {
+            Self::Local(local) => Ok(held(local).session.save_unsaved()),
+            Self::Remote(remote) => remote.save_unsaved(),
+        }
+    }
+
+    fn read_document_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        const LARGEST: u64 = 128 * 1024 * 1024;
+        match self {
+            Self::Local(local) => {
+                let file = held(local)
+                    .session
+                    .document_file(path)
+                    .ok_or_else(|| format!("{path}: not a document Proton opened"))?;
+                let size = std::fs::metadata(&file)
+                    .map_err(|err| format!("{path}: {err}"))?
+                    .len();
+                if size > LARGEST {
+                    return Err(format!(
+                        "{path}: {} MB is more than a document is read at",
+                        size / (1024 * 1024)
+                    ));
+                }
+                std::fs::read(&file).map_err(|err| format!("{path}: {err}"))
+            }
+            Self::Remote(remote) => remote.read_document(path.to_string()),
+        }
+    }
+
+    fn read_lab_bytes(&self, key: &str) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Local(local) => {
+                let path = held(local)
+                    .session
+                    .lab_file(key)
+                    .ok_or_else(|| format!("{key}: not a file a run left"))?;
+                std::fs::read(&path).map_err(|e| format!("{key}: {e}"))
+            }
+            Self::Remote(remote) => remote.read_lab(key.to_string()),
+        }
+    }
+
+    fn document_name(&self, path: &str) -> Result<String, String> {
+        match self {
+            Self::Local(local) => {
+                let file = held(local)
+                    .session
+                    .document_file(path)
+                    .ok_or_else(|| format!("{path}: not a document Proton opened"))?;
+                Ok(file
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("document.pdf")
+                    .to_string())
+            }
+            Self::Remote(_) => Ok(Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("document.pdf")
+                .to_string()),
+        }
+    }
+
+    fn forward_port(&self, local_port: u16, remote_port: u16) -> Result<RemoteStatus, String> {
+        match self {
+            Self::Local(_) => Err("SSH port forwarding requires an active remote SSH session".into()),
+            Self::Remote(remote) => remote.forward_port(local_port, remote_port),
+        }
+    }
+
+    fn shutdown(&self, save_local: bool, is_last: bool) {
+        match self {
+            Self::Local(local) => {
+                let mut guard = held(local);
+                if save_local {
+                    guard.session.save();
+                }
+                if is_last {
+                    guard.session.shutdown();
+                } else {
+                    guard.session.shutdown_window();
+                }
+            }
+            Self::Remote(remote) => remote.shutdown(),
+        }
+    }
 }
 
 /// Each window's own core, by the window's label. A window is a Proton of
@@ -36,7 +179,7 @@ fn channel(label: &str) -> String {
 /// first window's session is the one written down and reopened next launch.
 #[derive(Default)]
 struct Windows {
-    sessions: Mutex<Vec<(String, Arc<Mutex<BridgeSession>>)>>,
+    sessions: Mutex<Vec<(String, Arc<WindowSession>)>>,
     /// How many have been opened after the first, for the next one's name.
     opened: AtomicUsize,
     /// What each window's question about unsaved changes was asked for.
@@ -54,99 +197,40 @@ enum Ending {
     Close,
 }
 
-/// A lock that outlives a panic: the previous command's, already reported.
-fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
-    lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 impl Windows {
-    fn of(&self, label: &str) -> Option<Arc<Mutex<BridgeSession>>> {
-        held(&self.sessions).iter().find(|(l, _)| l == label).map(|(_, s)| Arc::clone(s))
+    fn of(&self, label: &str) -> Option<Arc<WindowSession>> {
+        held(&self.sessions)
+            .iter()
+            .find(|(l, _)| l == label)
+            .map(|(_, s)| Arc::clone(s))
     }
 
-    fn all(&self) -> Vec<(String, Arc<Mutex<BridgeSession>>)> {
+    fn all(&self) -> Vec<(String, Arc<WindowSession>)> {
         held(&self.sessions).clone()
     }
 
-    fn add(&self, label: &str, session: BridgeSession) {
-        held(&self.sessions).push((label.to_string(), Arc::new(Mutex::new(session))));
+    fn add(&self, label: &str, session: WindowSession) {
+        held(&self.sessions).push((label.to_string(), Arc::new(session)));
     }
 
-    fn remove(&self, label: &str) -> Option<Arc<Mutex<BridgeSession>>> {
+    fn replace(&self, label: &str, session: WindowSession) -> Option<Arc<WindowSession>> {
+        let mut sessions = held(&self.sessions);
+        if let Some((_, slot)) = sessions.iter_mut().find(|(l, _)| l == label) {
+            let new = Arc::new(session);
+            return Some(std::mem::replace(slot, new));
+        }
+        sessions.push((label.to_string(), Arc::new(session)));
+        None
+    }
+
+    fn remove(&self, label: &str) -> Option<Arc<WindowSession>> {
         let mut sessions = held(&self.sessions);
         let at = sessions.iter().position(|(l, _)| l == label)?;
         Some(sessions.remove(at).1)
     }
 }
 
-/// How often to ask the core whether anything has happened on a thread it
-/// cannot see — a server, a shell, the agent.
-///
-/// The core has no clock and no threads — that is what makes it testable — so
-/// something has to ask on its behalf, and this is that something. It used to
-/// ask twenty times a second whatever was going on, which is twenty wake-ups a
-/// second for a window nobody is using and a twentieth of a second added to
-/// every echoed keystroke in the terminal. Now it keeps time with the work:
-/// once a frame while things are happening, slower as they stop, and rarely
-/// once they have — and it is woken the moment a command arrives or a shell
-/// writes, so being asleep never makes anything late.
-const FAST: Duration = Duration::from_millis(16);
-/// For a few seconds after things go quiet: a language server answering a
-/// save, an agent thinking before its first word.
-const BEAT: Duration = Duration::from_millis(50);
-/// Once nothing has happened for a while.
-const IDLE: Duration = Duration::from_millis(250);
-
-/// The heartbeat's alarm clock: sleep until the next beat, or until woken.
-struct Heartbeat {
-    woken: Mutex<bool>,
-    bell: Condvar,
-}
-
-impl Heartbeat {
-    const fn new() -> Heartbeat {
-        Heartbeat {
-            woken: Mutex::new(false),
-            bell: Condvar::new(),
-        }
-    }
-
-    /// Something happened: poll now rather than at the next beat.
-    fn wake(&self) {
-        if let Ok(mut woken) = self.woken.lock() {
-            *woken = true;
-            self.bell.notify_one();
-        }
-    }
-
-    /// Sleep for `wait`, or less if woken. `true` if it was woken.
-    fn sleep(&self, wait: Duration) -> bool {
-        let Ok(mut woken) = self.woken.lock() else {
-            std::thread::sleep(wait);
-            return false;
-        };
-        if !*woken {
-            woken = match self.bell.wait_timeout(woken, wait) {
-                Ok((guard, _)) => guard,
-                Err(poisoned) => poisoned.into_inner().0,
-            };
-        }
-        std::mem::replace(&mut *woken, false)
-    }
-}
-
 static HEARTBEAT: Heartbeat = Heartbeat::new();
-
-/// How long to sleep, given how long it has been since anything happened.
-fn cadence(quiet: Duration) -> Duration {
-    if quiet < Duration::from_secs(1) {
-        FAST
-    } else if quiet < Duration::from_secs(5) {
-        BEAT
-    } else {
-        IDLE
-    }
-}
 
 /// What the compositor actually gave us. The front end needs this to decide
 /// whether to paint its own ground, so it reads it on boot and after any change.
@@ -165,30 +249,32 @@ type Surface = Mutex<Backdrop>;
 /// not be moved, resized or redrawn in. The page sends one command at a time
 /// and waits for each reply, so running them elsewhere cannot reorder them.
 #[tauri::command(async)]
-fn dispatch(command: Command, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> EventBatch {
+fn dispatch(
+    command: Command,
+    window: tauri::WebviewWindow,
+    windows: State<'_, Windows>,
+) -> Result<EventBatch, String> {
     // A window being let go of has no session left to ask.
     let Some(session) = windows.of(window.label()) else {
-        return EventBatch { sequence: 0, events: Vec::new() };
+        return Ok(EventBatch {
+            sequence: 0,
+            events: Vec::new(),
+        });
     };
-    // A poisoned lock means a previous command panicked. Recover rather than
-    // propagating: the front end should keep working, and the panic has
-    // already been reported on stderr.
-    let events = held(&session).apply(command.clone());
+    let events = session.apply(command.clone())?;
     // Whatever was just asked for may answer on another thread — a shell
     // echoing the key, a server replying — so the heartbeat looks sooner.
-    HEARTBEAT.wake();
+    if !session.is_remote() {
+        HEARTBEAT.wake();
+    }
 
-    // A dropped keystroke is the worst failure mode a modal editor has, and it
-    // is invisible from the page. Tracing the seam in debug builds makes it
-    // visible — and is how M0's exit criterion gets verified without a
-    // screenshot.
     #[cfg(debug_assertions)]
     eprintln!(
         "[bridge] {command:?} -> {} event(s): {events:?}",
         events.events.len()
     );
 
-    events
+    Ok(events)
 }
 
 /// Which backdrop is live: `mica`, `mica-alt`, `acrylic`, `vibrancy`, `solid`.
@@ -231,9 +317,58 @@ fn set_opaque(color: Option<String>, window: tauri::WebviewWindow, surface: Stat
 /// `None` means nothing was named, which is not the same as "the current
 /// directory" — see [`working_folder`].
 fn requested_folder() -> Option<std::path::PathBuf> {
-    let given = std::env::args_os().nth(1)?;
-    let path = std::path::PathBuf::from(given);
-    path.is_dir().then_some(path)
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let mut i = 0;
+    while i < args.len() {
+        let s = args[i].to_string_lossy();
+        if s == "--ssh" || s == "--remote-server" {
+            i += 2;
+            continue;
+        }
+        if s.starts_with('-') {
+            i += 1;
+            continue;
+        }
+        let path = std::path::PathBuf::from(&args[i]);
+        return path.is_dir().then_some(path);
+    }
+    None
+}
+
+fn parse_ssh_target(raw: &str) -> (String, Option<String>) {
+    let trimmed = raw.trim();
+    if let Some((host, folder)) = trimmed.split_once(':') {
+        let f = folder.trim();
+        (
+            host.trim().to_string(),
+            (!f.is_empty()).then(|| f.to_string()),
+        )
+    } else {
+        (trimmed.to_string(), None)
+    }
+}
+
+fn startup_ssh_target() -> Option<(String, Option<String>)> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--ssh" {
+            if let Some(target) = args.next() {
+                return Some(parse_ssh_target(&target));
+            }
+        }
+    }
+    None
+}
+
+fn remote_server_arg() -> Option<Option<String>> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--remote-server" {
+            let folder = args.next().filter(|a| !a.starts_with('-'));
+            return Some(folder);
+        }
+    }
+    None
 }
 
 /// The working directory, when it is worth anything.
@@ -285,38 +420,29 @@ fn could_be_a_project(cwd: &std::path::Path, exe_folder: Option<&std::path::Path
 /// read would otherwise hold, and the window with it.
 #[tauri::command(async)]
 fn read_document(path: String, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> Result<tauri::ipc::Response, String> {
-    /// The largest file read for the page: the library reads none larger.
-    const LARGEST: u64 = 128 * 1024 * 1024;
-    let file = windows.of(window.label()).and_then(|s| held(&s).session.document_file(&path));
-    let file = file.ok_or_else(|| format!("{path}: not a document Proton opened"))?;
-    let size = std::fs::metadata(&file).map_err(|err| format!("{path}: {err}"))?.len();
-    if size > LARGEST {
-        return Err(format!("{path}: {} MB is more than a document is read at", size / (1024 * 1024)));
-    }
-    let bytes = std::fs::read(&file).map_err(|err| format!("{path}: {err}"))?;
+    let session = windows
+        .of(window.label())
+        .ok_or_else(|| format!("{path}: window is closing"))?;
+    let bytes = session.read_document_bytes(&path)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// A file a Lab run left — a figure, a 3D scene — as bytes.
-///
-/// Where it is is asked of the core under the session's lock, which only
-/// gives a file inside that run's folder of a kind the Lab shows; it is read
-/// after the lock is let go, so a large picture never holds the core.
 #[tauri::command(async)]
 fn read_lab(key: String, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> Result<tauri::ipc::Response, String> {
-    let path = windows.of(window.label()).and_then(|s| held(&s).session.lab_file(&key));
-    let path = path.ok_or_else(|| format!("{key}: not a file a run left"))?;
-    std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("{key}: {e}"))
+    let session = windows
+        .of(window.label())
+        .ok_or_else(|| format!("{key}: window is closing"))?;
+    let bytes = session.read_lab_bytes(&key)?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Save a copy of the document on screen where the person chooses, through
-/// the system's save panel — only a file the viewer was let read, so the page
-/// cannot have the shell copy anything else. `None` when they cancel.
 #[tauri::command(async)]
 fn save_document_as(app: tauri::AppHandle, path: String, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> Result<Option<String>, String> {
-    let file = windows.of(window.label()).and_then(|s| held(&s).session.document_file(&path));
-    let file = file.ok_or_else(|| format!("{path}: not a document Proton opened"))?;
-    let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("document.pdf").to_string();
+    let session = windows
+        .of(window.label())
+        .ok_or_else(|| format!("{path}: window is closing"))?;
+    let name = session.document_name(&path)?;
+    let bytes = session.read_document_bytes(&path)?;
     // The panel is AppKit's, so it is shown on the main thread; this waits.
     let (tx, rx) = std::sync::mpsc::channel();
     app.run_on_main_thread(move || {
@@ -324,7 +450,7 @@ fn save_document_as(app: tauri::AppHandle, path: String, window: tauri::WebviewW
     })
     .map_err(|err| err.to_string())?;
     let Some(to) = rx.recv().map_err(|err| err.to_string())? else { return Ok(None) };
-    std::fs::copy(&file, &to).map_err(|err| format!("{}: {err}", to.display()))?;
+    std::fs::write(&to, bytes).map_err(|err| format!("{}: {err}", to.display()))?;
     Ok(Some(to.display().to_string()))
 }
 
@@ -444,13 +570,20 @@ fn spawn_poll(app: tauri::AppHandle) {
         .expect("the poll thread is not optional: without it no server is ever heard from");
 }
 
-/// One poll of every window's core, or `None` once the app is going away.
+/// One poll of every local window's core, or `None` once the app is going away.
+/// Remote SSH windows push events asynchronously on their own reader thread.
 fn poll_once(app: &tauri::AppHandle) -> Option<Vec<(String, EventBatch)>> {
     let windows = app.try_state::<Windows>()?;
-    Some(windows.all().into_iter().map(|(label, session)| {
-        let events = held(&session).apply(Command::Poll);
-        (label, events)
-    }).collect())
+    Some(
+        windows
+            .all()
+            .into_iter()
+            .filter_map(|(label, session)| {
+                let events = session.poll_local()?;
+                Some((label, events))
+            })
+            .collect(),
+    )
 }
 
 
@@ -484,7 +617,9 @@ fn asks_next(app: &tauri::AppHandle) -> bool {
         if settled.contains(&label) {
             continue;
         }
-        let batch = held(&session).apply(Command::AskToQuit);
+        let Ok(batch) = session.apply(Command::AskToQuit) else {
+            continue;
+        };
         if batch.events.is_empty() {
             continue;
         }
@@ -508,7 +643,9 @@ fn asks_to_close(app: &tauri::AppHandle, label: &str) -> bool {
     let Some(session) = windows.of(label) else {
         return false;
     };
-    let batch = held(&session).apply(Command::AskToClose);
+    let Ok(batch) = session.apply(Command::AskToClose) else {
+        return false;
+    };
     if batch.events.is_empty() {
         return false;
     }
@@ -525,7 +662,7 @@ fn quit(save: bool, window: tauri::WebviewWindow, app: tauri::AppHandle, windows
     let label = window.label().to_string();
     if save {
         if let Some(session) = windows.of(&label) {
-            let failed = held(&session).session.save_unsaved();
+            let failed = session.save_unsaved()?;
             if !failed.is_empty() {
                 return Err(failed.join("\n"));
             }
@@ -556,13 +693,116 @@ fn let_go(app: &tauri::AppHandle, label: &str) {
         return;
     };
     let last = windows.all().is_empty();
-    let mut session = held(&session);
-    session.session.save();
-    if last {
-        session.session.shutdown();
-    } else {
-        session.session.shutdown_window();
+    session.shutdown(true, last);
+}
+
+#[tauri::command]
+fn remote_status(window: tauri::WebviewWindow, windows: State<'_, Windows>) -> RemoteStatus {
+    windows
+        .of(window.label())
+        .map(|s| s.remote_status())
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+fn remote_hosts() -> RemoteCatalog {
+    RemoteCatalog {
+        hosts: remote_client::discover_ssh_hosts(),
+        recents: remote_client::load_recents(),
     }
+}
+
+#[tauri::command(async)]
+fn remote_browse(host: String, path: Option<String>) -> Result<Vec<RemoteDirEntry>, String> {
+    remote_client::browse_remote(&host, path.as_deref())
+}
+
+fn connect_client_for_label(
+    app: &tauri::AppHandle,
+    label: &str,
+    host: &str,
+    folder: Option<&str>,
+) -> Result<Arc<RemoteClient>, String> {
+    let app_push = app.clone();
+    let label_push = label.to_string();
+    let app_status = app.clone();
+    let label_status = label.to_string();
+    RemoteClient::connect_ssh(
+        host,
+        folder,
+        move |batch| {
+            let _ = app_push.emit(&channel(&label_push), batch);
+        },
+        move |status| {
+            let _ = app_status.emit(&remote_status_channel(&label_status), status);
+        },
+    )
+}
+
+#[tauri::command(async)]
+fn remote_connect(
+    host: String,
+    folder: Option<String>,
+    new_window: bool,
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    windows: State<'_, Windows>,
+) -> Result<RemoteStatus, String> {
+    if new_window {
+        let label = format!("window-{}", windows.opened.fetch_add(1, Ordering::SeqCst) + 2);
+        let client = connect_client_for_label(&app, &label, &host, folder.as_deref())?;
+        let status = client.status();
+        windows.add(&label, WindowSession::Remote(client));
+        if let Err(err) = build_and_open_window(&app, &label) {
+            if let Some(removed) = windows.remove(&label) {
+                removed.shutdown(false, false);
+            }
+            return Err(err);
+        }
+        return Ok(status);
+    }
+
+    let label = window.label().to_string();
+    let client = connect_client_for_label(&app, &label, &host, folder.as_deref())?;
+    let status = client.status();
+    if let Some(prev) = windows.replace(&label, WindowSession::Remote(client)) {
+        prev.shutdown(true, false);
+    }
+    let _ = app.emit(&remote_status_channel(&label), status.clone());
+    Ok(status)
+}
+
+#[tauri::command(async)]
+fn remote_disconnect(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    windows: State<'_, Windows>,
+) -> Result<RemoteStatus, String> {
+    let label = window.label().to_string();
+    let local = WindowSession::new_local(Session::another_window());
+    if let Some(prev) = windows.replace(&label, local) {
+        prev.shutdown(false, false);
+    }
+    let status = RemoteStatus::default();
+    let _ = app.emit(&remote_status_channel(&label), status.clone());
+    Ok(status)
+}
+
+#[tauri::command(async)]
+fn remote_forward_port(
+    local_port: u16,
+    remote_port: Option<u16>,
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    windows: State<'_, Windows>,
+) -> Result<RemoteStatus, String> {
+    let label = window.label().to_string();
+    let session = windows
+        .of(&label)
+        .ok_or_else(|| "window is closing".to_string())?;
+    let status = session.forward_port(local_port, remote_port.unwrap_or(local_port))?;
+    let _ = app.emit(&remote_status_channel(&label), status.clone());
+    Ok(status)
 }
 
 /// What every window does when closed: asks about its unsaved changes —
@@ -583,27 +823,27 @@ fn watch(window: &tauri::WebviewWindow) {
     });
 }
 
-/// The menu's New Window.
+/// The menu's New Window and Connect to Host (SSH).
 const NEW_WINDOW: &str = "proton-new-window";
+const CONNECT_SSH: &str = "proton-connect-ssh";
 
-/// Another window, with a session of its own on the home folder: in front of
-/// the one in front, as large, a little down and to the right.
-fn open_window(app: &tauri::AppHandle) -> Result<(), String> {
-    let windows = app.try_state::<Windows>().ok_or("Proton is closing")?;
-    let label = format!("window-{}", windows.opened.fetch_add(1, Ordering::SeqCst) + 2);
-    // Before the window, so its page's first command finds it.
-    windows.add(&label, BridgeSession::new(Session::another_window()));
-    let front = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false)).or_else(|| app.get_webview_window("main"));
-    let mut builder = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("index.html".into()))
-        .title("Proton")
-        .inner_size(1600.0, 1000.0)
-        .min_inner_size(1100.0, 700.0)
-        .resizable(true)
-        .decorations(false)
-        .transparent(true)
-        .theme(Some(tauri::Theme::Dark))
-        .disable_drag_drop_handler()
-        .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Throttle);
+fn build_and_open_window(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
+    let front = app
+        .webview_windows()
+        .into_values()
+        .find(|w| w.is_focused().unwrap_or(false))
+        .or_else(|| app.get_webview_window("main"));
+    let mut builder =
+        tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
+            .title("Proton")
+            .inner_size(1600.0, 1000.0)
+            .min_inner_size(1100.0, 700.0)
+            .resizable(true)
+            .decorations(false)
+            .transparent(true)
+            .theme(Some(tauri::Theme::Dark))
+            .disable_drag_drop_handler()
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Throttle);
     if let Some(front) = &front {
         let scale = front.scale_factor().unwrap_or(1.0);
         if let Ok(size) = front.inner_size() {
@@ -615,18 +855,26 @@ fn open_window(app: &tauri::AppHandle) -> Result<(), String> {
             builder = builder.position(at.x + 28.0, at.y + 28.0);
         }
     }
-    let window = match builder.build() {
-        Ok(window) => window,
-        Err(err) => {
-            if let Some(session) = windows.remove(&label) {
-                held(&session).session.shutdown_window();
-            }
-            return Err(err.to_string());
-        }
-    };
+    let window = builder.build().map_err(|e| e.to_string())?;
     dress(&window, app);
     watch(&window);
     let _ = window.set_focus();
+    Ok(())
+}
+
+/// Another window, with a session of its own on the home folder: in front of
+/// the one in front, as large, a little down and to the right.
+fn open_window(app: &tauri::AppHandle) -> Result<(), String> {
+    let windows = app.try_state::<Windows>().ok_or("Proton is closing")?;
+    let label = format!("window-{}", windows.opened.fetch_add(1, Ordering::SeqCst) + 2);
+    // Before the window, so its page's first command finds it.
+    windows.add(&label, WindowSession::new_local(Session::another_window()));
+    if let Err(err) = build_and_open_window(app, &label) {
+        if let Some(session) = windows.remove(&label) {
+            session.shutdown(false, false);
+        }
+        return Err(err);
+    }
     Ok(())
 }
 
@@ -656,10 +904,12 @@ fn menu_that_asks(app: &tauri::AppHandle) -> Option<tauri::menu::Menu<tauri::Wry
     let mut quit_given = false;
     for item in menu.items().ok()? {
         let MenuItemKind::Submenu(submenu) = item else { continue };
-        // File's first item: ⌘⇧N, as in every editor that has windows.
+        // File's first items: ⌘⇧N New Window, ⌘⇧O Connect to Host (SSH)...
         if submenu.text().is_ok_and(|text| text == "File") {
             let new = MenuItem::with_id(app, NEW_WINDOW, "New Window", true, Some("CmdOrCtrl+Shift+N")).ok()?;
+            let ssh = MenuItem::with_id(app, CONNECT_SSH, "Connect to Host (SSH)…", true, Some("CmdOrCtrl+Shift+O")).ok()?;
             submenu.insert(&new, 0).ok()?;
+            submenu.insert(&ssh, 1).ok()?;
         }
         for (at, entry) in submenu.items().ok()?.into_iter().enumerate() {
             let MenuItemKind::Predefined(predefined) = &entry else { continue };
@@ -728,6 +978,10 @@ fn keep_drawing(window: &tauri::WebviewWindow) {
 }
 
 fn main() {
+    if let Some(folder) = remote_server_arg() {
+        std::process::exit(remote_server::run(folder));
+    }
+
     // Opened from the Finder or the Dock, this has launchd's PATH, and so
     // would everything it starts by name — ffprobe, pandoc, git, a kernel's
     // `!pip`. What a login shell adds is added first, while this is still the
@@ -743,8 +997,14 @@ fn main() {
         // The PATH kept from the last launch, asked for again for the next.
         proton_claude::process::refresh_launch_path();
     });
+    let startup_ssh = startup_ssh_target();
     let windows = Windows::default();
-    windows.add("main", BridgeSession::new(Session::restore(requested_folder(), working_folder())));
+    if startup_ssh.is_none() {
+        windows.add(
+            "main",
+            WindowSession::new_local(Session::restore(requested_folder(), working_folder())),
+        );
+    }
     tauri::Builder::default()
         .manage(windows)
         .invoke_handler(tauri::generate_handler![
@@ -757,14 +1017,36 @@ fn main() {
             save_document_as,
             paste_text,
             copy_text,
-            quit
+            quit,
+            remote_status,
+            remote_hosts,
+            remote_browse,
+            remote_connect,
+            remote_disconnect,
+            remote_forward_port
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let Some(window) = app.get_webview_window("main") else {
                 // No window means the config is wrong, not that we should limp
                 // on with a half-configured app.
                 return Err("no main window in tauri.conf.json".into());
             };
+
+            if let Some((host, folder)) = startup_ssh.clone() {
+                let windows = app.state::<Windows>();
+                match connect_client_for_label(app.handle(), "main", &host, folder.as_deref()) {
+                    Ok(client) => {
+                        windows.add("main", WindowSession::Remote(client));
+                    }
+                    Err(err) => {
+                        eprintln!("proton: failed --ssh {host}: {err}");
+                        windows.add(
+                            "main",
+                            WindowSession::new_local(Session::restore(None, working_folder())),
+                        );
+                    }
+                }
+            }
 
             // Before anything else touches the window: it opens where it was
             // last closed, and the size in `tauri.conf.json` is only the
@@ -799,6 +1081,15 @@ fn main() {
                         }
                     });
                 }
+                if event.id() == CONNECT_SSH {
+                    let target = app
+                        .webview_windows()
+                        .into_values()
+                        .find(|w| w.is_focused().unwrap_or(false))
+                        .map(|w| w.label().to_string())
+                        .unwrap_or_else(|| "main".to_string());
+                    let _ = app.emit(&open_remote_channel(&target), ());
+                }
             });
             watch(&window);
 
@@ -816,13 +1107,11 @@ fn main() {
                 if let Some(windows) = app.try_state::<Windows>() {
                     for (label, session) in windows.all() {
                         windows.remove(&label);
-                        let mut session = held(&session);
-                        session.session.save();
                         // A Lab run and a notebook's kernel each lead a
                         // process group of their own, and the app exits
                         // without dropping the session: they would outlive
                         // it if not stopped here.
-                        session.session.shutdown();
+                        session.shutdown(true, true);
                     }
                 }
             }
@@ -837,19 +1126,29 @@ mod tests {
     #[test]
     fn each_window_has_a_session_of_its_own_until_it_is_let_go() {
         let windows = Windows::default();
-        let at = |dir: &str| BridgeSession::new(Session::new(std::env::temp_dir().join(dir)));
+        let at = |dir: &str| WindowSession::new_local(Session::new(std::env::temp_dir().join(dir)));
         windows.add("main", at("proton-shell-main"));
         windows.add("window-2", at("proton-shell-second"));
         let main = windows.of("main").unwrap();
         let second = windows.of("window-2").unwrap();
         assert!(!Arc::ptr_eq(&main, &second), "two windows share a core");
-        assert!(held(&second).session.active().root().ends_with("proton-shell-second"));
+        assert!(!second.is_remote());
         assert!(windows.of("window-3").is_none());
         assert!(windows.remove("window-2").is_some());
         assert!(windows.of("window-2").is_none() && windows.remove("window-2").is_none());
         assert_eq!(windows.all().iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(), ["main"]);
         // Pushes go to the window they are for, by name.
         assert_eq!(channel("window-2"), "proton://events/window-2");
+    }
+
+    #[test]
+    fn parses_cli_ssh_target_host_and_optional_folder() {
+        assert_eq!(parse_ssh_target("mini"), ("mini".into(), None));
+        assert_eq!(
+            parse_ssh_target("mini:~/Github/Applications/Proton"),
+            ("mini".into(), Some("~/Github/Applications/Proton".into()))
+        );
+        assert_eq!(parse_ssh_target("mini:"), ("mini".into(), None));
     }
 
     /// A window the capability does not name may not even listen: every
@@ -863,29 +1162,6 @@ mod tests {
         let made = format!("window-{}", 2);
         let covered = windows.iter().any(|w| *w == made || w.strip_suffix('*').is_some_and(|prefix| made.starts_with(prefix)));
         assert!(covered, "a new window's label {made} is not in the capability's windows {windows:?}");
-    }
-
-    #[test]
-    fn the_heartbeat_slows_as_things_go_quiet() {
-        assert_eq!(cadence(Duration::ZERO), FAST);
-        assert_eq!(cadence(Duration::from_secs(2)), BEAT);
-        assert_eq!(cadence(Duration::from_secs(60)), IDLE);
-    }
-
-    #[test]
-    fn a_wake_ends_the_sleep_at_once_and_is_used_up() {
-        let beat = std::sync::Arc::new(Heartbeat::new());
-        let waker = std::sync::Arc::clone(&beat);
-        let started = Instant::now();
-        let ringer = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(20));
-            waker.wake();
-        });
-        assert!(beat.sleep(Duration::from_secs(10)), "slept through the wake");
-        assert!(started.elapsed() < Duration::from_secs(2));
-        ringer.join().unwrap();
-        // Woken once, so the next sleep is a whole one.
-        assert!(!beat.sleep(Duration::from_millis(30)));
     }
 
     #[test]
