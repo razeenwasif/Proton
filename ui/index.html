@@ -106,6 +106,7 @@
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-logic" viewBox="0 0 24 24"><path d="M6 4.5v15M6 9.5h12M6 14.5h12"/></symbol>
     <symbol id="i-cad" viewBox="0 0 24 24"><path d="M12 3.5l7.5 4.25v8.5L12 20.5l-7.5-4.25v-8.5zM12 12l7.5-4.25M12 12v8.5M12 12L4.5 7.75"/></symbol>
+    <symbol id="i-container" viewBox="0 0 24 24"><path d="M3.5 7.5L12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5L12 12l8.5-4.5M12 12v9M7.8 5.2l8.4 4.5"/></symbol>
     <symbol id="i-sketch" viewBox="0 0 24 24"><path d="M4.5 19.5h15M6.5 17l9.5-9.5 2.5 2.5L9 19.5H6.5z"/></symbol>
     <symbol id="i-extrude" viewBox="0 0 24 24"><path d="M5 15.5l7 3.5 7-3.5M5 15.5V9l7-3.5L19 9v6.5M12 12v7M12 12L5 9M12 12l7-3"/></symbol>
     <symbol id="i-fillet" viewBox="0 0 24 24"><path d="M4 20V11a7 7 0 0 1 7-7h9"/><path d="M4 4h4M4 4v4" opacity=".5"/></symbol>
@@ -231,6 +232,7 @@
       <button title="Git  ␣gg" data-dock="git"><svg class="i"><use href="#i-git"/></svg></button>
       <button title="Debug — ␣db sets a breakpoint, ␣dr runs" data-dock="debug"><svg class="i"><use href="#i-bug"/></svg></button>
       <button title="Code Visualizer — ␣ct traces this file" data-dock="visualizer"><svg class="i"><use href="#i-proton"/></svg></button>
+      <button title="Dev Container  ␣ku" data-dock="container"><svg class="i"><use href="#i-container"/></svg></button>
       <button title="Plugin commands  ␣pc" data-open="telescope" data-picker="pluginCommands"><svg class="i"><use href="#i-ext"/></svg></button>
       <span class="spacer"></span>
       <button title="Docs"><svg class="i"><use href="#i-book"/></svg></button>
@@ -293,6 +295,7 @@
                is something to do — history to leave, or a shell to restart. -->
           <section class="term-pane" data-term-pane aria-label="Terminal" hidden>
             <div class="term-flags">
+              <span class="chip accent" data-term-container hidden></span>
               <!-- Only while looking at history. A terminal scrolled back
                    looks exactly like one whose shell has stopped answering,
                    so it has to say which it is — and offer the way out. -->
@@ -337,6 +340,7 @@
             <button class="dock-tab"     data-dockpanel="visualizer">Visualizer</button>
             <button class="dock-tab"     data-dockpanel="device">Device</button>
             <button class="dock-tab"     data-dockpanel="git">Git</button>
+            <button class="dock-tab"     data-dockpanel="container">Container <span class="dot" data-container-dot hidden></span></button>
             <button class="dock-tab"     data-dockpanel="term">Terminal</button>
           </div>
         </header>
@@ -491,6 +495,14 @@
             <span class="chip" data-git-count>0</span>
           </header>
           <div class="scroll tree" data-git-files></div>
+        </div>
+
+        <!-- Dev Container -->
+        <!-- Rendered from Event::Container. The core owns discovery, builds,
+             lifecycle hooks and container routing; this renders status, ports,
+             templates and live logs. -->
+        <div class="dock-panel" data-panel="container" style="display:none;flex-direction:column;flex:1;min-height:0">
+          <div class="scroll dc-scroll" data-container-view></div>
         </div>
       </aside>
 
@@ -1176,6 +1188,7 @@
     <div class="tb-actions">
       <button class="tb-btn" data-panel-toggle="left" title="Hide sidebar" aria-label="Hide sidebar" aria-expanded="true"><svg class="i"><use href="#i-panel-left"/></svg></button>
       <button class="tb-btn" data-term-toggle title="Terminal  ⌃`" aria-label="Terminal" aria-pressed="false"><svg class="i"><use href="#i-term"/></svg></button>
+      <button class="tb-btn" data-dock="container" data-container-tb title="Dev Container  ␣ku" aria-label="Dev Container"><svg class="i"><use href="#i-container"/></svg><span class="tb-dot" data-container-tb-dot hidden></span></button>
       <button class="tb-btn" data-panel-toggle="right" title="Hide right panel" aria-label="Hide right panel" aria-expanded="true"><svg class="i"><use href="#i-panel-right"/></svg></button>
       <button class="tb-btn" data-open="settings" title="Settings  ⌘," aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></button>
     </div>
@@ -1192,6 +1205,7 @@
     <div class="sl" id="sl-agent"><svg class="i ft-ai"><use href="#i-spark"/></svg> Agent</div>
     <div class="sl" id="sl-diagnostics"></div>
     <div class="sl" id="sl-servers"></div>
+    <div class="sl" id="sl-container" hidden role="button" tabindex="0" title="Open Dev Container panel"></div>
     <div class="sl right" id="sl-position">ln 1, col 1</div>
     <div class="sl" id="sl-progress"></div>
   </footer>
@@ -1252,6 +1266,7 @@
       <button class="row sel" data-st-nav="appearance"><span class="ic"><svg class="i"><use href="#i-palette"/></svg></span>Appearance</button>
       <button class="row" data-st-nav="editing"><span class="ic">&#10216;&#10217;</span>Editing</button>
       <button class="row" data-st-nav="plugins"><span class="ic"><svg class="i"><use href="#i-ext"/></svg></span>Plugins</button>
+      <button class="row" data-st-nav="container"><span class="ic"><svg class="i"><use href="#i-container"/></svg></span>Containers</button>
       <div class="group">Agent</div>
       <button class="row" data-st-nav="models"><span class="ic"><svg class="i ft-ai"><use href="#i-spark"/></svg></span>AI &amp; models</button>
       <button class="row" data-st-nav="library"><span class="ic"><svg class="i"><use href="#i-book"/></svg></span>Library</button>
@@ -1451,6 +1466,25 @@
           <h4>Installed</h4>
           <p>Loaded from the project when the session starts. Installing one needs a restart, so this is what is running now rather than what is on disk.</p>
           <div data-plugins-list></div>
+        </div>
+      </div>
+
+      <div data-st-panel="container" hidden>
+        <div class="st-head">Dev Containers</div>
+        <div class="setting">
+          <h4>Container runtime</h4>
+          <p>Which engine Proton uses when starting or attaching to a <code>devcontainer.json</code> environment. <strong>Auto</strong> looks for Docker (or OrbStack), Podman, and nerdctl.</p>
+          <div class="seg" data-set-choice="container.runtime">
+            <button data-value="auto">Auto</button>
+            <button data-value="docker">Docker</button>
+            <button data-value="podman">Podman</button>
+            <button data-value="nerdctl">nerdctl</button>
+          </div>
+        </div>
+        <div class="setting">
+          <h4>Environment routing</h4>
+          <p>When a dev container is attached, Codex terminals, language servers, debuggers, formatters, and approved agent commands run inside the container with workspace paths mapped between host and container.</p>
+          <label class="st-toggle"><input type="checkbox" data-set-bool="container.autoAttach"> Auto-attach when opening a project with <code>devcontainer.json</code></label>
         </div>
       </div>
 

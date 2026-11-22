@@ -190,6 +190,7 @@ pub struct Client {
     /// sending them early, and a file opened during startup is the common
     /// case, not an edge one.
     queued: Vec<String>,
+    path_map: Option<uri::PathMap>,
 }
 
 impl std::fmt::Debug for Client {
@@ -213,10 +214,23 @@ impl Client {
         args: &[String],
         root: &std::path::Path,
     ) -> std::io::Result<Self> {
+        Self::spawn_with_map(name, program, args, root, root, None)
+    }
+
+    /// Spawn a server in `cwd` (e.g. a host path for a `docker exec` wrapper)
+    /// while translating outgoing and incoming `file://` URIs via `path_map`.
+    pub fn spawn_with_map(
+        name: &str,
+        program: &str,
+        args: &[String],
+        cwd: &std::path::Path,
+        root: &std::path::Path,
+        path_map: Option<uri::PathMap>,
+    ) -> std::io::Result<Self> {
         let mut command = Command::new(program);
         command
             .args(args)
-            .current_dir(root)
+            .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -255,8 +269,15 @@ impl Client {
             let to_server = to_server.clone();
             let pending = Arc::clone(&pending);
             let name = name.to_string();
+            let map_for_read = path_map.clone();
             spawn_named(&format!("lsp-{name}-read"), move || {
-                read_loop(BufReader::new(stdout), &to_editor, &to_server, &pending);
+                read_loop(
+                    BufReader::new(stdout),
+                    &to_editor,
+                    &to_server,
+                    &pending,
+                    map_for_read.as_ref(),
+                );
                 let _ = to_editor.send(Incoming::Exited);
             });
         }
@@ -279,6 +300,7 @@ impl Client {
             ready: false,
             exited: false,
             queued: Vec::new(),
+            path_map,
         };
         client.initialize(root);
         Ok(client)
@@ -337,8 +359,15 @@ fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
 /* ── talking ──────────────────────────────────────────────────────── */
 
 impl Client {
+    fn uri_for(&self, path: &std::path::Path) -> String {
+        match &self.path_map {
+            Some(map) => map.host_to_uri(path),
+            None => uri::from_path(path),
+        }
+    }
+
     fn initialize(&mut self, root: &std::path::Path) {
-        let root_uri = uri::from_path(root);
+        let root_uri = self.uri_for(root);
         let params = json!({
             // Telling the server our pid is what makes it exit if the editor
             // is killed rather than lingering as an orphan eating a core.
@@ -448,10 +477,11 @@ impl Client {
         version: u64,
         text: &str,
     ) {
+        let uri = self.uri_for(path);
         self.notify(
             "textDocument/didOpen",
             json!({ "textDocument": {
-                "uri": uri::from_path(path),
+                "uri": uri,
                 "languageId": language_id,
                 "version": version,
                 "text": text,
@@ -464,35 +494,39 @@ impl Client {
     /// disagrees with the editor about the text produces diagnostics on the
     /// wrong lines — the worst kind of wrong. Revisit when edits are batched.
     pub fn did_change(&mut self, path: &std::path::Path, version: u64, text: &str) {
+        let uri = self.uri_for(path);
         self.notify(
             "textDocument/didChange",
             json!({
-                "textDocument": { "uri": uri::from_path(path), "version": version },
+                "textDocument": { "uri": uri, "version": version },
                 "contentChanges": [{ "text": text }],
             }),
         );
     }
 
     pub fn did_save(&mut self, path: &std::path::Path, text: &str) {
+        let uri = self.uri_for(path);
         self.notify(
             "textDocument/didSave",
-            json!({ "textDocument": { "uri": uri::from_path(path) }, "text": text }),
+            json!({ "textDocument": { "uri": uri }, "text": text }),
         );
     }
 
     pub fn did_close(&mut self, path: &std::path::Path) {
+        let uri = self.uri_for(path);
         self.notify(
             "textDocument/didClose",
-            json!({ "textDocument": { "uri": uri::from_path(path) } }),
+            json!({ "textDocument": { "uri": uri } }),
         );
     }
 
     pub fn completion(&mut self, path: &std::path::Path, at: Position) -> i64 {
+        let uri = self.uri_for(path);
         self.request(
             Kind::Completion,
             "textDocument/completion",
             json!({
-                "textDocument": { "uri": uri::from_path(path) },
+                "textDocument": { "uri": uri },
                 "position": at,
                 // 1 = invoked by the user. Saying "triggered by `.`" would be
                 // more honest but makes some servers return a narrower set.
@@ -502,29 +536,32 @@ impl Client {
     }
 
     pub fn definition(&mut self, path: &std::path::Path, at: Position) -> i64 {
+        let uri = self.uri_for(path);
         self.request(
             Kind::Definition,
             "textDocument/definition",
-            json!({ "textDocument": { "uri": uri::from_path(path) }, "position": at }),
+            json!({ "textDocument": { "uri": uri }, "position": at }),
         )
     }
 
     pub fn hover(&mut self, path: &std::path::Path, at: Position) -> i64 {
+        let uri = self.uri_for(path);
         self.request(
             Kind::Hover,
             "textDocument/hover",
-            json!({ "textDocument": { "uri": uri::from_path(path) }, "position": at }),
+            json!({ "textDocument": { "uri": uri }, "position": at }),
         )
     }
 
     /// Every use of the symbol, the declaration included — leaving it out
     /// makes the list disagree with itself when the cursor is already on it.
     pub fn references(&mut self, path: &std::path::Path, at: Position) -> i64 {
+        let uri = self.uri_for(path);
         self.request(
             Kind::References,
             "textDocument/references",
             json!({
-                "textDocument": { "uri": uri::from_path(path) },
+                "textDocument": { "uri": uri },
                 "position": at,
                 "context": { "includeDeclaration": true },
             }),
@@ -538,11 +575,12 @@ impl Client {
     /// ignores these entirely, which is the point: the style that wins should
     /// be the repository's, not the editor's.
     pub fn formatting(&mut self, path: &std::path::Path) -> i64 {
+        let uri = self.uri_for(path);
         self.request(
             Kind::Format,
             "textDocument/formatting",
             json!({
-                "textDocument": { "uri": uri::from_path(path) },
+                "textDocument": { "uri": uri },
                 "options": {
                     "tabSize": 4,
                     "insertSpaces": true,
@@ -554,11 +592,12 @@ impl Client {
     }
 
     pub fn rename(&mut self, path: &std::path::Path, at: Position, to: &str) -> i64 {
+        let uri = self.uri_for(path);
         self.request(
             Kind::Rename,
             "textDocument/rename",
             json!({
-                "textDocument": { "uri": uri::from_path(path) },
+                "textDocument": { "uri": uri },
                 "position": at,
                 "newName": to,
             }),
@@ -577,11 +616,12 @@ impl Client {
         range: crate::protocol::Range,
         diagnostics: &[Value],
     ) -> i64 {
+        let uri = self.uri_for(path);
         self.request(
             Kind::CodeActions,
             "textDocument/codeAction",
             json!({
-                "textDocument": { "uri": uri::from_path(path) },
+                "textDocument": { "uri": uri },
                 "range": range,
                 "context": { "diagnostics": diagnostics },
             }),
@@ -595,10 +635,11 @@ impl Client {
     }
 
     pub fn symbols(&mut self, path: &std::path::Path) -> i64 {
+        let uri = self.uri_for(path);
         self.request(
             Kind::Symbols,
             "textDocument/documentSymbol",
-            json!({ "textDocument": { "uri": uri::from_path(path) } }),
+            json!({ "textDocument": { "uri": uri } }),
         )
     }
 
@@ -629,11 +670,47 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /* ── listening ────────────────────────────────────────────────────── */
 
+fn path_for(map: Option<&uri::PathMap>, uri_str: &str) -> Option<PathBuf> {
+    match map {
+        Some(m) => m.uri_to_host_path(uri_str),
+        None => uri::to_path(uri_str),
+    }
+}
+
+fn remap_uri(map: Option<&uri::PathMap>, uri_str: String) -> String {
+    match map {
+        Some(m) => m.uri_to_host_uri(&uri_str),
+        None => uri_str,
+    }
+}
+
+fn remap_workspace_edit(map: Option<&uri::PathMap>, edit: &mut WorkspaceEdit) {
+    let Some(m) = map else {
+        return;
+    };
+    if let Some(changes) = edit.changes.take() {
+        edit.changes = Some(
+            changes
+                .into_iter()
+                .map(|(u, edits)| (m.uri_to_host_uri(&u), edits))
+                .collect(),
+        );
+    }
+    if let Some(doc_changes) = &mut edit.document_changes {
+        for ch in doc_changes {
+            if let crate::protocol::DocumentChange::Edits(one) = ch {
+                one.text_document.uri = m.uri_to_host_uri(&one.text_document.uri);
+            }
+        }
+    }
+}
+
 fn read_loop(
     mut stdout: impl BufRead,
     to_editor: &Sender<Incoming>,
     to_server: &Sender<String>,
     pending: &Pending,
+    path_map: Option<&uri::PathMap>,
 ) {
     // `$/progress` names its work once, in the `begin`, and then refers to it
     // by token. Remembering the title here is what lets a later `report` say
@@ -696,7 +773,7 @@ fn read_loop(
             }
 
             (None, Some(method)) => {
-                if let Some(event) = notification(method, &message, &mut titles) {
+                if let Some(event) = notification(method, &message, &mut titles, path_map) {
                     if to_editor.send(event).is_err() {
                         return;
                     }
@@ -705,7 +782,7 @@ fn read_loop(
 
             (Some(id), None) => {
                 let kind = lock(pending).remove(&id);
-                if let Some(event) = response(id, kind, &message, to_server) {
+                if let Some(event) = response(id, kind, &message, to_server, path_map) {
                     if to_editor.send(event).is_err() {
                         return;
                     }
@@ -721,13 +798,14 @@ fn notification(
     method: &str,
     message: &Value,
     titles: &mut HashMap<String, String>,
+    path_map: Option<&uri::PathMap>,
 ) -> Option<Incoming> {
     let params = message.get("params")?;
     match method {
         "textDocument/publishDiagnostics" => {
             let parsed: PublishDiagnostics = serde_json::from_value(params.clone()).ok()?;
             Some(Incoming::Diagnostics {
-                path: uri::to_path(&parsed.uri)?,
+                path: path_for(path_map, &parsed.uri)?,
                 items: parsed.diagnostics,
             })
         }
@@ -784,6 +862,7 @@ fn response(
     kind: Option<Kind>,
     message: &Value,
     to_server: &Sender<String>,
+    path_map: Option<&uri::PathMap>,
 ) -> Option<Incoming> {
     if let Some(error) = message.get("error") {
         // -32800 is "you cancelled this", which is something we asked for
@@ -840,7 +919,7 @@ fn response(
                 id,
                 target: response.first().and_then(|(uri, at)| {
                     Some(Jump {
-                        path: uri::to_path(&uri)?,
+                        path: path_for(path_map, &uri)?,
                         line: at.line,
                         character: at.character,
                     })
@@ -879,7 +958,7 @@ fn response(
                     .into_iter()
                     .filter_map(|l| {
                         Some(Jump {
-                            path: uri::to_path(&l.uri)?,
+                            path: path_for(path_map, &l.uri)?,
                             line: l.range.start.line,
                             character: l.range.start.character,
                         })
@@ -912,23 +991,34 @@ fn response(
             changes: Changes::default(),
         }),
         Kind::Rename => match serde_json::from_value::<WorkspaceEdit>(result.clone()) {
-            Ok(edit) => Some(Incoming::Renamed {
-                id,
-                changes: edit.resolve(),
-            }),
+            Ok(mut edit) => {
+                remap_workspace_edit(path_map, &mut edit);
+                Some(Incoming::Renamed {
+                    id,
+                    changes: edit.resolve(),
+                })
+            }
             Err(err) => Some(Incoming::Failed {
                 text: format!("rename: {err}"),
             }),
         },
 
-        Kind::CodeActions => Some(Incoming::CodeActions {
-            id,
-            actions: CodeAction::parse(result),
-        }),
+        Kind::CodeActions => {
+            let mut actions = CodeAction::parse(result);
+            for action in &mut actions {
+                if let Some(edit) = &mut action.edit {
+                    remap_workspace_edit(path_map, edit);
+                }
+            }
+            Some(Incoming::CodeActions { id, actions })
+        }
 
         Kind::Resolve => match serde_json::from_value::<CodeAction>(result.clone()) {
             Ok(mut action) => {
                 action.raw = result.clone();
+                if let Some(edit) = &mut action.edit {
+                    remap_workspace_edit(path_map, edit);
+                }
                 Some(Incoming::Resolved {
                     id,
                     action: Box::new(action),
@@ -944,10 +1034,15 @@ fn response(
             symbols: Vec::new(),
         }),
         Kind::Symbols => match serde_json::from_value::<SymbolResponse>(result.clone()) {
-            Ok(response) => Some(Incoming::Symbols {
-                id,
-                symbols: response.flatten(),
-            }),
+            Ok(response) => {
+                let mut symbols = response.flatten();
+                for sym in &mut symbols {
+                    if let Some(u) = sym.uri.take() {
+                        sym.uri = Some(remap_uri(path_map, u));
+                    }
+                }
+                Some(Incoming::Symbols { id, symbols })
+            }
             Err(err) => Some(Incoming::Failed {
                 text: format!("symbols: {err}"),
             }),
@@ -989,7 +1084,7 @@ mod tests {
 
         let (to_editor, from_server) = mpsc::channel();
         let (to_server, from_editor) = mpsc::channel();
-        read_loop(Cursor::new(wire), &to_editor, &to_server, &pending);
+        read_loop(Cursor::new(wire), &to_editor, &to_server, &pending, None);
         drop(to_editor);
         drop(to_server);
 
@@ -1345,5 +1440,115 @@ mod tests {
         ]);
         assert!(matches!(heard[0], Incoming::Failed { .. }));
         assert!(matches!(&heard[1], Incoming::Log { text } if text == "still here"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mapped_client_translates_uris_both_ways_across_a_real_stdio_server() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("proton-lsp-map-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let host_root = std::fs::canonicalize(&dir).unwrap();
+        let log_path = host_root.join("server_in.log");
+        let server_path = host_root.join("fake-lsp.sh");
+
+        let script = format!(
+            r#"#!/bin/sh
+set -eu
+LOG="{log}"
+send_msg() {{
+  body="$1"
+  printf 'Content-Length: %d\r\n\r\n%s' "${{#body}}" "$body"
+}}
+read_msg() {{
+  len=0
+  while IFS= read -r line; do
+    line=$(printf '%s' "$line" | tr -d '\r')
+    [ -z "$line" ] && break
+    case "$line" in
+      Content-Length:*) len=$(printf '%s' "${{line#Content-Length:}}" | tr -d ' ') ;;
+    esac
+  done
+  [ "$len" -eq 0 ] && return 1
+  dd bs=1 count="$len" 2>/dev/null
+}}
+while body=$(read_msg); do
+  printf '%s\n' "$body" >> "$LOG"
+  case "$body" in
+    *'"method":"initialize"'*)
+      send_msg '{{"jsonrpc":"2.0","id":1,"result":{{"capabilities":{{"definitionProvider":true}}}}}}'
+      ;;
+    *'"method":"textDocument/didOpen"'*)
+      send_msg '{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"file:///workspaces/app/main.rs","diagnostics":[{{"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":2}}}},"severity":1,"message":"err"}}]}} }}'
+      ;;
+    *'"method":"textDocument/definition"'*)
+      send_msg '{{"jsonrpc":"2.0","id":2,"result":{{"uri":"file:///workspaces/app/main.rs","range":{{"start":{{"line":4,"character":2}},"end":{{"line":4,"character":5}}}}}}}}'
+      ;;
+    *'"method":"shutdown"'*)
+      send_msg '{{"jsonrpc":"2.0","id":3,"result":null}}'
+      exit 0
+      ;;
+  esac
+done
+"#,
+            log = log_path.display()
+        );
+        std::fs::write(&server_path, script).unwrap();
+        std::fs::set_permissions(&server_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let map = uri::PathMap::new(&host_root, "/workspaces/app");
+        let mut client = Client::spawn_with_map(
+            "fake",
+            server_path.to_str().unwrap(),
+            &[],
+            &host_root,
+            &host_root,
+            Some(map),
+        )
+        .unwrap();
+
+        let main_rs = host_root.join("main.rs");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut got_ready = false;
+        while std::time::Instant::now() < deadline && !got_ready {
+            for msg in client.poll() {
+                if matches!(msg, Incoming::Ready { .. }) {
+                    got_ready = true;
+                }
+            }
+            if !got_ready {
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+        }
+        assert!(got_ready, "did not receive Ready");
+
+        client.did_open(&main_rs, "rust", 1, "fn main() {}\n");
+        let _ = client.definition(&main_rs, Position { line: 0, character: 3 });
+
+        let mut got_diag = None;
+        let mut got_def = None;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline && (got_diag.is_none() || got_def.is_none()) {
+            for msg in client.poll() {
+                match msg {
+                    Incoming::Diagnostics { path, .. } => got_diag = Some(path),
+                    Incoming::Definition { target, .. } => got_def = target,
+                    _ => {}
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+
+        assert_eq!(got_diag.as_ref(), Some(&main_rs));
+        assert_eq!(got_def.unwrap().path, main_rs);
+
+        let sent = std::fs::read_to_string(&log_path).unwrap();
+        assert!(sent.contains(r#""rootUri":"file:///workspaces/app""#), "{sent}");
+        assert!(sent.contains(r#""uri":"file:///workspaces/app/main.rs""#), "{sent}");
+
+        drop(client);
+        let _ = std::fs::remove_dir_all(&host_root);
     }
 }

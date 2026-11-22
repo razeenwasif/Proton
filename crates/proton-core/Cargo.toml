@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 proton-agent = { workspace = true }
 proton-claude = { workspace = true }
+proton-container = { workspace = true }
 proton-research = { workspace = true }
 proton-sheet = { workspace = true }
 proton-circuit = { workspace = true }

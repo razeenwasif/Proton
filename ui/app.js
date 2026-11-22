@@ -33,6 +33,7 @@ import { createSheet } from "./sheet.js";
 import { createCircuit } from "./circuit.js";
 import { createLogic } from "./logic.js";
 import { createCad } from "./cad.js";
+import { createContainer } from "./container.js";
 import { createLab } from "./lab.js";
 import { createLean } from "./lean.js";
 import { markdown } from "./markdown.js";
@@ -595,7 +596,7 @@ $$("[data-mode-go]").forEach((el) =>
 
 /** What the dock's header says while each panel is open. The agent's is the
  *  conversation's own title, from `renderChats`. */
-const DOCK_TITLES = { tasks: "Tasks", debug: "Debug", visualizer: "Visualizer", device: "Device", git: "Git" };
+const DOCK_TITLES = { tasks: "Tasks", debug: "Debug", visualizer: "Visualizer", device: "Device", git: "Git", container: "Dev Container" };
 let dockPanel = "agent";
 
 function setDock(panel) {
@@ -909,6 +910,29 @@ const logic = createLogic({ root: document, dispatch });
 
 /* CAD: a part's steps, the part in 3D, and a sketch drawn on its plane. */
 const cad = createCad({ root: document, dispatch });
+
+/* Dev Containers: isolated Linux container environments via devcontainer.json. */
+const containerUi = createContainer({
+  root: document,
+  dispatch,
+  openTerminal: () => setDock("term"),
+  openSettings: () => {
+    open("settings");
+    /** @type {HTMLElement | null} */ ($('[data-st-nav="container"]'))?.click();
+  },
+});
+
+$("#sl-container")?.addEventListener("click", () => {
+  coreSetMode("codex");
+  setDock("container");
+});
+$("#sl-container")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    coreSetMode("codex");
+    setDock("container");
+  }
+});
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
 const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings"];
@@ -3101,7 +3125,7 @@ function closeHover() {
 const LEADER = {
   "": [
     ["f", "+find"], ["p", "+project · plugins"], ["g", "+git"], ["l", "+lsp"],
-    ["d", "+debug"], ["w", "+window"], ["c", "+code"], ["t", "+terminal"],
+    ["d", "+debug"], ["w", "+window"], ["k", "+container"], ["c", "+code"], ["t", "+terminal"],
     ["e", "reveal this file in the tree"],
   ],
   f: [["f", "files"], ["g", "live grep"], ["b", "open buffers"], ["p", "projects — open a folder"], ["l", "your library"]],
@@ -3110,6 +3134,7 @@ const LEADER = {
   l: [["s", "symbols"], ["r", "rename"], ["a", "code actions"], ["f", "format"]],
   d: [["b", "toggle breakpoint"], ["r", "run"], ["c", "continue"], ["n", "step over"], ["i", "step into"], ["o", "step out"], ["q", "stop"]],
   w: [["v", "split right"], ["s", "split down"], ["h j k l", "go to a split"], ["w", "next split"], ["o", "only this split"], ["q", "close this split"]],
+  k: [["u", "start / attach"], ["r", "rebuild"], ["s", "stop"], ["d", "detach"], ["i", "create devcontainer.json"]],
   c: [["t", "trace in the Code Visualizer"]],
   t: [["t", "open the terminal"]],
 };
@@ -3571,6 +3596,10 @@ function renderEvent(event) {
 
     case "trace":
       renderTrace(event);
+      break;
+
+    case "container":
+      containerUi.update(event.state);
       break;
 
     case "notice":

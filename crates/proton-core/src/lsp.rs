@@ -237,6 +237,7 @@ pub struct Servers {
     /// Recorded rather than learned from a failed request: a save should not
     /// produce an error notice on every language with no formatter behind it.
     can: HashMap<&'static str, proton_lsp::Capable>,
+    container: Option<proton_container::ExecTarget>,
 }
 
 /// A question the editor is waiting on an answer to.
@@ -274,6 +275,24 @@ impl Servers {
         self.enabled
     }
 
+    /// Route newly started language servers inside `target` (or back to the
+    /// host when `None`), resetting any running servers so buffers re-announce
+    /// cleanly to the new environment.
+    pub fn set_container(&mut self, target: Option<proton_container::ExecTarget>) {
+        if self.container == target {
+            return;
+        }
+        self.clients.clear();
+        self.unavailable.clear();
+        self.announced.clear();
+        self.diagnostics.clear();
+        self.status.clear();
+        self.notes.clear();
+        self.awaiting.clear();
+        self.can.clear();
+        self.container = target;
+    }
+
     /// Every server we have tried to start, and how it is doing. Sorted so the
     /// statusline does not reshuffle itself between polls.
     pub fn status(&self) -> Vec<(&'static str, ServerStatus, Option<String>)> {
@@ -296,8 +315,39 @@ impl Servers {
             return None;
         }
         if !self.clients.contains_key(language.id) {
-            let args: Vec<String> = language.args.iter().map(|s| (*s).to_string()).collect();
-            match Client::spawn(language.id, language.program, &args, &self.root) {
+            let (program, args, path_map) = if let Some(target) = &self.container {
+                let (prog, arg_list) = match target.lsp_overrides.get(language.id) {
+                    Some(ov) => (ov.program.as_str(), ov.args.clone()),
+                    None => (
+                        language.program,
+                        language.args.iter().map(|s| (*s).to_string()).collect(),
+                    ),
+                };
+                let exec = proton_container::runtime::exec_args(target, false, prog, &arg_list);
+                let map = proton_lsp::uri::PathMap::new(
+                    &target.path_map.host_root,
+                    &target.path_map.container_root,
+                );
+                (
+                    target.runtime.to_string_lossy().into_owned(),
+                    exec,
+                    Some(map),
+                )
+            } else {
+                (
+                    language.program.to_string(),
+                    language.args.iter().map(|s| (*s).to_string()).collect(),
+                    None,
+                )
+            };
+            match Client::spawn_with_map(
+                language.id,
+                &program,
+                &args,
+                &self.root,
+                &self.root,
+                path_map,
+            ) {
                 Ok(client) => {
                     self.clients.insert(language.id, client);
                     self.status.insert(language.id, ServerStatus::Starting);

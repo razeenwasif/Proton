@@ -109,6 +109,7 @@ pub struct Debugger {
     /// the question — the adapter does not echo it back.
     wanted: Option<i64>,
     output: Vec<String>,
+    container: Option<proton_container::ExecTarget>,
 }
 
 /// How many lines of program output to keep. Enough to see what happened,
@@ -210,22 +211,20 @@ impl Debugger {
         self.verified.remove(path);
     }
 
+    pub fn set_container(&mut self, target: Option<proton_container::ExecTarget>) {
+        if self.container == target {
+            return;
+        }
+        self.stop();
+        self.container = target;
+    }
+
     /// Start a session. `Err` is what to tell the user.
     pub fn start(&mut self) -> Result<(), String> {
         if self.client.is_some() {
             return Err("already debugging — :dbstop first".into());
         }
         let launch = Launch::read(&self.root)?;
-        if !launch.adapter.is_file() {
-            return Err(format!("no adapter at {}", launch.adapter.display()));
-        }
-        if !launch.program.is_file() {
-            return Err(format!(
-                "nothing to run at {} — build it first",
-                launch.program.display()
-            ));
-        }
-
         let breakpoints = self
             .breakpoints
             .iter()
@@ -233,14 +232,50 @@ impl Debugger {
             .map(|(path, lines)| (path.clone(), lines.iter().copied().collect()))
             .collect();
 
-        let client = Client::launch(
-            &launch.adapter,
-            &launch.args,
-            &launch.program,
-            &self.root,
-            breakpoints,
-        )
-        .map_err(|err| format!("could not start {}: {err}", launch.adapter.display()))?;
+        let client = if let Some(target) = self.container.clone() {
+            let program_in_container = target
+                .path_map
+                .host_to_container(&launch.program)
+                .unwrap_or_else(|| launch.program.to_string_lossy().into_owned());
+            let adapter_str = launch.adapter.to_string_lossy().into_owned();
+            let exec = proton_container::runtime::exec_args(
+                &target,
+                false,
+                &adapter_str,
+                &launch.args,
+            );
+            Client::launch_mapped(
+                &target.runtime,
+                &exec,
+                &program_in_container,
+                &self.root,
+                &target.workdir,
+                breakpoints,
+                Some((
+                    target.path_map.host_root.clone(),
+                    target.path_map.container_root.clone(),
+                )),
+            )
+            .map_err(|err| format!("could not start {}: {err}", launch.adapter.display()))?
+        } else {
+            if !launch.adapter.is_file() {
+                return Err(format!("no adapter at {}", launch.adapter.display()));
+            }
+            if !launch.program.is_file() {
+                return Err(format!(
+                    "nothing to run at {} — build it first",
+                    launch.program.display()
+                ));
+            }
+            Client::launch(
+                &launch.adapter,
+                &launch.args,
+                &launch.program,
+                &self.root,
+                breakpoints,
+            )
+            .map_err(|err| format!("could not start {}: {err}", launch.adapter.display()))?
+        };
 
         self.client = Some(client);
         self.phase = Phase::Running;

@@ -21,6 +21,7 @@ import type { CircuitRunView } from "./CircuitRunView";
 import type { CircuitTestResult } from "./CircuitTestResult";
 import type { ClaudeItem } from "./ClaudeItem";
 import type { Completion } from "./Completion";
+import type { ContainerView } from "./ContainerView";
 import type { DebugFrame } from "./DebugFrame";
 import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
@@ -341,4 +342,4 @@ subject: string,
 /**
  * Step count, an error, or what it is doing.
  */
-message: string, step: number, steps: number, view: StepView | null, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, };
+message: string, step: number, steps: number, view: StepView | null, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, } | { "type": "container", state: ContainerView, };

@@ -53,6 +53,7 @@
     "cad-companion.js",
     "cad-sketch.js",
     "preview-cad.js",
+    "container.js",
     "kmap.js",
     "sheet-chart.js",
     "pdf-view.js",

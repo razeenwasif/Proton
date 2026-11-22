@@ -5,7 +5,154 @@
 //! — three slashes, forward slashes, an unencoded drive colon — and a path with
 //! a space in it has to survive the trip back unchanged.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+/// Bidirectional host ↔ container path & `file://` URI translator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathMap {
+    pub host_root: PathBuf,
+    pub container_root: String,
+}
+
+impl PathMap {
+    pub fn new(host_root: impl Into<PathBuf>, container_root: impl Into<String>) -> Self {
+        let mut container_root = container_root.into();
+        while container_root.len() > 1 && container_root.ends_with('/') {
+            container_root.pop();
+        }
+        Self {
+            host_root: host_root.into(),
+            container_root,
+        }
+    }
+
+    pub fn host_to_container(&self, host_path: &Path) -> Option<String> {
+        let rel = strip_host_prefix(&self.host_root, host_path)?;
+        let mut out = if self.container_root == "/" {
+            String::new()
+        } else {
+            self.container_root.clone()
+        };
+        for comp in rel.components() {
+            match comp {
+                Component::Normal(seg) => {
+                    out.push('/');
+                    out.push_str(&seg.to_string_lossy());
+                }
+                Component::CurDir => {}
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+            }
+        }
+        Some(if out.is_empty() { "/".to_string() } else { out })
+    }
+
+    pub fn container_to_host(&self, container_path: &str) -> Option<PathBuf> {
+        let trimmed = if container_path.len() > 1 {
+            container_path.trim_end_matches('/')
+        } else {
+            container_path
+        };
+        let rel = if self.container_root == "/" {
+            trimmed.strip_prefix('/')?
+        } else if trimmed == self.container_root {
+            ""
+        } else {
+            trimmed
+                .strip_prefix(&self.container_root)?
+                .strip_prefix('/')?
+        };
+        let mut out = self.host_root.clone();
+        for seg in rel.split('/').filter(|s| !s.is_empty() && *s != ".") {
+            if seg == ".." {
+                return None;
+            }
+            out.push(seg);
+        }
+        Some(out)
+    }
+
+    pub fn host_to_uri(&self, host_path: &Path) -> String {
+        match self.host_to_container(host_path) {
+            Some(cpath) => from_posix(&cpath),
+            None => from_path(host_path),
+        }
+    }
+
+    pub fn uri_to_host_path(&self, uri: &str) -> Option<PathBuf> {
+        if let Some(cpath) = to_posix_string(uri) {
+            if let Some(host) = self.container_to_host(&cpath) {
+                return Some(host);
+            }
+        }
+        to_path(uri)
+    }
+
+    pub fn uri_to_host_uri(&self, uri: &str) -> String {
+        match to_posix_string(uri).and_then(|c| self.container_to_host(&c)) {
+            Some(host) => from_path(&host),
+            None => uri.to_string(),
+        }
+    }
+}
+
+fn strip_host_prefix(root: &Path, target: &Path) -> Option<PathBuf> {
+    if let Ok(rel) = target.strip_prefix(root) {
+        return Some(rel.to_path_buf());
+    }
+    let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if let Ok(rel) = target.strip_prefix(&canon_root) {
+        return Some(rel.to_path_buf());
+    }
+    if let Some(canon_target) = canonicalize_with_tail(target) {
+        if let Ok(rel) = canon_target.strip_prefix(&canon_root) {
+            return Some(rel.to_path_buf());
+        }
+        if let Ok(rel) = canon_target.strip_prefix(root) {
+            return Some(rel.to_path_buf());
+        }
+    }
+    None
+}
+
+fn canonicalize_with_tail(path: &Path) -> Option<PathBuf> {
+    if let Ok(canon) = std::fs::canonicalize(path) {
+        return Some(canon);
+    }
+    let mut cur = path;
+    let mut tail = Vec::new();
+    while let Some(name) = cur.file_name() {
+        tail.push(name.to_os_string());
+        cur = cur.parent()?;
+        if let Ok(mut canon) = std::fs::canonicalize(cur) {
+            for seg in tail.into_iter().rev() {
+                canon.push(seg);
+            }
+            return Some(canon);
+        }
+    }
+    None
+}
+
+fn from_posix(text: &str) -> String {
+    let mut uri = String::from("file://");
+    if !text.starts_with('/') {
+        uri.push('/');
+    }
+    for byte in text.bytes() {
+        if is_safe(byte) {
+            uri.push(byte as char);
+        } else {
+            uri.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    uri
+}
+
+fn to_posix_string(uri: &str) -> Option<String> {
+    let rest = uri.strip_prefix("file://")?;
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    decode(rest)
+}
 
 /// Characters that never need escaping, per RFC 3986's `unreserved` set. `/`
 /// is added because it is the separator we are building, and `:` because the

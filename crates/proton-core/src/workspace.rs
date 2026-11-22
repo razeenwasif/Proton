@@ -205,6 +205,10 @@ pub struct Workspace {
     /// the pattern, which is the distinction people use it for — the highlight
     /// has served its purpose and `n` still has to work.
     highlight: bool,
+    /// Dev container discovery, lifecycle, and host ↔ container routing.
+    container: proton_container::Manager,
+    /// Guard ensuring `container.autoAttach` runs at most once per workspace.
+    container_auto_attempted: bool,
 }
 
 /// A search, remembered.
@@ -265,23 +269,49 @@ struct Running {
 const COMMAND_OUTPUT: usize = 16_000;
 
 /// Start a command in the project, in the person's own shell as a login
-/// shell would set it up — so what is on their PATH is on its — with no
-/// input, in a process group of its own so stopping it stops what it began.
-fn start_command(root: &Path, command: &str) -> Result<Running, String> {
+/// shell would set it up — so what is on their PATH is on its — or inside the
+/// attached dev container when one is active — with no input, in a process
+/// group of its own so stopping it stops what it began.
+fn start_command(
+    root: &Path,
+    command: &str,
+    container: Option<&proton_container::ExecTarget>,
+) -> Result<Running, String> {
     use std::io::Read;
     use std::process::{Command as Process, Stdio};
-    let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
-    let mut process = Process::new(&shell);
-    if cfg!(target_os = "macos") && ["zsh", "bash", "fish"].iter().any(|s| shell.ends_with(s)) {
-        process.arg("-l");
-    }
-    process.arg("-c").arg(command).current_dir(root).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let (label, mut process) = if let Some(target) = container {
+        let exec = proton_container::runtime::exec_args(
+            target,
+            false,
+            "/bin/sh",
+            &["-lc".to_string(), command.to_string()],
+        );
+        let mut proc = Process::new(&target.runtime);
+        proc.args(&exec);
+        (target.runtime.display().to_string(), proc)
+    } else {
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "/bin/sh".into());
+        let mut proc = Process::new(&shell);
+        if cfg!(target_os = "macos") && ["zsh", "bash", "fish"].iter().any(|s| shell.ends_with(s)) {
+            proc.arg("-l");
+        }
+        proc.arg("-c").arg(command);
+        (shell, proc)
+    };
+    process
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         process.process_group(0);
     }
-    let mut child = process.spawn().map_err(|e| format!("{shell}: {e}"))?;
+    let mut child = process.spawn().map_err(|e| format!("{label}: {e}"))?;
     let out = Arc::new(Mutex::new(Vec::new()));
     let ended = Arc::new(Mutex::new(None));
     let readers: Vec<_> = [child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>), child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>)]
@@ -423,6 +453,7 @@ impl Workspace {
             git: Git::discover(root),
             debugger: Debugger::new(root),
             settings: crate::settings::Settings::load(root),
+            container: proton_container::Manager::new(root),
             term_size: (24, 80),
             ..Default::default()
         };
@@ -732,6 +763,20 @@ impl Workspace {
                 if !crate::folder::is_too_broad(self.root(), crate::folder::home().as_deref()) {
                     self.pickers.warm();
                 }
+                if !self.container.is_busy() {
+                    self.container.refresh();
+                }
+                let mut auto_notice = None;
+                if !self.container_auto_attempted
+                    && self.settings.bool("container.autoAttach", false)
+                    && self.container.phase() == proton_container::ContainerPhase::Detected
+                {
+                    self.container_auto_attempted = true;
+                    let runtime_pref = self.settings.string("container.runtime", "auto");
+                    if let Err(why) = self.container.start(None, Some(&runtime_pref), false) {
+                        auto_notice = Some(notice(why, NoticeLevel::Warn));
+                    }
+                }
                 let mut events = vec![
                     self.state_event(),
                     self.splits_event(),
@@ -766,10 +811,14 @@ impl Workspace {
                     self.settings_event(),
                     self.library_event(),
                     self.chats_event(),
+                    self.container_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
                     },
                 ]);
+                if let Some(n) = auto_notice {
+                    events.push(n);
+                }
                 events.extend(self.research().sync());
                 // Excel's home page and workbook, when it is the mode on
                 // screen: finding the workbooks walks the project.
@@ -1043,7 +1092,25 @@ impl Workspace {
                 }
                 if self.terminal.is_none() {
                     let (rows, cols) = self.term_size;
-                    match proton_term::Terminal::open(self.pickers.root(), rows, cols) {
+                    let opened = if let Some(target) = self.container.exec_target() {
+                        let exec = proton_container::runtime::exec_args(
+                            target,
+                            true,
+                            &target.shell,
+                            &[],
+                        );
+                        proton_term::Terminal::open_program(
+                            &target.runtime,
+                            &exec,
+                            self.pickers.root(),
+                            &[("TERM", "xterm-256color")],
+                            rows,
+                            cols,
+                        )
+                    } else {
+                        proton_term::Terminal::open(self.pickers.root(), rows, cols)
+                    };
+                    match opened {
                         Ok(term) => self.terminal = Some(term),
                         Err(err) => {
                             return vec![notice(format!("no terminal: {err}"), NoticeLevel::Error)]
@@ -1172,6 +1239,24 @@ impl Workspace {
             Command::DebugStepOut => {
                 self.debugger.step_out();
                 Vec::new()
+            }
+
+            Command::ContainerStart { config } => self.start_container(config.as_deref(), false),
+            Command::ContainerRebuild { config } => self.start_container(config.as_deref(), true),
+            Command::ContainerStop => self.stop_container(),
+            Command::ContainerDetach => self.detach_container(),
+            Command::ContainerInit { template } => self.init_container(&template),
+            Command::ContainerSelectConfig { path } => match self.container.select_config(&path) {
+                Ok(()) => vec![self.container_event()],
+                Err(why) => vec![notice(why, NoticeLevel::Warn), self.container_event()],
+            },
+            Command::ContainerRefresh => {
+                self.container.refresh();
+                vec![self.container_event()]
+            }
+            Command::ContainerClearLogs => {
+                self.container.clear_logs();
+                vec![self.container_event()]
             }
 
             Command::ToggleTreeNode { path } => {
@@ -2286,6 +2371,10 @@ impl Workspace {
             return events;
         }
 
+        if ex.name == "container" || ex.name == "devcontainer" {
+            return self.ex_container(ex.arg.as_deref());
+        }
+
         vec![Event::CmdlineRun { text: line }]
     }
 
@@ -2508,6 +2597,17 @@ impl Workspace {
             self.formatting = None;
             // No server formats it, but clang-format can: C and C++ without clangd.
             if crate::formatters::is_c_family(&path) {
+                if let Some(target) = self.container.exec_target() {
+                    let text = self.editor.buffer().contents();
+                    self.external_format =
+                        Some(crate::formatters::start_in_container(target, &path, text));
+                    self.formatting = Some(Formatting {
+                        path,
+                        version: self.editor.buffer().version(),
+                        then_write,
+                    });
+                    return Vec::new();
+                }
                 let program = self.clang_format.get_or_insert_with(crate::formatters::clang_format).clone();
                 if let Some(program) = program {
                     let text = self.editor.buffer().contents();
@@ -2803,6 +2903,27 @@ impl Workspace {
         if self.visualizer.poll() {
             events.push(self.trace_event());
             events.extend(self.follow_trace());
+        }
+
+        let container_poll = self.container.poll();
+        if container_poll.changed {
+            match container_poll.transition {
+                Some(proton_container::Transition::Attached(target)) => {
+                    events.extend(self.on_container_attached(target));
+                }
+                Some(proton_container::Transition::Detached) => {
+                    events.extend(self.on_container_detached("Dev container stopped"));
+                }
+                Some(proton_container::Transition::Failed(why)) => {
+                    events.push(self.container_event());
+                    events.push(notice(why, NoticeLevel::Error));
+                }
+                None => {
+                    if !self.quiet {
+                        events.push(self.container_event());
+                    }
+                }
+            }
         }
 
         let messages = self.servers.poll();
@@ -3400,6 +3521,7 @@ impl Workspace {
             eprintln!("proton: the notebook could not be saved: {why}");
         }
         self.data.shutdown();
+        self.container.shutdown();
         if !self.research_shared {
             self.research().shutdown();
         }
@@ -4618,7 +4740,8 @@ impl Workspace {
             return vec![self.agent_event()];
         }
         let root = self.root().to_path_buf();
-        match start_command(&root, &self.proposed[at].command) {
+        let target = self.container.exec_target().cloned();
+        match start_command(&root, &self.proposed[at].command, target.as_ref()) {
             Ok(running) => {
                 self.proposed[at].running = Some(running);
                 self.agent.asking(call, false, "running…");
@@ -6179,6 +6302,14 @@ impl Workspace {
                 events.extend(self.apply(window_command(&prefix).unwrap()));
                 (events, false)
             }
+            // The dev container family, under `␣k`.
+            Outcome::Leader(prefix) if self.container_command(&prefix).is_some() => {
+                self.vim.cancel_leader();
+                let mut events = vec![Event::Leader { prefix: None }];
+                let cmd = self.container_command(&prefix).unwrap();
+                events.extend(self.apply(cmd));
+                (events, false)
+            }
             // `␣e` finds the file you are in. The rail has always claimed this
             // binding in its tooltip; now it exists.
             Outcome::Leader(prefix) if prefix == "e" => {
@@ -6482,6 +6613,165 @@ impl Workspace {
             vim_mode,
             vim_label: vim_mode.label().to_string(),
         }
+    }
+
+    fn container_event(&self) -> Event {
+        Event::Container {
+            state: crate::container::view(&self.container),
+        }
+    }
+
+    fn container_command(&self, prefix: &str) -> Option<Command> {
+        Some(match prefix {
+            "ku" => Command::ContainerStart { config: None },
+            "kr" => Command::ContainerRebuild { config: None },
+            "ks" => Command::ContainerStop,
+            "kd" => Command::ContainerDetach,
+            "ki" => Command::ContainerInit {
+                template: proton_container::suggest_template(self.pickers.root()).to_string(),
+            },
+            _ => return None,
+        })
+    }
+
+    fn start_container(&mut self, config: Option<&str>, rebuild: bool) -> Vec<Event> {
+        let runtime_pref = self.settings.string("container.runtime", "auto");
+        match self.container.start(config, Some(&runtime_pref), rebuild) {
+            Ok(()) => vec![self.container_event()],
+            Err(why) => vec![notice(why, NoticeLevel::Error), self.container_event()],
+        }
+    }
+
+    fn stop_container(&mut self) -> Vec<Event> {
+        match self.container.stop() {
+            Ok(()) => vec![self.container_event()],
+            Err(why) => vec![notice(why, NoticeLevel::Warn), self.container_event()],
+        }
+    }
+
+    fn detach_container(&mut self) -> Vec<Event> {
+        if self.container.detach() {
+            self.on_container_detached("Detached from dev container (container left running)")
+        } else {
+            vec![
+                notice("no dev container attached".into(), NoticeLevel::Warn),
+                self.container_event(),
+            ]
+        }
+    }
+
+    fn init_container(&mut self, template: &str) -> Vec<Event> {
+        let root = self.pickers.root().to_path_buf();
+        match proton_container::write_template(&root, template) {
+            Ok(created) => {
+                self.container.refresh();
+                let rel = created
+                    .strip_prefix(&root)
+                    .unwrap_or(&created)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let mut events = self.open_path(&rel);
+                events.push(self.tree_event());
+                events.push(self.repo_event());
+                events.push(self.container_event());
+                events.push(notice(format!("created {rel}"), NoticeLevel::Info));
+                events
+            }
+            Err(why) => vec![notice(why, NoticeLevel::Warn), self.container_event()],
+        }
+    }
+
+    fn on_container_attached(&mut self, target: proton_container::ExecTarget) -> Vec<Event> {
+        self.servers.set_container(Some(target.clone()));
+        if self.mode.edits_text() {
+            for buf in self.editor.buffers() {
+                self.servers.sync(buf);
+            }
+        }
+        self.debugger.set_container(Some(target));
+
+        let had_term = self.terminal.take().is_some();
+        self.term_sent.clear();
+        let mut events = vec![
+            self.container_event(),
+            self.servers_event(),
+            self.diagnostics_event(),
+            notice(
+                "Dev container attached — terminal & LSP now run inside the container".into(),
+                NoticeLevel::Info,
+            ),
+        ];
+        if had_term {
+            let (rows, cols) = self.term_size;
+            if let Some(target) = self.container.exec_target() {
+                let exec = proton_container::runtime::exec_args(target, true, &target.shell, &[]);
+                if let Ok(term) = proton_term::Terminal::open_program(
+                    &target.runtime,
+                    &exec,
+                    self.pickers.root(),
+                    &[("TERM", "xterm-256color")],
+                    rows,
+                    cols,
+                ) {
+                    self.terminal = Some(term);
+                }
+            }
+            events.push(self.terminal_event());
+        }
+        events
+    }
+
+    fn on_container_detached(&mut self, message: &str) -> Vec<Event> {
+        self.servers.set_container(None);
+        self.resync();
+        self.debugger.set_container(None);
+
+        let had_term = self.terminal.take().is_some();
+        self.term_sent.clear();
+        let mut events = vec![
+            self.container_event(),
+            self.servers_event(),
+            self.diagnostics_event(),
+            notice(message.into(), NoticeLevel::Info),
+        ];
+        if had_term {
+            events.push(self.terminal_event());
+        }
+        events
+    }
+
+    fn ex_container(&mut self, arg: Option<&str>) -> Vec<Event> {
+        let trimmed = arg.map(str::trim).unwrap_or("");
+        if trimmed.is_empty() || matches!(trimmed, "up" | "start" | "attach") {
+            return self.apply(Command::ContainerStart { config: None });
+        }
+        if trimmed == "rebuild" {
+            return self.apply(Command::ContainerRebuild { config: None });
+        }
+        if matches!(trimmed, "stop" | "down") {
+            return self.apply(Command::ContainerStop);
+        }
+        if trimmed == "detach" {
+            return self.apply(Command::ContainerDetach);
+        }
+        if trimmed == "refresh" {
+            return self.apply(Command::ContainerRefresh);
+        }
+        if trimmed == "init" {
+            let suggested = proton_container::suggest_template(self.pickers.root()).to_string();
+            return self.apply(Command::ContainerInit { template: suggested });
+        }
+        if let Some(rest) = trimmed.strip_prefix("init ") {
+            let tpl = rest.trim().to_string();
+            if !tpl.is_empty() {
+                return self.apply(Command::ContainerInit { template: tpl });
+            }
+        }
+        vec![notice(
+            "usage: :container [start|rebuild|stop|detach|init [rust|python|node|cpp|go|base]]"
+                .into(),
+            NoticeLevel::Warn,
+        )]
     }
 }
 
@@ -7447,5 +7737,189 @@ mod tests {
                 "{buffers:?}"
             );
         }
+    }
+
+    #[test]
+    fn container_sync_init_ex_and_leader_work_end_to_end() {
+        let p = Project::new("devcontainer");
+        std::fs::write(p.base.join("Cargo.toml"), "[package]\nname=\"demo\"\n").unwrap();
+
+        let mut ws = Workspace::rooted(&p.base);
+        let synced = ws.apply(Command::Sync);
+        let Some(Event::Container { state }) = synced.iter().find(|e| matches!(e, Event::Container { .. })) else {
+            panic!("Sync must emit Event::Container: {synced:?}");
+        };
+        assert_eq!(state.phase, crate::container::ContainerPhase::Absent);
+        assert_eq!(state.suggested_template, "rust");
+
+        // `:container init` creates .devcontainer/devcontainer.json using the suggested rust template
+        let init_events = ws.run_ex("container init".into());
+        assert!(p.base.join(".devcontainer/devcontainer.json").is_file());
+        let Some(Event::Container { state }) = init_events.iter().find(|e| matches!(e, Event::Container { .. })) else {
+            panic!("ContainerInit must emit Event::Container");
+        };
+        assert_eq!(state.phase, crate::container::ContainerPhase::Detected);
+        assert_eq!(
+            state.config_path.as_deref(),
+            Some(".devcontainer/devcontainer.json")
+        );
+
+        // `␣ki` when file already exists reports a warning notice without panicking
+        let leader_events = ws.apply(Command::Key { key: Key::char(' ') });
+        assert!(leader_events.iter().any(|e| matches!(e, Event::Leader { prefix: Some(p) } if p.is_empty())));
+        let _ = ws.apply(Command::Key { key: Key::char('k') });
+        let ki_events = ws.apply(Command::Key { key: Key::char('i') });
+        assert!(ki_events.iter().any(|e| matches!(
+            e,
+            Event::Notice { level: NoticeLevel::Warn, text } if text.contains("already exists")
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_attaches_runs_command_and_detaches_via_fake_runtime() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let p = Project::new("devcontainer-runtime");
+        let canon = std::fs::canonicalize(&p.base).unwrap();
+        let state_dir = canon.join(".fake-state");
+        std::fs::create_dir_all(canon.join(".devcontainer")).unwrap();
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::write(
+            canon.join(".devcontainer/devcontainer.json"),
+            r#"{ "name": "Test Box", "image": "alpine:3.20", "forwardPorts": [3000] }"#,
+        )
+        .unwrap();
+
+        let fake_bin = state_dir.join("docker");
+        let script = format!(
+            r#"#!/bin/sh
+set -eu
+STATE="{state}"
+cmd="${{1:-}}"
+shift || true
+case "$cmd" in
+  info) echo "28.0.0-fake" ;;
+  inspect) exit 1 ;;
+  run) echo "cid-core-1" ;;
+  port) echo "3000/tcp -> 0.0.0.0:3000" ;;
+  stop) echo "stopped" > "$STATE/stopped" ;;
+  exec)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -i|-it) shift ;;
+        -u|-w|-e) shift 2 ;;
+        *) break ;;
+      esac
+    done
+    shift || true
+    if [ "${{1:-}}" = "/bin/sh" ] && [ "${{2:-}}" = "-c" ]; then
+      echo "/bin/sh"
+    elif [ "${{1:-}}" = "/bin/sh" ] && [ "${{2:-}}" = "-lc" ]; then
+      echo "IN_CONTAINER:${{3:-}}" > "$STATE/agent_cmd"
+      echo "container-ran"
+    fi
+    ;;
+  *) exit 0 ;;
+esac
+"#,
+            state = state_dir.display()
+        );
+        std::fs::write(&fake_bin, script).unwrap();
+        std::fs::set_permissions(&fake_bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        struct EnvGuard(Option<std::ffi::OsString>);
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(v) => std::env::set_var("PROTON_CONTAINER_BIN", v),
+                    None => std::env::remove_var("PROTON_CONTAINER_BIN"),
+                }
+            }
+        }
+        let _env_guard = EnvGuard(std::env::var_os("PROTON_CONTAINER_BIN"));
+        std::env::set_var("PROTON_CONTAINER_BIN", &fake_bin);
+
+        let mut ws = Workspace::rooted(&canon);
+        let sync_events = ws.apply(Command::Sync);
+        assert!(sync_events.iter().any(|e| matches!(
+            e,
+            Event::Container { state } if state.phase == crate::container::ContainerPhase::Detected
+        )));
+
+        let start_events = ws.apply(Command::ContainerStart { config: None });
+        assert!(start_events.iter().any(|e| matches!(
+            e,
+            Event::Container { state } if state.phase == crate::container::ContainerPhase::Starting
+        )));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut attached = false;
+        while std::time::Instant::now() < deadline {
+            let poll_events = ws.apply(Command::Poll);
+            if poll_events.iter().any(|e| matches!(
+                e,
+                Event::Container { state } if state.phase == crate::container::ContainerPhase::Running
+            )) {
+                attached = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        assert!(attached, "workspace did not transition to Running");
+
+        // `start_command` routes approved commands into the container via `exec -i ... /bin/sh -lc ...`
+        let running = start_command(&canon, "cargo check", ws.container.exec_target()).unwrap();
+        let wait_end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < wait_end {
+            if running.ended.lock().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            std::fs::read_to_string(state_dir.join("agent_cmd")).unwrap().trim(),
+            "IN_CONTAINER:cargo check"
+        );
+
+        let detach_events = ws.apply(Command::ContainerDetach);
+        assert!(detach_events.iter().any(|e| matches!(
+            e,
+            Event::Container { state } if state.phase == crate::container::ContainerPhase::Detected
+        )));
+
+        // Enabling `container.autoAttach` attaches once on initial Sync, and does not re-attach after detach.
+        std::fs::create_dir_all(canon.join(".proton")).unwrap();
+        std::fs::write(
+            canon.join(".proton/settings.json"),
+            r#"{"container":{"autoAttach":true}}"#,
+        )
+        .unwrap();
+        let mut auto_ws = Workspace::rooted(&canon);
+        let first_sync = auto_ws.apply(Command::Sync);
+        assert!(first_sync.iter().any(|e| matches!(
+            e,
+            Event::Container { state } if state.phase == crate::container::ContainerPhase::Starting
+        )));
+        let auto_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut auto_attached = false;
+        while std::time::Instant::now() < auto_deadline {
+            let poll_events = auto_ws.apply(Command::Poll);
+            if poll_events.iter().any(|e| matches!(
+                e,
+                Event::Container { state } if state.phase == crate::container::ContainerPhase::Running
+            )) {
+                auto_attached = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        assert!(auto_attached, "autoAttach workspace did not transition to Running");
+        auto_ws.apply(Command::ContainerDetach);
+        let second_sync = auto_ws.apply(Command::Sync);
+        assert!(second_sync.iter().any(|e| matches!(
+            e,
+            Event::Container { state } if state.phase == crate::container::ContainerPhase::Detected
+        )));
     }
 }

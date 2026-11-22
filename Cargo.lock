@@ -4365,6 +4365,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proton-container"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "proton-core"
 version = "0.0.1"
 dependencies = [
@@ -4374,6 +4383,7 @@ dependencies = [
  "proton-cad",
  "proton-circuit",
  "proton-claude",
+ "proton-container",
  "proton-council",
  "proton-dap",
  "proton-data",

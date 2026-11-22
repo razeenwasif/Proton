@@ -45,3 +45,15 @@ editor.update({type: 'cursor', view: 0, line: 0, column: 3, offset: 3, selection
 editor.update({type: 'viewport', lines: ['incomplete']});
 // @ts-expect-error The editor reducer does not accept unrelated events.
 editor.update({type: 'notice', text: 'hello', level: 'info'});
+
+dispatch({type: 'containerStart', config: null});
+dispatch({type: 'containerInit', template: 'rust'});
+// @ts-expect-error containerInit requires a template id string.
+dispatch({type: 'containerInit'});
+declare const containerEv: Extract<WireEvent, {type: 'container'}>;
+const _containerPhase: string = containerEv.state.phase;
+const _portUrls: string[] = containerEv.state.ports.map((p) => p.url);
+void _containerPhase;
+void _portUrls;
+// @ts-expect-error ContainerView exposes suggestedTemplate, not defaultTemplate.
+containerEv.state.defaultTemplate;

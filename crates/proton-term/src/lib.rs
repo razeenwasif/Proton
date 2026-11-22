@@ -150,6 +150,32 @@ fn takes_login_flag(program: &str) -> bool {
 impl Terminal {
     /// Start a shell in `cwd`.
     pub fn open(cwd: &std::path::Path, rows: u16, cols: u16) -> std::io::Result<Terminal> {
+        let mut cmd = shell();
+        cmd.cwd(cwd);
+        Self::open_builder(cmd, rows, cols)
+    }
+
+    /// Start an explicit program with arguments and environment variables in
+    /// `cwd` inside a pseudo-terminal.
+    pub fn open_program(
+        program: &std::path::Path,
+        args: &[String],
+        cwd: &std::path::Path,
+        env: &[(&str, &str)],
+        rows: u16,
+        cols: u16,
+    ) -> std::io::Result<Terminal> {
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(args);
+        cmd.cwd(cwd);
+        cmd.env("TERM", "xterm-256color");
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        Self::open_builder(cmd, rows, cols)
+    }
+
+    fn open_builder(cmd: CommandBuilder, rows: u16, cols: u16) -> std::io::Result<Terminal> {
         let rows = rows.max(1);
         let cols = cols.max(1);
         let pair = native_pty_system()
@@ -161,8 +187,6 @@ impl Terminal {
             })
             .map_err(other)?;
 
-        let mut cmd = shell();
-        cmd.cwd(cwd);
         let child = pair.slave.spawn_command(cmd).map_err(other)?;
         // The slave has to go, or nothing ever reaches end-of-file and the
         // reader thread outlives the shell.
@@ -634,5 +658,42 @@ mod tests {
         let rows = painted("\x1b[41m   \x1b[0m");
         assert_eq!(line(&rows[0]), "   ", "{:?}", rows[0]);
         assert_eq!(rows[0][0].bg, Some(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_program_runs_explicit_command_and_captures_screen_output() {
+        let cwd = std::env::temp_dir();
+        let args = vec!["-c".to_string(), "echo proton-container-ok".to_string()];
+        let mut term = Terminal::open_program(
+            std::path::Path::new("/bin/sh"),
+            &args,
+            &cwd,
+            &[("PROTON_TEST_ENV", "1")],
+            8,
+            40,
+        )
+        .unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut captured = String::new();
+        while std::time::Instant::now() < deadline {
+            term.poll();
+            captured = term
+                .screen()
+                .rows
+                .iter()
+                .map(|r| line(r))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if captured.contains("proton-container-ok") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            captured.contains("proton-container-ok"),
+            "expected output in screen: {captured:?}"
+        );
     }
 }

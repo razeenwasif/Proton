@@ -50,6 +50,7 @@ pub struct Client {
     seq: i64,
     /// Whether the adapter has gone. Distinct from "said nothing lately".
     alive: bool,
+    path_map: Option<proton_lsp::uri::PathMap>,
 }
 
 impl std::fmt::Debug for Client {
@@ -81,10 +82,35 @@ impl Client {
         cwd: &Path,
         breakpoints: Vec<(PathBuf, Vec<usize>)>,
     ) -> std::io::Result<Client> {
+        let program_str = program.to_string_lossy().into_owned();
+        let cwd_str = cwd.to_string_lossy().into_owned();
+        Self::launch_mapped(
+            adapter,
+            adapter_args,
+            &program_str,
+            cwd,
+            &cwd_str,
+            breakpoints,
+            None,
+        )
+    }
+
+    /// Start an adapter in `cwd_host`, telling the adapter `cwd_target` and
+    /// `program`, while translating breakpoint and stack source paths between
+    /// host and container via `path_map`.
+    pub fn launch_mapped(
+        adapter: &Path,
+        adapter_args: &[String],
+        program: &str,
+        cwd_host: &Path,
+        cwd_target: &str,
+        breakpoints: Vec<(PathBuf, Vec<usize>)>,
+        path_map: Option<(PathBuf, String)>,
+    ) -> std::io::Result<Client> {
         let mut command = Command::new(adapter);
         command
             .args(adapter_args)
-            .current_dir(cwd)
+            .current_dir(cwd_host)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             // The adapter's own diagnostics go to the void: everything Proton
@@ -96,6 +122,9 @@ impl Client {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             command.creation_flags(CREATE_NO_WINDOW);
         }
+
+        let map = path_map
+            .map(|(h, c)| proton_lsp::uri::PathMap::new(h, c));
 
         let mut child = command.spawn()?;
         let mut stdin = child.stdin.take().expect("piped");
@@ -114,9 +143,18 @@ impl Client {
 
         let (found, incoming) = mpsc::channel::<Incoming>();
         let replies = outgoing.clone();
+        let map_for_read = map.clone();
         std::thread::Builder::new()
             .name("proton-dap-read".into())
-            .spawn(move || read_loop(BufReader::new(stdout), found, replies, breakpoints))?;
+            .spawn(move || {
+                read_loop(
+                    BufReader::new(stdout),
+                    found,
+                    replies,
+                    breakpoints,
+                    map_for_read.as_ref(),
+                )
+            })?;
 
         let mut client = Client {
             child,
@@ -124,6 +162,7 @@ impl Client {
             incoming,
             seq: 0,
             alive: true,
+            path_map: map,
         };
         client.request(
             "initialize",
@@ -141,8 +180,8 @@ impl Client {
         client.request(
             "launch",
             serde_json::json!({
-                "program": program.to_string_lossy(),
-                "cwd": cwd.to_string_lossy(),
+                "program": program,
+                "cwd": cwd_target,
                 "stopAtBeginningOfMainSubprogram": false,
             }),
         );
@@ -158,7 +197,10 @@ impl Client {
 
     /// Replace the breakpoints for one file. DAP has no "add one".
     pub fn set_breakpoints(&mut self, path: &Path, lines: &[usize]) {
-        self.request("setBreakpoints", breakpoints_body(path, lines));
+        self.request(
+            "setBreakpoints",
+            breakpoints_body(path, lines, self.path_map.as_ref()),
+        );
     }
 
     pub fn resume(&mut self, thread: i64) {
@@ -232,9 +274,46 @@ impl Client {
     }
 }
 
-fn breakpoints_body(path: &Path, lines: &[usize]) -> serde_json::Value {
+fn target_path(path: &Path, map: Option<&proton_lsp::uri::PathMap>) -> String {
+    match map.and_then(|m| m.host_to_container(path)) {
+        Some(mapped) => mapped,
+        None => path.to_string_lossy().into_owned(),
+    }
+}
+
+fn map_incoming(mut item: Incoming, map: Option<&proton_lsp::uri::PathMap>) -> Incoming {
+    let Some(m) = map else {
+        return item;
+    };
+    match &mut item {
+        Incoming::Stack(frames) => {
+            for f in frames {
+                if let Some(p) = &f.path {
+                    if let Some(host) = m.container_to_host(&p.to_string_lossy()) {
+                        f.path = Some(host);
+                    }
+                }
+            }
+        }
+        Incoming::BreakpointChanged { path, .. } => {
+            if let Some(p) = path {
+                if let Some(host) = m.container_to_host(&p.to_string_lossy()) {
+                    *p = host;
+                }
+            }
+        }
+        _ => {}
+    }
+    item
+}
+
+fn breakpoints_body(
+    path: &Path,
+    lines: &[usize],
+    map: Option<&proton_lsp::uri::PathMap>,
+) -> serde_json::Value {
     serde_json::json!({
-        "source": { "path": path.to_string_lossy() },
+        "source": { "path": target_path(path, map) },
         "breakpoints": lines
             .iter()
             .map(|line| serde_json::json!({ "line": line }))
@@ -251,6 +330,7 @@ fn read_loop(
     found: Sender<Incoming>,
     replies: Sender<Vec<u8>>,
     pending: Vec<(PathBuf, Vec<usize>)>,
+    map: Option<&proton_lsp::uri::PathMap>,
 ) {
     // Its own counter: these are sent from this thread, and the sequence
     // numbers only have to be unique per direction.
@@ -277,16 +357,44 @@ fn read_loop(
         // are pending at best and refused at worst.
         if message["type"] == "event" && message["event"] == "initialized" {
             for (path, lines) in &pending {
-                configure("setBreakpoints", breakpoints_body(path, lines));
+                configure("setBreakpoints", breakpoints_body(path, lines, map));
             }
             configure("configurationDone", serde_json::json!({}));
         }
 
         for item in protocol::interpret(&message) {
-            if found.send(item).is_err() {
+            if found.send(map_incoming(item, map)).is_err() {
                 return;
             }
         }
     }
     let _ = found.send(Incoming::Exited { code: None });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_breakpoints_and_stack_frames_when_path_map_present() {
+        let map = proton_lsp::uri::PathMap::new("/Users/me/app", "/workspaces/app");
+        let body = breakpoints_body(Path::new("/Users/me/app/src/main.c"), &[12], Some(&map));
+        assert_eq!(body["source"]["path"], "/workspaces/app/src/main.c");
+
+        let mapped = map_incoming(
+            Incoming::Stack(vec![Frame {
+                id: 0,
+                name: "main".into(),
+                path: Some(PathBuf::from("/workspaces/app/src/main.c")),
+                line: 12,
+            }]),
+            Some(&map),
+        );
+        match mapped {
+            Incoming::Stack(frames) => {
+                assert_eq!(frames[0].path, Some(PathBuf::from("/Users/me/app/src/main.c")));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
 }

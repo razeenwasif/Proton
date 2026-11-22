@@ -5,7 +5,7 @@
   "scripts": {
     "check": "tsc -p ui/tsconfig.json",
     "test:transport": "node --test tests/ui/ordering.test.mjs",
-    "test:unit": "node --test tests/ui/ordering.test.mjs tests/ui/editor-row.test.mjs tests/ui/research.test.mjs tests/ui/literature.test.mjs tests/ui/molecule.test.mjs tests/ui/markdown-links.test.mjs tests/ui/cad.test.mjs",
+    "test:unit": "node --test tests/ui/ordering.test.mjs tests/ui/editor-row.test.mjs tests/ui/research.test.mjs tests/ui/literature.test.mjs tests/ui/molecule.test.mjs tests/ui/markdown-links.test.mjs tests/ui/cad.test.mjs tests/ui/container.test.mjs",
     "test:browser": "playwright test"
   },
   "devDependencies": {

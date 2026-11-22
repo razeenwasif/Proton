@@ -1081,6 +1081,24 @@ pub enum Command {
     DebugStepInto,
     DebugStepOut,
 
+    /* ── dev containers ───────────────────────────────────────────── */
+    ContainerStart {
+        config: Option<String>,
+    },
+    ContainerRebuild {
+        config: Option<String>,
+    },
+    ContainerStop,
+    ContainerDetach,
+    ContainerInit {
+        template: String,
+    },
+    ContainerSelectConfig {
+        path: String,
+    },
+    ContainerRefresh,
+    ContainerClearLogs,
+
     /// Ask for the current state — used once on connect so the shell can render
     /// without guessing.
     Sync,
@@ -1803,6 +1821,10 @@ pub enum Event {
         mode: ModeId,
         vim_mode: VimMode,
         vim_label: String,
+    },
+    /// Dev container state: detected configs, active phase, ports, and logs.
+    Container {
+        state: crate::container::ContainerView,
     },
 }
 

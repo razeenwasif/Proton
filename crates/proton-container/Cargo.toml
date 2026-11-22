@@ -1,0 +1,13 @@
+[package]
+name = "proton-container"
+description = "Proton dev containers: devcontainer.json parsing, container lifecycle, and host/container path mapping."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"

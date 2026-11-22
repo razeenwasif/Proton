@@ -6,6 +6,7 @@ members = [
     "crates/proton-cad",
     "crates/proton-circuit",
     "crates/proton-claude",
+    "crates/proton-container",
     "crates/proton-council",
     "crates/proton-core",
     "crates/proton-dap",
@@ -40,6 +41,7 @@ proton-agent = { path = "crates/proton-agent" }
 proton-cad = { path = "crates/proton-cad" }
 proton-board = { path = "crates/proton-board" }
 proton-claude = { path = "crates/proton-claude" }
+proton-container = { path = "crates/proton-container" }
 proton-circuit = { path = "crates/proton-circuit" }
 proton-council = { path = "crates/proton-council" }
 proton-core = { path = "crates/proton-core" }

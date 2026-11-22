@@ -347,6 +347,92 @@ export function createPreview(deliver) {
       items, selected: filePicker.selected, total: previewFiles.length, elapsedMs: 0, scanning: false,
       cutShort: false };
   };
+  let containerState = {
+    phase: "detected",
+    name: "Proton Rust",
+    configPath: ".devcontainer/devcontainer.json",
+    configs: [
+      { path: ".devcontainer/devcontainer.json", name: "Proton Rust", source: "mcr.microsoft.com/devcontainers/rust:1-bookworm" },
+    ],
+    image: "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+    workspaceFolder: "/workspaces/Proton",
+    remoteUser: "vscode",
+    runtime: "docker",
+    containerId: null,
+    stepNote: null,
+    ports: [],
+    error: null,
+    logs: [],
+    suggestedTemplate: "rust",
+    templates: [
+      { id: "rust", label: "Rust", description: "Official Rust image with rust-analyzer & lldb ready" },
+      { id: "python", label: "Python 3", description: "Python 3.12 with pip, pytest & pyright-langserver" },
+      { id: "node", label: "Node.js & TypeScript", description: "Node.js 22 LTS with TypeScript language server" },
+      { id: "cpp", label: "C / C++", description: "GCC/Clang, CMake, clangd, clang-format & gdb" },
+      { id: "go", label: "Go", description: "Go 1.23 with gopls and Delve" },
+      { id: "base", label: "Ubuntu / Base Linux", description: "Clean Debian Bookworm container with git and common utilities" },
+    ],
+  };
+  const containerEvent = () => ({ type: "container", state: { ...containerState, ports: [...containerState.ports], logs: [...containerState.logs] } });
+  const handleContainer = (command) => {
+    if (command.type === "containerRefresh") return [containerEvent()];
+    if (command.type === "containerClearLogs") {
+      containerState = { ...containerState, logs: [] };
+      return [containerEvent()];
+    }
+    if (command.type === "containerSelectConfig") {
+      containerState = { ...containerState, configPath: command.path };
+      return [containerEvent()];
+    }
+    if (command.type === "containerInit") {
+      const tpl = containerState.templates.find((t) => t.id === command.template) ?? containerState.templates[0];
+      containerState = {
+        ...containerState,
+        phase: "detected",
+        name: tpl.label,
+        configPath: ".devcontainer/devcontainer.json",
+        configs: [{ path: ".devcontainer/devcontainer.json", name: tpl.label, source: `proton-${tpl.id}` }],
+        image: `mcr.microsoft.com/devcontainers/${tpl.id}:latest`,
+        error: null,
+      };
+      return [containerEvent(), { type: "notice", text: "created .devcontainer/devcontainer.json", level: "info" }];
+    }
+    if (command.type === "containerStart" || command.type === "containerRebuild") {
+      const verb = command.type === "containerRebuild" ? "Rebuilding" : "Starting";
+      containerState = {
+        ...containerState,
+        phase: "building",
+        stepNote: `${verb} container…`,
+        error: null,
+        logs: [...containerState.logs, `$ docker up --workspace ${containerState.workspaceFolder}`],
+      };
+      setTimeout(() => {
+        containerState = {
+          ...containerState,
+          phase: "running",
+          containerId: "a1b2c3d4e5f6",
+          stepNote: null,
+          ports: [{ containerPort: 3000, hostPort: 3000, label: "App", protocol: "tcp", url: "http://127.0.0.1:3000" }],
+          logs: [...containerState.logs, "Container attached (a1b2c3d4e5f6)"],
+        };
+        deliver(containerEvent());
+      }, 250);
+      return [containerEvent()];
+    }
+    if (command.type === "containerStop" || command.type === "containerDetach") {
+      containerState = {
+        ...containerState,
+        phase: "detected",
+        containerId: null,
+        stepNote: null,
+        ports: [],
+        logs: [...containerState.logs, command.type === "containerStop" ? "Container stopped" : "Detached from container"],
+      };
+      return [containerEvent()];
+    }
+    return [];
+  };
+
   send = async (command) => {
     if (command.type === "openPicker" && command.kind === "files") {
       filePicker = { query: "", selected: 0 };
@@ -392,6 +478,7 @@ export function createPreview(deliver) {
         notebookEvent(),
         settingsEvent(),
         chatsEvent(),
+        containerEvent(),
         ...research.sync(),
         ...sheet.sync(),
         ...circuit.sync(),
@@ -399,6 +486,7 @@ export function createPreview(deliver) {
         ...cad.sync(),
       ];
     }
+    if (command.type.startsWith("container")) return handleContainer(command);
     if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
     if (command.type.startsWith("sheet")) return sheet.command(command);
     if (command.type.startsWith("circuit")) return circuit.command(command);

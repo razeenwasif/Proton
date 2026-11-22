@@ -61,15 +61,51 @@ pub fn clang_format() -> Option<PathBuf> {
 /// the project's `.clang-format` from beside the file, and falls back to
 /// LLVM's style without one.
 pub fn start(program: &Path, path: &Path, text: String) -> Receiver<Result<String, String>> {
+    let args = vec![
+        format!("--assume-filename={}", path.display()),
+        "--style=file".to_string(),
+        "--fallback-style=LLVM".to_string(),
+    ];
+    let cwd = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    run_clang_format(program.to_path_buf(), args, cwd, text)
+}
+
+/// Format `text` as `path` inside an attached dev container using `clang-format`.
+pub fn start_in_container(
+    target: &proton_container::ExecTarget,
+    path: &Path,
+    text: String,
+) -> Receiver<Result<String, String>> {
+    let container_path = target
+        .path_map
+        .host_to_container(path)
+        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    let cf_args = vec![
+        format!("--assume-filename={container_path}"),
+        "--style=file".to_string(),
+        "--fallback-style=LLVM".to_string(),
+    ];
+    let args = proton_container::runtime::exec_args(target, false, "clang-format", &cf_args);
+    run_clang_format(
+        target.runtime.clone(),
+        args,
+        target.path_map.host_root.clone(),
+        text,
+    )
+}
+
+fn run_clang_format(
+    program: PathBuf,
+    args: Vec<String>,
+    cwd: PathBuf,
+    text: String,
+) -> Receiver<Result<String, String>> {
     let (tx, rx) = channel();
-    let program = program.to_path_buf();
-    let path = path.to_path_buf();
     std::thread::spawn(move || {
         let answer = (|| {
             let mut child = Command::new(&program)
-                .arg(format!("--assume-filename={}", path.display()))
-                .args(["--style=file", "--fallback-style=LLVM"])
-                .current_dir(path.parent().unwrap_or(Path::new(".")))
+                .args(&args)
+                .current_dir(&cwd)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
