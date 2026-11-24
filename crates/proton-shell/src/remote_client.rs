@@ -50,7 +50,7 @@ pub struct RemoteClient {
     remote_home: String,
     control_sock: Option<PathBuf>,
     writer: Arc<Mutex<Option<BufWriter<ChildStdin>>>>,
-    pending: Arc<Mutex<HashMap<u64, mpsc::Sender<ServerMsg>>>>,
+    pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Result<ServerMsg, String>>>>>,
     next_id: AtomicU64,
     closed: Arc<AtomicBool>,
     shutting_down: Arc<AtomicBool>,
@@ -206,7 +206,9 @@ impl RemoteClient {
         }
 
         let writer = Arc::new(Mutex::new(Some(BufWriter::new(stdin))));
-        let pending = Arc::new(Mutex::new(HashMap::<u64, mpsc::Sender<ServerMsg>>::new()));
+        let pending = Arc::new(Mutex::new(
+            HashMap::<u64, mpsc::Sender<Result<ServerMsg, String>>>::new(),
+        ));
         let closed = Arc::new(AtomicBool::new(false));
         let shutting_down = Arc::new(AtomicBool::new(false));
         let last_error = Arc::new(Mutex::new(None));
@@ -254,8 +256,15 @@ impl RemoteClient {
                         if trimmed.is_empty() {
                             continue;
                         }
-                        let Ok(msg) = serde_json::from_str::<ServerMsg>(trimmed) else {
-                            continue;
+                        let msg = match decode_server_msg(trimmed) {
+                            Ok(msg) => msg,
+                            Err((Some(id), reason)) => {
+                                if let Some(tx) = held(&pending).remove(&id) {
+                                    let _ = tx.send(Err(reason));
+                                }
+                                continue;
+                            }
+                            Err((None, _)) => continue,
                         };
                         match msg {
                             ServerMsg::Ready { host, home, root } => {
@@ -284,7 +293,7 @@ impl RemoteClient {
                                 if let Some(id) = id {
                                     let tx = held(&pending).remove(&id);
                                     if let Some(tx) = tx {
-                                        let _ = tx.send(other);
+                                        let _ = tx.send(Ok(other));
                                     }
                                 }
                             }
@@ -536,7 +545,8 @@ impl RemoteClient {
         }
 
         match rx.recv_timeout(timeout) {
-            Ok(resp) => Ok(resp),
+            Ok(Ok(resp)) => Ok(resp),
+            Ok(Err(err)) => Err(err),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 held(&self.pending).remove(&id);
                 Err(self.disconnect_reason())
@@ -562,6 +572,46 @@ impl RemoteClient {
             format!("SSH connection to {} closed: {detail}", self.host)
         }
     }
+}
+
+fn decode_server_msg(trimmed: &str) -> Result<ServerMsg, (Option<u64>, String)> {
+    let parse_err = match serde_json::from_str::<ServerMsg>(trimmed) {
+        Ok(msg) => return Ok(msg),
+        Err(err) => err,
+    };
+    let val: serde_json::Value = match serde_json::from_str(trimmed) {
+        Ok(v) => v,
+        Err(err) => return Err((None, err.to_string())),
+    };
+    let kind = val.get("kind").and_then(|v| v.as_str());
+    let id = val.get("id").and_then(|v| v.as_u64());
+    if matches!(kind, Some("reply") | Some("push")) {
+        if let Some(batch) = val.get("batch").and_then(|v| v.as_object()) {
+            if let (Some(sequence), Some(events_arr)) = (
+                batch.get("sequence").and_then(|v| v.as_u64()),
+                batch.get("events").and_then(|v| v.as_array()),
+            ) {
+                let events: Vec<Event> = events_arr
+                    .iter()
+                    .filter_map(|ev| serde_json::from_value::<Event>(ev.clone()).ok())
+                    .collect();
+                let batch = EventBatch { sequence, events };
+                match kind {
+                    Some("reply") => {
+                        if let Some(id) = id {
+                            return Ok(ServerMsg::Reply { id, batch });
+                        }
+                    }
+                    Some("push") => return Ok(ServerMsg::Push { batch }),
+                    _ => {}
+                }
+            }
+        }
+    }
+    Err((
+        id,
+        format!("incompatible remote response (update Proton.app on remote host): {parse_err}"),
+    ))
 }
 
 fn sync_container_ports(events: &[Event], fwd_tx: &mpsc::Sender<ForwardReq>) {
@@ -1020,6 +1070,7 @@ fi
 "#;
 
 const REMOTE_BROWSE_SH: &str = r#"
+total=0
 emit_dir() {
   d="$1"
   label="$2"
@@ -1027,16 +1078,22 @@ emit_dir() {
   [ -e "$d/.git" ] && g=1
   if [ -f "$d/.devcontainer/devcontainer.json" ] || [ -f "$d/.devcontainer.json" ]; then dc=1; fi
   printf '%s\t%s\t%s\t%s\n' "$g" "$dc" "$label" "$d"
+  total=$((total+1))
 }
 scan_base() {
   base="$1"
   prefix="$2"
+  skip_name="${3:-}"
+  while [ "$base" != "/" ] && [ "${base%/}" != "$base" ]; do
+    base="${base%/}"
+  done
   [ -d "$base" ] || return 0
   n=0
   for d in "$base"/*; do
     [ -d "$d" ] || continue
     name="${d##*/}"
     case "$name" in .*) continue ;; esac
+    if [ -n "$skip_name" ] && [ "$name" = "$skip_name" ]; then continue; fi
     if [ -n "$prefix" ]; then lbl="$prefix/$name"; else lbl="$name"; fi
     emit_dir "$d" "$lbl"
     n=$((n+1))
@@ -1050,6 +1107,9 @@ case "$arg" in
     if [ -d "$HOME/Github" ]; then
       scan_base "$HOME/Github/Applications" "Applications"
       scan_base "$HOME/Github" ""
+      if [ "$total" -lt 3 ]; then
+        scan_base "$HOME" "" "Github"
+      fi
     else
       scan_base "$HOME" ""
     fi
@@ -1193,6 +1253,32 @@ for line in sys.stdin:
         assert_eq!(sh_quote("a'b c"), "'a'\\''b c'");
         let cmd = ssh_sh_command("echo \"$1\"", Some("~/My Repo; id"));
         assert_eq!(cmd, "/bin/sh -c 'echo \"$1\"' sh '~/My Repo; id'");
+    }
+
+    #[test]
+    fn decode_server_msg_skips_unknown_event_variants() {
+        let raw = r#"{"kind":"reply","id":4,"batch":{"sequence":9,"events":[{"type":"researchList","items":[]},{"type":"notice","text":"hi","level":"info"}]}}"#;
+        let msg = decode_server_msg(raw).expect("tolerant reply decode");
+        match msg {
+            ServerMsg::Reply { id, batch } => {
+                assert_eq!(id, 4);
+                assert_eq!(batch.sequence, 9);
+                assert_eq!(batch.events.len(), 1);
+                assert!(matches!(
+                    &batch.events[0],
+                    Event::Notice { text, .. } if text == "hi"
+                ));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_server_msg_fails_fast_with_id_on_corrupt_reply() {
+        let raw = r#"{"kind":"reply","id":7,"batch":{"events":"not-an-array"}}"#;
+        let err = decode_server_msg(raw).expect_err("corrupt reply should error");
+        assert_eq!(err.0, Some(7));
+        assert!(err.1.contains("incompatible remote response"), "{}", err.1);
     }
 
     #[test]

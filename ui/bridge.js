@@ -105,6 +105,14 @@ export async function remoteForwardPort(localPort, remotePort = null) {
   return tauri.core.invoke('remote_forward_port', { localPort, remotePort });
 }
 
+/** Run `gcloud auth application-default print-access-token`, copy it to the
+ *  clipboard (`pbcopy`), and return the fresh OAuth access token.
+ *  @returns {Promise<string>} */
+export async function colabGcloudToken() {
+  if (!tauri) throw new Error('Fetching a gcloud token requires the Proton desktop app');
+  return tauri.core.invoke('colab_gcloud_token');
+}
+
 /** Subscribe to remote SSH status push updates for this window.
  *  @param {(status: import('./native-api').RemoteStatus) => void} listener */
 export function onRemoteStatus(listener) {

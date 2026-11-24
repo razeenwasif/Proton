@@ -96,6 +96,7 @@ test("renderColabModalHtml renders OAuth setup and signed-in Ultra TPU controls 
   assert.match(signedOutHtml, /Google OAuth 2\.0 Sign-In/);
   assert.match(signedOutHtml, /Sign in with Google/);
   assert.match(signedOutHtml, /Direct Access Token/);
+  assert.match(signedOutHtml, /data-colab-gcloud-token/);
 
   const signedInHtml = renderColabModalHtml(
     {
@@ -141,5 +142,6 @@ test("renderColabModalHtml renders OAuth setup and signed-in Ultra TPU controls 
   assert.match(signedInHtml, /450\.2 CCU|450\.3 CCU/);
   assert.match(signedInHtml, /v5e-1/);
   assert.match(signedInHtml, /v6e-1/);
+  assert.match(signedInHtml, /data-colab-gcloud-token/);
   assert.match(signedInHtml, /Disconnect &amp; Terminate VM/);
 });

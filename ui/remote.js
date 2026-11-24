@@ -370,7 +370,8 @@ export function createRemote(opts) {
       }
       paintModal();
       if (state.draftHost && !state.dirs.length && !state.browsing) {
-        void browse(state.draftHost, null);
+        const initialPath = state.draftFolder.trim();
+        void browse(state.draftHost, initialPath && initialPath !== "~/Github" ? initialPath : null);
       }
     } catch (err) {
       state.error = String(err);
@@ -482,6 +483,14 @@ export function createRemote(opts) {
     }
   });
 
+  modal?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const t = /** @type {HTMLInputElement | null} */ (e.target instanceof HTMLInputElement ? e.target : null);
+    if (!t || (!t.matches("[data-rm-folder-input]") && !t.matches("[data-rm-host-input]"))) return;
+    e.preventDefault();
+    void browse(state.draftHost, state.draftFolder.trim() || null);
+  });
+
   modal?.addEventListener("click", (e) => {
     const target = /** @type {Element | null} */ (e.target instanceof Element ? e.target : null);
     if (!target) return;
@@ -515,7 +524,7 @@ export function createRemote(opts) {
         void closeOverlay();
         break;
       case "browse":
-        void browse(state.draftHost, null);
+        void browse(state.draftHost, state.draftFolder.trim() || null);
         break;
       case "connect-window":
         void connect(state.draftHost, state.draftFolder, true);

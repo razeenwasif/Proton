@@ -14,7 +14,7 @@
 
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
-import { HAS_SHELL, applyBackdrop, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, sendKey, setBackdrop, setOpaque,
+import { HAS_SHELL, applyBackdrop, colabGcloudToken, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, toggleFullscreen, wireWindowChrome, quitApp,
   resetTransport, remoteStatus, remoteHosts, remoteBrowse, remoteConnect, remoteDisconnect, remoteForwardPort, onRemoteStatus, onOpenRemote } from "./bridge.js";
 import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, saveDocument, zoomDocument } from "./document.js";
@@ -961,6 +961,8 @@ const colabUi = createColab({
   },
   closeOverlay: dismissOverlay,
   dispatch,
+  colabGcloudToken,
+  flashMessage,
 });
 
 /* Remote-SSH: connect to remote hosts (e.g. mini) over SSH NDJSON. */

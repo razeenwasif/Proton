@@ -55,6 +55,7 @@ export interface NativeApi {
     invoke(name: 'save_document_as', args: {path: string}): Promise<string | null>;
     invoke(name: 'paste_text'): Promise<string | null>;
     invoke(name: 'copy_text', args: {text: string}): Promise<void>;
+    invoke(name: 'colab_gcloud_token'): Promise<string>;
     invoke(name: 'backdrop'): Promise<string>;
     invoke(name: 'set_backdrop', args: {material: string}): Promise<string>;
     invoke(name: 'set_opaque', args: {color: string | null}): Promise<void>;

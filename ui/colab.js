@@ -194,9 +194,10 @@ export function renderColabModalHtml(status, draft) {
       <details class="cb-sec cb-card cb-details"${draft.tokenOpen ? " open" : ""} data-colab-token-details>
         <summary>Direct Access Token (<code>gcloud</code> / manual fallback)</summary>
         <div class="cb-details-body">
-          <p class="rm-muted">Run <code>gcloud auth application-default login --scopes=openid,email,profile,https://www.googleapis.com/auth/colaboratory &amp;&amp; gcloud auth application-default print-access-token</code> and paste below:</p>
+          <p class="rm-muted">Run <code>gcloud auth application-default login --scopes=openid,email,profile,https://www.googleapis.com/auth/colaboratory &amp;&amp; gcloud auth application-default print-access-token</code> and paste below, or copy one directly:</p>
           <div class="cb-token-row">
             <input type="password" data-colab-token value="${esc(draft.directToken)}" placeholder="ya29...." spellcheck="false">
+            <button class="btn" type="button" data-colab-gcloud-token${busyDis} title="Run gcloud auth application-default print-access-token | pbcopy">Copy gcloud Token</button>
             <button class="btn" data-colab-use-token${busyDis}>Use Token</button>
           </div>
         </div>
@@ -242,6 +243,7 @@ export function renderColabModalHtml(status, draft) {
           <span class="chip info" title="Compute Units remaining">${esc(ccuText + rateText)}</span>
         </div>
         <div class="cb-actions">
+          <button class="btn" type="button" data-colab-gcloud-token${busyDis} title="Run gcloud auth application-default print-access-token | pbcopy and refresh token">Copy gcloud Token</button>
           <button class="btn" data-colab-refresh${busyDis}>Refresh</button>
           <button class="btn" data-colab-signout${busyDis}>Sign Out</button>
         </div>
@@ -311,9 +313,11 @@ export function renderColabModalHtml(status, draft) {
  *   openOverlay: () => Promise<void>,
  *   closeOverlay: () => Promise<void> | void,
  *   dispatch: Dispatch,
+ *   colabGcloudToken?: () => Promise<string>,
+ *   flashMessage?: (text: string, level?: string) => void,
  * }} opts
  */
-export function createColab({ root, openOverlay, closeOverlay, dispatch }) {
+export function createColab({ root, openOverlay, closeOverlay, dispatch, colabGcloudToken, flashMessage }) {
   /** @type {ColabStatusView} */
   let status = {
     hasOauthConfig: false,
@@ -428,6 +432,33 @@ export function createColab({ root, openOverlay, closeOverlay, dispatch }) {
         await dispatch({ type: "colabConfigureOauth", clientId: draft.clientId, clientSecret: draft.clientSecret });
       }
       await dispatch({ type: "colabSignIn" });
+      return;
+    }
+    if (target.closest("[data-colab-gcloud-token]")) {
+      if (!colabGcloudToken) {
+        status = { ...status, error: "Fetching a gcloud token requires the Proton desktop app." };
+        render();
+        return;
+      }
+      status = { ...status, error: "", busy: "Fetching gcloud access token…" };
+      render();
+      try {
+        const token = (await colabGcloudToken()).trim();
+        draft.directToken = token;
+        draft.tokenOpen = true;
+        status = { ...status, busy: "" };
+        flashMessage?.("Copied gcloud access token to clipboard", "info");
+        if (status.signedIn) {
+          render();
+          await dispatch({ type: "colabSetToken", accessToken: token });
+        } else {
+          render();
+        }
+      } catch (err) {
+        status = { ...status, busy: "", error: String(err) };
+        flashMessage?.(String(err), "err");
+        render();
+      }
       return;
     }
     if (target.closest("[data-colab-use-token]")) {

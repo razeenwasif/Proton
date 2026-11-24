@@ -512,6 +512,67 @@ fn copy_text(text: String) {
     pasteboard::put_text(&text);
 }
 
+/// Run `gcloud auth application-default print-access-token`, copy the token to
+/// the clipboard (equivalent to piping into `pbcopy`), and return it.
+#[tauri::command(async)]
+fn colab_gcloud_token(app: tauri::AppHandle) -> Result<String, String> {
+    use std::io::ErrorKind;
+    use std::process::{Command as ProcessCommand, Stdio};
+
+    let mut candidates = vec![
+        "gcloud".to_string(),
+        "/opt/homebrew/bin/gcloud".to_string(),
+        "/usr/local/bin/gcloud".to_string(),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(format!("{home}/google-cloud-sdk/bin/gcloud"));
+    }
+
+    let mut output = None;
+    for bin in candidates {
+        match ProcessCommand::new(&bin)
+            .args(["auth", "application-default", "print-access-token"])
+            .stdin(Stdio::null())
+            .output()
+        {
+            Ok(out) => {
+                output = Some(out);
+                break;
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => continue,
+            Err(err) => return Err(format!("failed to run gcloud: {err}")),
+        }
+    }
+    let output = output.ok_or_else(|| {
+        "could not find `gcloud` CLI in PATH or /opt/homebrew/bin/gcloud".to_string()
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("gcloud exited with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if token.is_empty() {
+        return Err("gcloud returned an empty access token".into());
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let clip = token.clone();
+    app.run_on_main_thread(move || {
+        pasteboard::put_text(&clip);
+        let _ = tx.send(());
+    })
+    .map_err(|err| err.to_string())?;
+    let _ = rx.recv();
+
+    Ok(token)
+}
+
 /// Give the core a heartbeat.
 ///
 /// Everything a language server says arrives on a thread the core cannot see,
@@ -1027,6 +1088,7 @@ fn main() {
             save_document_as,
             paste_text,
             copy_text,
+            colab_gcloud_token,
             quit,
             remote_status,
             remote_hosts,
