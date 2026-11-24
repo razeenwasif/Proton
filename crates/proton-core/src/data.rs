@@ -63,6 +63,8 @@ pub struct ColabStatusView {
     pub active_label: String,
     pub busy: String,
     pub error: String,
+    #[serde(default)]
+    pub auth_url: String,
 }
 
 /// One cell, as the panel draws it.

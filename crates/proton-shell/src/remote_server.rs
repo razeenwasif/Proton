@@ -23,6 +23,7 @@ const MAX_DOCUMENT_BYTES: u64 = 128 * 1024 * 1024;
 static REMOTE_HEARTBEAT: Heartbeat = Heartbeat::new();
 
 pub fn run(folder: Option<String>) -> i32 {
+    std::env::set_var("PROTON_REMOTE_SERVER", "1");
     prepare_path();
 
     let requested = match folder.as_deref().map(str::trim).filter(|s| !s.is_empty()) {

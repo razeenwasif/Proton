@@ -6838,6 +6838,7 @@ impl Workspace {
     }
 
     fn colab_refresh_status(&mut self) -> Vec<Event> {
+        self.colab_status.auth_url.clear();
         self.sync_colab_disk();
         if !self.colab_status.signed_in {
             self.colab_status.error.clear();
@@ -6865,7 +6866,12 @@ impl Workspace {
                 return vec![self.colab_event(), notice(why, NoticeLevel::Error)];
             }
         };
-        let open_err = open_link(&auth_url).err();
+        let open_err = if std::env::var_os("PROTON_REMOTE_SERVER").is_some() {
+            None
+        } else {
+            open_link(&auth_url).err()
+        };
+        self.colab_status.auth_url = auth_url.clone();
         let mut events = self.spawn_colab_job("Waiting for Google sign-in in browser…", move || {
             let res = oauth_rx
                 .recv()
@@ -6892,6 +6898,7 @@ impl Workspace {
     }
 
     fn colab_set_token(&mut self, access_token: &str) -> Vec<Event> {
+        self.colab_status.auth_url.clear();
         let token = access_token.to_string();
         self.spawn_colab_job("Verifying Google Colab access token…", move || {
             let res = proton_data::colab::set_direct_token(&token).and_then(|tok| {
@@ -7009,11 +7016,13 @@ impl Workspace {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.colab_rx = None;
                 self.colab_status.busy.clear();
+                self.colab_status.auth_url.clear();
                 return vec![self.colab_event()];
             }
         };
         self.colab_rx = None;
         self.colab_status.busy.clear();
+        self.colab_status.auth_url.clear();
 
         match msg {
             ColabAsyncResult::Account(Ok(summary)) => {

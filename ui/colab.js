@@ -147,8 +147,18 @@ export function renderColabModalHtml(status, draft) {
   const errorBanner = status.error
     ? `<div class="cb-banner cb-err">${esc(status.error)}</div>`
     : "";
+  const busyActions = [
+    status.authUrl
+      ? `<button class="btn" type="button" data-colab-open-auth>Open Sign-In</button>`
+      : "",
+    !status.signedIn
+      ? `<button class="btn" type="button" data-colab-cancel>Cancel</button>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
   const busyBanner = status.busy
-    ? `<div class="cb-banner cb-busy"><span class="cb-spin"></span>${esc(status.busy)}</div>`
+    ? `<div class="cb-banner cb-busy"><span class="cb-spin"></span><span>${esc(status.busy)}</span>${busyActions ? `<div class="cb-actions" style="margin-left:auto">${busyActions}</div>` : ""}</div>`
     : "";
 
   let body = "";
@@ -333,6 +343,7 @@ export function createColab({ root, openOverlay, closeOverlay, dispatch, colabGc
     activeLabel: "",
     busy: "",
     error: "",
+    authUrl: "",
   };
   /** @type {string} */
   let notebookKernelLabel = "";
@@ -417,6 +428,16 @@ export function createColab({ root, openOverlay, closeOverlay, dispatch, colabGc
 
     if (target.closest("[data-colab-close]")) {
       await closeOverlay();
+      return;
+    }
+    if (target.closest("[data-colab-open-auth]")) {
+      if (status.authUrl) {
+        await dispatch({ type: "openLink", url: status.authUrl });
+      }
+      return;
+    }
+    if (target.closest("[data-colab-cancel]")) {
+      await dispatch({ type: "colabSignOut" });
       return;
     }
     if (target.closest("[data-colab-save-oauth]")) {

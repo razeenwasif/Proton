@@ -40,6 +40,7 @@ test("colabPillSummary prioritizes Colab runtime over Container and Local", () =
       activeLabel: "Colab · TPU v5e-1",
       busy: "",
       error: "",
+      authUrl: "",
     },
     "Container",
   );
@@ -80,6 +81,7 @@ test("renderColabModalHtml renders OAuth setup and signed-in Ultra TPU controls 
       activeLabel: "",
       busy: "",
       error: "",
+      authUrl: "",
     },
     {
       clientId: "",
@@ -97,6 +99,38 @@ test("renderColabModalHtml renders OAuth setup and signed-in Ultra TPU controls 
   assert.match(signedOutHtml, /Sign in with Google/);
   assert.match(signedOutHtml, /Direct Access Token/);
   assert.match(signedOutHtml, /data-colab-gcloud-token/);
+
+  const waitingHtml = renderColabModalHtml(
+    {
+      hasOauthConfig: true,
+      signedIn: false,
+      email: "",
+      tier: "",
+      ccuBalance: null,
+      ccuRateHourly: null,
+      assignmentsCount: 0,
+      specs: [],
+      runtimes: [],
+      activeRuntimeId: "",
+      activeLabel: "",
+      busy: "Waiting for Google sign-in in browser…",
+      error: "",
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A60218%2Fcallback",
+    },
+    {
+      clientId: "cid",
+      clientSecret: "",
+      oauthJson: "",
+      directToken: "",
+      tokenOpen: false,
+      jsonOpen: false,
+      variant: "VARIANT_GPU",
+      accelerator: "A100",
+      shape: "SHAPE_STANDARD",
+    },
+  );
+  assert.match(waitingHtml, /data-colab-open-auth/);
+  assert.match(waitingHtml, /data-colab-cancel/);
 
   const signedInHtml = renderColabModalHtml(
     {
@@ -125,6 +159,7 @@ test("renderColabModalHtml renders OAuth setup and signed-in Ultra TPU controls 
       activeLabel: "Colab · TPU v5e-1",
       busy: "",
       error: "",
+      authUrl: "",
     },
     {
       clientId: "",

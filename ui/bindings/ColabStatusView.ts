@@ -5,4 +5,4 @@ import type { ColabRuntimeView } from "./ColabRuntimeView";
 /**
  * Complete Colab connection & quota state shown in Data mode.
  */
-export type ColabStatusView = { hasOauthConfig: boolean, signedIn: boolean, email: string, tier: string, ccuBalance: number | null, ccuRateHourly: number | null, assignmentsCount: number, specs: Array<ColabRuntimeSpec>, runtimes: Array<ColabRuntimeView>, activeRuntimeId: string, activeLabel: string, busy: string, error: string, };
+export type ColabStatusView = { hasOauthConfig: boolean, signedIn: boolean, email: string, tier: string, ccuBalance: number | null, ccuRateHourly: number | null, assignmentsCount: number, specs: Array<ColabRuntimeSpec>, runtimes: Array<ColabRuntimeView>, activeRuntimeId: string, activeLabel: string, busy: string, error: string, authUrl: string, };

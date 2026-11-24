@@ -213,6 +213,7 @@ impl RemoteClient {
         let shutting_down = Arc::new(AtomicBool::new(false));
         let last_error = Arc::new(Mutex::new(None));
         let tunnels = Arc::new(Mutex::new(TunnelBook::default()));
+        let last_oauth_url: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         let (fwd_tx, fwd_rx) = mpsc::channel::<ForwardReq>();
         {
@@ -242,6 +243,7 @@ impl RemoteClient {
             let on_push = Arc::clone(&on_push);
             let on_status = Arc::clone(&on_status);
             let tunnels = Arc::clone(&tunnels);
+            let last_oauth_url = Arc::clone(&last_oauth_url);
 
             std::thread::Builder::new()
                 .name("proton-ssh-out".into())
@@ -277,11 +279,13 @@ impl RemoteClient {
                             }
                             ServerMsg::Push { batch } => {
                                 sync_container_ports(&batch.events, &fwd_tx);
+                                maybe_launch_remote_oauth(&batch.events, &fwd_tx, &last_oauth_url);
                                 on_push(batch);
                             }
                             other => {
                                 if let ServerMsg::Reply { ref batch, .. } = other {
                                     sync_container_ports(&batch.events, &fwd_tx);
+                                    maybe_launch_remote_oauth(&batch.events, &fwd_tx, &last_oauth_url);
                                 }
                                 let id = match &other {
                                     ServerMsg::Reply { id, .. }
@@ -612,6 +616,77 @@ fn decode_server_msg(trimmed: &str) -> Result<ServerMsg, (Option<u64>, String)> 
         id,
         format!("incompatible remote response (update Proton.app on remote host): {parse_err}"),
     ))
+}
+
+fn percent_decode_component(raw: &str) -> String {
+    let mut bytes = Vec::with_capacity(raw.len());
+    let src = raw.as_bytes();
+    let mut i = 0;
+    while i < src.len() {
+        if src[i] == b'%' && i + 2 < src.len() {
+            if let Ok(hex) = std::str::from_utf8(&src[i + 1..i + 3]) {
+                if let Ok(val) = u8::from_str_radix(hex, 16) {
+                    bytes.push(val);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        bytes.push(if src[i] == b'+' { b' ' } else { src[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn extract_loopback_port(auth_url: &str) -> Option<u16> {
+    let query = auth_url.split_once('?')?.1;
+    for pair in query.split('&') {
+        if let Some(raw_uri) = pair.strip_prefix("redirect_uri=") {
+            let decoded = percent_decode_component(raw_uri);
+            let rest = decoded
+                .strip_prefix("http://127.0.0.1:")
+                .or_else(|| decoded.strip_prefix("http://localhost:"))?;
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            return digits.parse::<u16>().ok().filter(|&p| p > 0);
+        }
+    }
+    None
+}
+
+fn maybe_launch_remote_oauth(
+    events: &[Event],
+    fwd_tx: &mpsc::Sender<ForwardReq>,
+    last_oauth_url: &Arc<Mutex<Option<String>>>,
+) {
+    for event in events {
+        if let Event::Colab { status } = event {
+            if status.auth_url.is_empty() {
+                *held(last_oauth_url) = None;
+                continue;
+            }
+            {
+                let mut seen = held(last_oauth_url);
+                if seen.as_deref() == Some(status.auth_url.as_str()) {
+                    continue;
+                }
+                *seen = Some(status.auth_url.clone());
+            }
+            if let Some(port) = extract_loopback_port(&status.auth_url) {
+                let (reply_tx, reply_rx) = mpsc::channel();
+                if fwd_tx
+                    .send(ForwardReq::AddManual {
+                        local_port: port,
+                        remote_port: port,
+                        reply: reply_tx,
+                    })
+                    .is_ok()
+                {
+                    let _ = reply_rx.recv_timeout(Duration::from_secs(2));
+                }
+            }
+            let _ = open_local_url(&status.auth_url);
+        }
+    }
 }
 
 fn sync_container_ports(events: &[Event], fwd_tx: &mpsc::Sender<ForwardReq>) {
@@ -1279,6 +1354,15 @@ for line in sys.stdin:
         let err = decode_server_msg(raw).expect_err("corrupt reply should error");
         assert_eq!(err.0, Some(7));
         assert!(err.1.contains("incompatible remote response"), "{}", err.1);
+    }
+
+    #[test]
+    fn extracts_loopback_port_from_oauth_auth_url() {
+        let url = "https://accounts.google.com/o/oauth2/v2/auth?client_id=abc&redirect_uri=http%3A%2F%2F127.0.0.1%3A60218%2Fcallback&response_type=code";
+        assert_eq!(extract_loopback_port(url), Some(60218));
+        let lh = "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=http://localhost:8123/cb";
+        assert_eq!(extract_loopback_port(lh), Some(8123));
+        assert_eq!(extract_loopback_port("https://example.com/auth"), None);
     }
 
     #[test]

@@ -664,87 +664,98 @@ fn wait_for_oauth_callback(
     expected_state: &str,
 ) -> Result<ColabTokens, String> {
     let deadline = Instant::now() + OAUTH_WAIT_TIMEOUT;
-    let mut stream = loop {
-        match listener.accept() {
-            Ok((stream, _)) => break stream,
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                if Instant::now() >= deadline {
-                    return Err("Timed out waiting for Google sign-in in browser".into());
+    loop {
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err("Timed out waiting for Google sign-in in browser".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                Err(e) => return Err(format!("OAuth callback accept failed: {e}")),
             }
-            Err(e) => return Err(format!("OAuth callback accept failed: {e}")),
+        };
+
+        let _ = stream.set_nonblocking(false);
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut buf = [0u8; 8192];
+        let n = match stream.read(&mut buf) {
+            Ok(0) => continue,
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        let req_text = String::from_utf8_lossy(&buf[..n]);
+        let request_line = req_text.lines().next().unwrap_or("");
+        let raw_target = request_line.split_whitespace().nth(1).unwrap_or("");
+        if raw_target.is_empty() || raw_target.starts_with("/favicon.ico") {
+            let _ = stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+            let _ = stream.flush();
+            continue;
         }
-    };
+        let query = raw_target.split_once('?').map(|(_, q)| q).unwrap_or("");
+        let params = parse_query(query);
 
-    let _ = stream.set_nonblocking(false);
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let mut buf = [0u8; 8192];
-    let n = stream
-        .read(&mut buf)
-        .map_err(|e| format!("failed reading OAuth callback: {e}"))?;
-    let req_text = String::from_utf8_lossy(&buf[..n]);
-    let request_line = req_text.lines().next().unwrap_or("");
-    let raw_target = request_line.split_whitespace().nth(1).unwrap_or("");
-    let query = raw_target.split_once('?').map(|(_, q)| q).unwrap_or("");
-    let params = parse_query(query);
-
-    if let Some(err) = params.get("error") {
-        let msg = params
-            .get("error_description")
-            .cloned()
-            .unwrap_or_else(|| err.clone());
-        write_oauth_html(
-            &mut stream,
-            400,
-            "Sign-in cancelled",
-            &format!("Google OAuth returned an error: {msg}"),
-        );
-        return Err(format!("Google sign-in failed: {msg}"));
-    }
-
-    if params.get("state").map(String::as_str) != Some(expected_state) {
-        write_oauth_html(
-            &mut stream,
-            400,
-            "Invalid OAuth state",
-            "The callback state parameter did not match.",
-        );
-        return Err("OAuth state mismatch".into());
-    }
-
-    let Some(code) = params.get("code").filter(|c| !c.is_empty()) else {
-        write_oauth_html(
-            &mut stream,
-            400,
-            "Missing authorization code",
-            "Google did not return an authorization code.",
-        );
-        return Err("OAuth callback missing code".into());
-    };
-
-    match exchange_code_for_tokens(
-        oauth,
-        code,
-        verifier,
-        redirect_uri,
-        &endpoints.token_url,
-        &endpoints.userinfo_url,
-    ) {
-        Ok(tokens) => {
-            save_tokens_in(dir, &tokens)?;
+        if let Some(err) = params.get("error") {
+            let msg = params
+                .get("error_description")
+                .cloned()
+                .unwrap_or_else(|| err.clone());
             write_oauth_html(
                 &mut stream,
-                200,
-                "Signed in to Google Colab",
-                "Authentication succeeded. You can close this tab and return to Proton.",
+                400,
+                "Sign-in cancelled",
+                &format!("Google OAuth returned an error: {msg}"),
             );
-            Ok(tokens)
+            return Err(format!("Google sign-in failed: {msg}"));
         }
-        Err(why) => {
-            write_oauth_html(&mut stream, 500, "Token exchange failed", &why);
-            Err(why)
+
+        if params.get("state").map(String::as_str) != Some(expected_state) {
+            write_oauth_html(
+                &mut stream,
+                400,
+                "Invalid OAuth state",
+                "The callback state parameter did not match.",
+            );
+            return Err("OAuth state mismatch".into());
         }
+
+        let Some(code) = params.get("code").filter(|c| !c.is_empty()) else {
+            write_oauth_html(
+                &mut stream,
+                400,
+                "Missing authorization code",
+                "Google did not return an authorization code.",
+            );
+            return Err("OAuth callback missing code".into());
+        };
+
+        return match exchange_code_for_tokens(
+            oauth,
+            code,
+            verifier,
+            redirect_uri,
+            &endpoints.token_url,
+            &endpoints.userinfo_url,
+        ) {
+            Ok(tokens) => {
+                save_tokens_in(dir, &tokens)?;
+                write_oauth_html(
+                    &mut stream,
+                    200,
+                    "Signed in to Google Colab",
+                    "Authentication succeeded. You can close this tab and return to Proton.",
+                );
+                Ok(tokens)
+            }
+            Err(why) => {
+                write_oauth_html(&mut stream, 500, "Token exchange failed", &why);
+                Err(why)
+            }
+        };
     }
 }
 
