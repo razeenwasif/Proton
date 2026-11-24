@@ -24,9 +24,9 @@
 //!
 //! ## Verbs are what a mode can be asked to do
 //!
-//! `dd` in Codex deletes a line. In Data it deletes a cell. In Research it does
-//! nothing at all, because the noun is prose and the editing verbs belong to
-//! the composer. A mode that cannot implement a verb has to say so — the
+//! `dd` in Codex deletes a line. In Data it deletes a cell. In Excel it does
+//! nothing at all, because the noun is a grid and the editing verbs belong to
+//! its cells. A mode that cannot implement a verb has to say so — the
 //! statusline reports it, because silently doing nothing is the failure users
 //! cannot debug.
 
@@ -55,12 +55,6 @@ pub enum Slot {
     Panels,
     /// A single table, large enough to read.
     Table,
-    /// A project's investigations.
-    Investigations,
-    /// One investigation: its overview, its hypotheses ranked, the round's work.
-    Board,
-    /// Runs of code, and what they drew.
-    Lab,
     /// A sheet's cells, by rows and columns, with the formula bar above and
     /// the sheets' tabs below.
     Grid,
@@ -90,9 +84,6 @@ pub enum DocumentKind {
     Source,
     /// `.ipynb` and `.sql`.
     Notebook,
-    /// `research/<slug>/`: Markdown hypotheses and reviews, a JSON-lines
-    /// tournament, the plan and the logs.
-    Investigation,
     /// `Name.sheet/`: `workbook.json` and a `.cells` file a sheet, a line a
     /// cell. `.xlsx`, `.csv` and `.tsv` are opened and saved too.
     Workbook,
@@ -143,15 +134,6 @@ impl Layout {
                 Slot::Cells,
                 Slot::Table,
                 DocumentKind::Notebook,
-            ),
-            // The investigations to pick from, the one picked, and the Lab
-            // beside it: what a run drew wants to be seen next to the
-            // hypothesis it tests.
-            ModeId::Research => (
-                Slot::Investigations,
-                Slot::Board,
-                Slot::Lab,
-                DocumentKind::Investigation,
             ),
             // The project's workbooks, the grid, and the agent with its
             // sheet tools beside it — shut until asked for, as the grid
@@ -206,9 +188,9 @@ impl Layout {
     /// cannot debug.
     pub fn supports(&self, action: &Action) -> bool {
         match self.mode {
-            // The noun is prose, so the editing verbs belong to the composer
-            // rather than to the mode.
-            ModeId::Research | ModeId::Sheet | ModeId::Circuit | ModeId::Logic | ModeId::Cad => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
+            // The noun is not text, so the editing verbs belong to the
+            // mode's own fields rather than to the mode.
+            ModeId::Sheet | ModeId::Circuit | ModeId::Logic | ModeId::Cad => matches!(action.verb, Verb::Move | Verb::Undo | Verb::Redo),
             _ => true,
         }
     }
@@ -220,7 +202,7 @@ mod tests {
 
     #[test]
     fn every_mode_has_a_layout_and_a_document() {
-        // The contract is only a contract if it covers all eight. A mode
+        // The contract is only a contract if it covers all six. A mode
         // added later fails to compile rather than falling through to a
         // default that puts an editor where its stage should be.
         for mode in ModeId::ALL {
@@ -251,7 +233,7 @@ mod tests {
             count: 1,
             register: None,
         };
-        assert!(!Layout::of(ModeId::Research).supports(&delete));
+        assert!(!Layout::of(ModeId::Sheet).supports(&delete));
         assert!(Layout::of(ModeId::Codex).supports(&delete));
         assert!(Layout::of(ModeId::Data).supports(&delete));
     }

@@ -33,7 +33,6 @@ pub mod mode;
 pub mod picker;
 pub mod plugins;
 pub mod review;
-pub mod research;
 pub mod session;
 pub mod settings;
 pub mod sheet;

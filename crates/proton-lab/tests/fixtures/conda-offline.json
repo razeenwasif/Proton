@@ -1,5 +1,0 @@
-{
-  "error": "RuntimeError('EnforceUnusedAdapter called with url https://conda.anaconda.org/conda-forge/tos.json\\nThis command is using a remote connection in offline mode.\\n')",
-  "exception_name": "RuntimeError",
-  "exception_type": "<class 'RuntimeError'>"
-}

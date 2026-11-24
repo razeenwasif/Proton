@@ -4384,17 +4384,13 @@ dependencies = [
  "proton-circuit",
  "proton-claude",
  "proton-container",
- "proton-council",
  "proton-dap",
  "proton-data",
  "proton-index",
- "proton-lab",
  "proton-library",
- "proton-literature",
  "proton-logic",
  "proton-lsp",
  "proton-plugin",
- "proton-research",
  "proton-sheet",
  "proton-syntax",
  "proton-term",
@@ -4447,18 +4443,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proton-lab"
-version = "0.0.1"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "sha2",
- "ts-rs",
- "ureq",
-]
-
-[[package]]
 name = "proton-library"
 version = "0.0.1"
 dependencies = [
@@ -4469,17 +4453,6 @@ dependencies = [
  "proton-library",
  "quick-xml",
  "serde_json",
- "ureq",
-]
-
-[[package]]
-name = "proton-literature"
-version = "0.0.1"
-dependencies = [
- "proton-research",
- "quick-xml",
- "serde_json",
- "sha2",
  "ureq",
 ]
 
@@ -4518,16 +4491,6 @@ dependencies = [
  "ts-rs",
  "wasmtime",
  "wat",
-]
-
-[[package]]
-name = "proton-research"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
- "toml 0.9.12+spec-1.1.0",
- "ts-rs",
 ]
 
 [[package]]

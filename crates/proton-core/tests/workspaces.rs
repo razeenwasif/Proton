@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 
 use proton_core::bus::Event;
 use proton_core::folder;
-use proton_core::research::factory::Engines;
-use proton_core::research::Research;
 use proton_core::picker::PickerKind;
 use proton_core::{Command, Key, ModeId, Session};
 
@@ -408,36 +406,36 @@ fn a_project_opened_in_codex_is_not_carried_into_data() {
     assert_eq!(names[active], "beta");
 
     // Every other mode keeps its own too: Logic has the session's first
-    // folder, not Codex's latest, and Research its own.
+    // folder, not Codex's latest, and Circuit its own.
     mode(&mut session, ModeId::Logic);
     assert_eq!(here(&session), "alpha", "Codex's latest was carried into Logic");
     session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
-    mode(&mut session, ModeId::Research);
-    assert_eq!(here(&session), "alpha", "Logic's project was carried into Research");
+    mode(&mut session, ModeId::Circuit);
+    assert_eq!(here(&session), "alpha", "Logic's project was carried into Circuit");
     mode(&mut session, ModeId::Logic);
     assert_eq!(here(&session), "beta", "Logic did not bring its own back");
 }
 
 #[test]
-fn research_and_excel_keep_projects_of_their_own() {
+fn circuit_and_excel_keep_projects_of_their_own() {
     // Each mode lists what was opened in it: Data's project is not
-    // Research's, nor Excel's, and each comes back to its own.
+    // Circuit's, nor Excel's, and each comes back to its own.
     let scratch = Scratch::new("own-each");
     let mut session = Session::new(scratch.at("alpha"));
     mode(&mut session, ModeId::Data);
     session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
-    mode(&mut session, ModeId::Research);
-    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Research), "Data's project was carried into Research");
+    mode(&mut session, ModeId::Circuit);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Circuit), "Data's project was carried into Circuit");
     session.apply(Command::OpenWorkspace { path: scratch.at("nested/alpha") });
     mode(&mut session, ModeId::Sheet);
     assert_eq!(here(&session), "alpha");
     mode(&mut session, ModeId::Data);
     assert_eq!(here(&session), "beta");
-    let events = mode(&mut session, ModeId::Research);
-    assert!(session.active().root().ends_with("nested/alpha"), "back in Research, not on its own project");
+    let events = mode(&mut session, ModeId::Circuit);
+    assert!(session.active().root().ends_with("nested/alpha"), "back in Circuit, not on its own project");
     let (names, active) = tabs(&events).unwrap();
-    assert!(names[active].ends_with("alpha") && names.len() == 2, "the switcher is not Research's: {names:?}");
-    assert!(!names.contains(&"beta".to_string()), "Data's project is in Research's switcher: {names:?}");
+    assert!(names[active].ends_with("alpha") && names.len() == 2, "the switcher is not Circuit's: {names:?}");
+    assert!(!names.contains(&"beta".to_string()), "Data's project is in Circuit's switcher: {names:?}");
 }
 
 #[test]
@@ -472,7 +470,7 @@ fn a_mode_with_no_project_of_its_own_is_given_a_folder_of_its_own() {
 #[test]
 fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes() {
     // A file from when the window had two sides: Codex's projects, Data's,
-    // and the one Data showed — read into Codex's, Data's and Research's;
+    // and the one Data showed — read into Codex's and Data's;
     // every other mode starts on a folder of its own.
     let scratch = Scratch::new("old-sides");
     let homes = scratch.root.join("homes");
@@ -488,17 +486,15 @@ fn a_session_from_before_keeps_codexs_projects_for_codex_and_datas_for_its_modes
     .unwrap();
     let mut session = Session::restore_from(Some(store), None, None).with_mode_homes(&homes);
     assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Codex));
-    for data_side in [ModeId::Data, ModeId::Research] {
-        mode(&mut session, data_side);
-        assert_eq!(here(&session), "beta", "{data_side:?} lost Data's project");
-    }
+    mode(&mut session, ModeId::Data);
+    assert_eq!(here(&session), "beta", "Data lost its project");
     mode(&mut session, ModeId::Logic);
     assert!(session.active().root().ends_with("Logic"), "Logic was given Codex's project: {:?}", session.active().root());
 }
 
 #[test]
 fn a_project_only_a_mode_that_left_listed_is_closed_not_given_to_codex() {
-    // A session from when Game, Chat and Notebook were modes here: their folders are
+    // A session from when Game, Chat, Notebook and Research were modes here: their folders are
     // closed on the way in, out of every list — not handed to Codex.
     let scratch = Scratch::new("left-modes");
     let homes = scratch.root.join("homes");
@@ -511,13 +507,16 @@ fn a_project_only_a_mode_that_left_listed_is_closed_not_given_to_codex() {
     let chat = folder_of(&scratch.root.join("Chat")).display().to_string();
     std::fs::create_dir_all(scratch.root.join("Notebook")).unwrap();
     let notebook = folder_of(&scratch.root.join("Notebook")).display().to_string();
+    std::fs::create_dir_all(scratch.root.join("Research")).unwrap();
+    let research = folder_of(&scratch.root.join("Research")).display().to_string();
     std::fs::write(
         &store,
-        serde_json::json!({"version": 1, "open": [alpha, game, chat, notebook, beta], "active": 0, "recents": [],
+        serde_json::json!({"version": 1, "open": [alpha, game, chat, notebook, research, beta], "active": 0, "recents": [],
                            "modes": [{"mode": "codex", "listed": [alpha], "shown": alpha},
                                      {"mode": "game", "listed": [game, beta], "shown": game},
                                      {"mode": "chat", "listed": [chat], "shown": chat},
                                      {"mode": "study", "listed": [notebook], "shown": notebook},
+                                     {"mode": "research", "listed": [research], "shown": research},
                                      {"mode": "data", "listed": [beta], "shown": beta}]})
         .to_string(),
     )
@@ -542,13 +541,13 @@ fn folder_of(path: &Path) -> PathBuf {
 #[test]
 fn a_mode_that_opened_none_starts_on_the_sessions_first_folder() {
     // A session made on a folder shows it in every mode until a mode opens
-    // another: Research, never having opened one, shows it.
+    // another: Circuit, never having opened one, shows it.
     let scratch = Scratch::new("first-side");
     let mut session = Session::new(scratch.at("alpha"));
     mode(&mut session, ModeId::Data);
     session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
-    mode(&mut session, ModeId::Research);
-    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Research));
+    mode(&mut session, ModeId::Circuit);
+    assert_eq!((here(&session), session.active().mode()), ("alpha".to_string(), ModeId::Circuit));
     mode(&mut session, ModeId::Codex);
     assert_eq!(here(&session), "alpha");
 }
@@ -1414,93 +1413,6 @@ fn a_command_nobody_knows_still_reaches_the_front_end() {
             .any(|e| matches!(e, Event::CmdlineRun { text } if text.contains("frobnicate"))),
         "{events:?}"
     );
-}
-
-/// Investigations kept in a folder of their own are every project's: made
-/// from one, listed from another opened later, and never in a `research/`
-/// of either — nor mistaken for the person's own folders beside them.
-#[test]
-fn investigations_kept_in_a_folder_of_their_own_are_every_projects() {
-    let scratch = Scratch::new("research");
-    let kept = scratch.root.join("Research");
-    std::fs::create_dir_all(kept.join("Cricket-Analysis")).unwrap();
-    let research = Research::kept_with(&kept, Box::new(Engines::default()), "test");
-    let mut session = Session::new(scratch.at("alpha")).sharing_research(research);
-    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
-
-    let events = session.apply(Command::ResearchNew {
-        title: "Why is the sky blue?".into(),
-        goal: "Explain the colour.".into(),
-        discipline: proton_research::Discipline::Physics,
-        literature: false,
-    });
-    assert!(kept.join("why-is-the-sky-blue").join("investigation.json").is_file(), "{events:?}");
-    for project in ["alpha", "beta"] {
-        assert!(!Path::new(&scratch.at(project)).join("research").exists(), "made in {project}'s research/");
-    }
-
-    session.apply(Command::FocusWorkspace { index: 0 });
-    let events = session.apply(Command::Sync);
-    let (listed, shown) = events
-        .iter()
-        .find_map(|e| match e {
-            Event::ResearchList { investigations, folder, .. } => {
-                Some((investigations.iter().map(|i| i.slug.clone()).collect::<Vec<_>>(), folder.clone()))
-            }
-            _ => None,
-        })
-        .expect("Research was not drawn");
-    assert_eq!(listed, ["why-is-the-sky-blue"], "the other project does not show it, or a folder that is no investigation is listed");
-    assert_eq!(shown, format!("{}{}", folder::tilde(&kept), std::path::MAIN_SEPARATOR));
-}
-
-/// Where investigations are kept, moved from the window: to a folder of
-/// their own — made when only its last part is missing — and back to each
-/// project's `research/`, saved in the person's settings each time.
-#[test]
-fn where_investigations_are_kept_is_moved_from_the_window_and_saved() {
-    fn kept_here(folder: &Path) -> Research {
-        Research::kept_with(folder, Box::new(Engines::default()), "test")
-    }
-    fn folder_of(events: &[Event]) -> Option<String> {
-        events.iter().find_map(|e| match e {
-            Event::ResearchList { folder, .. } => Some(folder.clone()),
-            _ => None,
-        })
-    }
-    let read = |file: &Path| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap() };
-    let scratch = Scratch::new("research-folder");
-    let settings = scratch.root.join("settings.json");
-    let mut session = Session::new(scratch.at("alpha")).making_research_with(kept_here).with_person_settings(settings.clone());
-
-    let kept = scratch.root.join("kept");
-    let typed = kept.display().to_string();
-    let events = session.apply(Command::ResearchFolder { folder: typed.clone() });
-    assert!(kept.is_dir(), "the folder was not made: {:?}", notices(&events));
-    assert!(notices(&events).iter().any(|n| n.starts_with("Made ")), "{:?}", notices(&events));
-    assert_eq!(folder_of(&events), Some(format!("{}{}", folder::tilde(&folder::normalise(&kept)), std::path::MAIN_SEPARATOR)));
-    assert_eq!(read(&settings)["research"]["folder"], typed.as_str());
-
-    // A project opened since keeps them there too.
-    session.apply(Command::OpenWorkspace { path: scratch.at("beta") });
-    session.apply(Command::ResearchNew {
-        title: "Why is the sky blue?".into(),
-        goal: "Explain the colour.".into(),
-        discipline: proton_research::Discipline::Physics,
-        literature: false,
-    });
-    assert!(kept.join("why-is-the-sky-blue").join("investigation.json").is_file());
-
-    // A folder whose parent is not there is refused, and nothing moves.
-    let events = session.apply(Command::ResearchFolder { folder: scratch.root.join("no").join("such").display().to_string() });
-    assert!(notices(&events).iter().any(|n| n.contains("no such folder")), "{:?}", notices(&events));
-    assert!(!scratch.root.join("no").exists());
-    assert_eq!(read(&settings)["research"]["folder"], typed.as_str());
-
-    // Nothing: each project's own research/ again, and the setting goes.
-    let events = session.apply(Command::ResearchFolder { folder: String::new() });
-    assert_eq!(folder_of(&events).as_deref(), Some("research/"));
-    assert!(read(&settings)["research"].get("folder").is_none(), "{}", read(&settings));
 }
 
 #[test]

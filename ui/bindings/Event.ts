@@ -19,7 +19,6 @@ import type { CircuitMachineView } from "./CircuitMachineView";
 import type { CircuitProjectView } from "./CircuitProjectView";
 import type { CircuitRunView } from "./CircuitRunView";
 import type { CircuitTestResult } from "./CircuitTestResult";
-import type { ClaudeItem } from "./ClaudeItem";
 import type { Completion } from "./Completion";
 import type { ContainerView } from "./ContainerView";
 import type { DebugFrame } from "./DebugFrame";
@@ -27,40 +26,21 @@ import type { DebugPhase } from "./DebugPhase";
 import type { DebugVariable } from "./DebugVariable";
 import type { Diagnostic } from "./Diagnostic";
 import type { Entry } from "./Entry";
-import type { ExperimentRow } from "./ExperimentRow";
 import type { GitMark } from "./GitMark";
 import type { Hit } from "./Hit";
-import type { HypothesisDetail } from "./HypothesisDetail";
-import type { HypothesisRow } from "./HypothesisRow";
-import type { LabEnv } from "./LabEnv";
-import type { LabRun } from "./LabRun";
-import type { LabRunDetail } from "./LabRunDetail";
-import type { LabSandbox } from "./LabSandbox";
 import type { Layout } from "./Layout";
-import type { LeanEnv } from "./LeanEnv";
 import type { LibrarySource } from "./LibrarySource";
-import type { LiteratureRow } from "./LiteratureRow";
-import type { LiteratureSourceRow } from "./LiteratureSourceRow";
 import type { LogicAnswerView } from "./LogicAnswerView";
 import type { LogicFileView } from "./LogicFileView";
 import type { LogicFound } from "./LogicFound";
 import type { LogicModelsView } from "./LogicModelsView";
 import type { ModeId } from "./ModeId";
 import type { NoticeLevel } from "./NoticeLevel";
-import type { PaperDetail } from "./PaperDetail";
-import type { PaperResult } from "./PaperResult";
-import type { PaperRow } from "./PaperRow";
 import type { PickerItem } from "./PickerItem";
 import type { PickerKind } from "./PickerKind";
 import type { PluginView } from "./PluginView";
 import type { ProposalView } from "./ProposalView";
 import type { RepoFile } from "./RepoFile";
-import type { ResearchDiscipline } from "./ResearchDiscipline";
-import type { ResearchForked } from "./ResearchForked";
-import type { ResearchSeatRow } from "./ResearchSeatRow";
-import type { ResearchSummary } from "./ResearchSummary";
-import type { ResearchTask } from "./ResearchTask";
-import type { RoundStatus } from "./RoundStatus";
 import type { Selection } from "./Selection";
 import type { ServerState } from "./ServerState";
 import type { SheetBookView } from "./SheetBookView";
@@ -215,39 +195,7 @@ proposals: Array<ProposalView>, } | { "type": "notebookCells", path: string, cel
 /**
  * Only this window is closing; Proton goes on in the others.
  */
-closing: boolean, } | { "type": "researchList", investigations: Array<ResearchSummary>, open: string | null, folder: string, } | { "type": "researchBoard", slug: string, title: string, discipline: ResearchDiscipline, brief: string, plan: string, overview: string, verdicts: string, sandbox: string, 
-/**
- * What the scientist has told the team.
- */
-feedback: string, hypotheses: Array<HypothesisRow>, 
-/**
- * Where it was forked from, if it was.
- */
-forked: ResearchForked | null, 
-/**
- * The rounds it can be forked from, by their ends kept.
- */
-roundEnds: Array<number>, } | { "type": "researchHypothesis", slug: string, detail: HypothesisDetail | null, } | { "type": "researchLab", slug: string, experiments: Array<ExperimentRow>, runs: Array<LabRun>, sandbox: LabSandbox, 
-/**
- * Whether what the agents propose runs, in the sandbox, without asking.
- */
-autoRun: boolean, } | { "type": "researchRun", slug: string, detail: LabRunDetail | null, } | { "type": "researchLiterature", slug: string, enabled: boolean, 
-/**
- * Whether what the team cites is checked.
- */
-check: boolean, 
-/**
- * Whether this Proton asks anybody at all.
- */
-live: boolean, sources: Array<LiteratureSourceRow>, papers: Array<PaperRow>, fetching: Array<string>, adding: Array<string>, } | { "type": "researchPaper", slug: string, detail: PaperDetail | null, } | { "type": "researchResults", slug: string, query: string, searching: boolean, results: Array<PaperResult>, failures: Array<string>, } | { "type": "labEnv", env: LabEnv, } | { "type": "leanEnv", env: LeanEnv, } | { "type": "researchTranscript", slug: string, task: string, items: Array<ClaudeItem>, } | { "type": "researchRound", slug: string, round: number, status: RoundStatus, used: number, cap: number, seats: Array<ResearchSeatRow>, tasks: Array<ResearchTask>, 
-/**
- * The round's search of the literature, if it has one.
- */
-literature: LiteratureRow | null, 
-/**
- * Another Proton is running its rounds, in words: read only here.
- */
-held: string | null, } | { "type": "chats", conversations: Array<Summary>, 
+closing: boolean, } | { "type": "chats", conversations: Array<Summary>, 
 /**
  * Which one is open, as a project-relative path. Empty for a
  * conversation that has not been saved yet — one with no question in

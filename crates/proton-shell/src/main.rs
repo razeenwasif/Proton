@@ -114,19 +114,6 @@ impl WindowSession {
         }
     }
 
-    fn read_lab_bytes(&self, key: &str) -> Result<Vec<u8>, String> {
-        match self {
-            Self::Local(local) => {
-                let path = held(local)
-                    .session
-                    .lab_file(key)
-                    .ok_or_else(|| format!("{key}: not a file a run left"))?;
-                std::fs::read(&path).map_err(|e| format!("{key}: {e}"))
-            }
-            Self::Remote(remote) => remote.read_lab(key.to_string()),
-        }
-    }
-
     fn document_name(&self, path: &str) -> Result<String, String> {
         match self {
             Self::Local(local) => {
@@ -176,7 +163,7 @@ impl WindowSession {
 
 /// Each window's own core, by the window's label. A window is a Proton of
 /// its own — its projects, its modes, its agents and terminals — sharing
-/// with the others only what the machine has one of: the Lab, Lean. The
+/// with the others only what the machine has one of. The
 /// first window's session is the one written down and reopened next launch.
 #[derive(Default)]
 struct Windows {
@@ -438,15 +425,6 @@ fn read_document(path: String, window: tauri::WebviewWindow, windows: State<'_, 
         .of(window.label())
         .ok_or_else(|| format!("{path}: window is closing"))?;
     let bytes = session.read_document_bytes(&path)?;
-    Ok(tauri::ipc::Response::new(bytes))
-}
-
-#[tauri::command(async)]
-fn read_lab(key: String, window: tauri::WebviewWindow, windows: State<'_, Windows>) -> Result<tauri::ipc::Response, String> {
-    let session = windows
-        .of(window.label())
-        .ok_or_else(|| format!("{key}: window is closing"))?;
-    let bytes = session.read_lab_bytes(&key)?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -1046,7 +1024,6 @@ fn main() {
             set_backdrop,
             set_opaque,
             read_document,
-            read_lab,
             save_document_as,
             paste_text,
             copy_text,
@@ -1152,8 +1129,8 @@ fn main() {
                 if let Some(windows) = app.try_state::<Windows>() {
                     for (label, session) in windows.all() {
                         windows.remove(&label);
-                        // A Lab run and a notebook's kernel each lead a
-                        // process group of their own, and the app exits
+                        // A notebook's kernel leads a process group of
+                        // its own, and the app exits
                         // without dropping the session: they would outlive
                         // it if not stopped here.
                         session.shutdown(true, true);

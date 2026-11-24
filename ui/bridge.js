@@ -157,18 +157,6 @@ export async function saveDocumentAs(path, name) {
   return tauri.core.invoke("save_document_as", { path });
 }
 
-/** A file a Lab run left, as bytes: `<investigation>/<run>/<path>`.
- *  @param {string} key */
-export async function readLab(key) {
-  if (!tauri) {
-    const adapter = await preview;
-    if (!adapter) throw new Error('Browser preview is unavailable');
-    return adapter.readLab(key);
-  }
-  const body = await tauri.core.invoke("read_lab", { key });
-  return body instanceof ArrayBuffer ? body : new Uint8Array(body).buffer;
-}
-
 /** ⌘V in the editor: the clipboard's text, read by the shell — none if it
  *  holds none, or there is no shell. @returns {Promise<string | null>} */
 export async function pasteText() {

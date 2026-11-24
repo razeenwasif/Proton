@@ -12,14 +12,11 @@ members = [
     "crates/proton-dap",
     "crates/proton-data",
     "crates/proton-index",
-    "crates/proton-lab",
     "crates/proton-library",
-    "crates/proton-literature",
     "crates/proton-logic",
     "crates/proton-mcp",
     "crates/proton-lsp",
     "crates/proton-plugin",
-    "crates/proton-research",
     "crates/proton-sheet",
     "crates/proton-shell",
     "crates/proton-syntax",
@@ -50,13 +47,10 @@ proton-data = { path = "crates/proton-data" }
 proton-sheet = { path = "crates/proton-sheet" }
 proton-index = { path = "crates/proton-index" }
 proton-library = { path = "crates/proton-library" }
-proton-literature = { path = "crates/proton-literature" }
 proton-logic = { path = "crates/proton-logic" }
 proton-mcp = { path = "crates/proton-mcp" }
 proton-lsp = { path = "crates/proton-lsp" }
 proton-plugin = { path = "crates/proton-plugin" }
-proton-research = { path = "crates/proton-research" }
-proton-lab = { path = "crates/proton-lab" }
 proton-syntax = { path = "crates/proton-syntax" }
 proton-term = { path = "crates/proton-term" }
 proton-text = { path = "crates/proton-text" }

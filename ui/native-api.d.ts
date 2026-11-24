@@ -53,7 +53,6 @@ export interface NativeApi {
     invoke(name: 'dispatch', args: {command: WireCommand}): Promise<EventBatch>;
     invoke(name: 'read_document', args: {path: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'save_document_as', args: {path: string}): Promise<string | null>;
-    invoke(name: 'read_lab', args: {key: string}): Promise<ArrayBuffer | number[]>;
     invoke(name: 'paste_text'): Promise<string | null>;
     invoke(name: 'copy_text', args: {text: string}): Promise<void>;
     invoke(name: 'backdrop'): Promise<string>;

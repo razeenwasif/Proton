@@ -110,12 +110,6 @@ pub fn run(folder: Option<String>) -> i32 {
                     break;
                 }
             }
-            ClientMsg::ReadLab { id, key } => {
-                let resp = read_lab_msg(&session, id, &key);
-                if !write_msg(&writer, &resp) {
-                    break;
-                }
-            }
             ClientMsg::SaveUnsaved { id } => {
                 let failed = held(&session).session.save_unsaved();
                 if !write_msg(&writer, &ServerMsg::Unsaved { id, failed }) {
@@ -235,32 +229,6 @@ fn read_document_msg(session: &Arc<Mutex<BridgeSession>>, id: u64, path: &str) -
             ok: false,
             data: None,
             error: Some(format!("{path}: {err}")),
-        },
-    }
-}
-
-fn read_lab_msg(session: &Arc<Mutex<BridgeSession>>, id: u64, key: &str) -> ServerMsg {
-    let path = held(session).session.lab_file(key);
-    let Some(path) = path else {
-        return ServerMsg::Bytes {
-            id,
-            ok: false,
-            data: None,
-            error: Some(format!("{key}: not a file a run left")),
-        };
-    };
-    match std::fs::read(&path) {
-        Ok(bytes) => ServerMsg::Bytes {
-            id,
-            ok: true,
-            data: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
-            error: None,
-        },
-        Err(err) => ServerMsg::Bytes {
-            id,
-            ok: false,
-            data: None,
-            error: Some(format!("{key}: {err}")),
         },
     }
 }

@@ -11,7 +11,6 @@ use crate::transport::EventBatch;
 pub enum ClientMsg {
     Dispatch { id: u64, command: Command },
     ReadDocument { id: u64, path: String },
-    ReadLab { id: u64, key: String },
     SaveUnsaved { id: u64 },
     Shutdown { id: u64 },
 }

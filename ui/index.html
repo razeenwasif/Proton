@@ -210,7 +210,6 @@
       <div class="mode-rail" role="tablist" aria-label="Mode">
       <button class="mode" role="tab" aria-selected="true"  data-mode="codex"><svg class="i"><use href="#i-code"/></svg><span>Codex</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="data"><svg class="i"><use href="#i-chart"/></svg><span>Data</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="research"><svg class="i"><use href="#i-flask"/></svg><span>Research</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="sheet"><svg class="i"><use href="#i-table"/></svg><span>Excel</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="circuit"><svg class="i"><use href="#i-bolt"/></svg><span>Circuit</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="logic"><svg class="i"><use href="#i-logic"/></svg><span>Logic</span></button>
@@ -587,92 +586,6 @@
               </div>
             </div>
           </div>
-        </div>
-      </aside>
-    </section>
-
-    <!-- ══ RESEARCH ══════════════════════════════════════════════ -->
-    <!-- Investigations: a question put to Claude Code, Codex and Antigravity
-         together, as Google's co-scientist puts one — hypotheses proposed,
-         reviewed by the others, ranked by a tournament judged blind, evolved
-         — with the Lab to run what is worth running. Each is a folder under
-         the project's research/, and this draws what the core reads from it
-         (ui/research.js). Codex's ground and type. -->
-    <section class="workspace cc rs" data-ws="research"
-             style="--col-l:240px; --col-r:320px; grid-template-columns: var(--col-l) 1px minmax(0,1fr) 1px var(--col-r);">
-      <aside class="pane side cc-side rs-side">
-        <div class="cc-side-head">
-          <button class="cc-new" data-research-new title="New investigation"><svg class="i"><use href="#i-plus"/></svg>New investigation</button>
-        </div>
-        <!-- From Event::ResearchList: the project's investigations, newest first. -->
-        <div class="scroll cc-sessions" data-research-list></div>
-        <!-- Where they are kept — research/ in the project, or a folder of
-             their own for every project — and a way to keep them elsewhere. -->
-        <div class="rs-where" data-research-where></div>
-        <!-- From Event::ResearchRound: who sits at the open investigation's
-             table, in which role, and whether each can. -->
-        <div class="rs-seats-box" data-research-seats-box hidden>
-          <header>Table</header>
-          <div data-research-seats></div>
-        </div>
-      </aside>
-
-      <div class="gutter" data-resize="--col-l" title="Drag to resize · double-click to reset"></div>
-
-      <main class="pane cc-main rs-main">
-        <header class="cc-head rs-head">
-          <div class="cc-title" data-research-title>Research</div>
-          <span class="rs-chip" data-research-discipline hidden></span>
-          <span class="grow"></span>
-        </header>
-        <div class="rs-strip" data-research-tabs hidden>
-          <div class="rs-tabs" role="tablist" aria-label="Board">
-            <button class="rs-tab on" role="tab" aria-selected="true" data-research-tab="overview">Overview</button>
-            <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="hypotheses">Hypotheses<span class="rs-count" data-research-count></span></button>
-            <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="literature">Literature<span class="rs-count" data-research-papers></span></button>
-            <button class="rs-tab" role="tab" aria-selected="false" data-research-tab="activity">Activity<span class="rs-count live" data-research-busy></span></button>
-          </div>
-          <!-- The round: where it stands, what it has spent, and its controls. -->
-          <div class="rs-run" data-research-run hidden>
-            <span class="rs-status" data-research-status></span>
-            <span class="rs-meter" data-research-meter><i></i></span>
-            <button class="cc-quiet" data-research-pause hidden>Pause</button>
-            <button class="cc-quiet" data-research-stop hidden>Stop</button>
-            <button class="cc-quiet" data-research-fork title="Copy this investigation to take another direction from it" aria-pressed="false" hidden>Fork</button>
-            <button class="cc-primary" data-research-go>Run round</button>
-          </div>
-        </div>
-        <!-- From Event::ResearchBoard, ResearchHypothesis, ResearchLiterature, ResearchPaper,
-             ResearchResults, ResearchRound and ResearchTranscript. -->
-        <div class="scroll rs-board" data-research-board></div>
-        <!-- What the scientist tells the team, and hypotheses of their own. -->
-        <div class="rs-dock" data-research-dock hidden>
-          <div class="cc-composer rs-composer">
-            <textarea class="cc-input" data-research-input rows="1" spellcheck="true" aria-label="Tell the team"
-                      placeholder="Tell the team something — /h Title: statement adds a hypothesis of your own, /p and a DOI a paper"></textarea>
-            <div class="cc-foot">
-              <span class="rs-hint" data-research-hint>⏎ tells the team · ⇧⏎ a new line</span>
-              <span class="grow"></span>
-              <button class="cc-send" data-research-send title="Send  ⏎" aria-label="Send" disabled><svg class="i"><use href="#i-arrow-up"/></svg></button>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      <div class="gutter" data-resize="--col-r" title="Drag to resize · double-click to reset"></div>
-
-      <!-- The Lab: where an investigation's code runs, in a sandbox, after
-           you have read it. -->
-      <aside class="pane rs-lab" data-research-lab>
-        <header class="cc-head rs-lab-head"><div class="cc-title">Lab</div></header>
-        <div class="scroll rs-lab-body" data-research-lab-body>
-          <!-- From Event::LabEnv: the Lab's Python, made with your say-so twice (ui/lab.js). -->
-          <section class="lab-env" data-lab-env></section>
-          <!-- From Event::LeanEnv: Lean and Mathlib, for mathematics, made the same way (ui/lean.js). -->
-          <section class="lab-env lean-env" data-lean-env hidden></section>
-          <!-- From Event::ResearchLab and ResearchRun: what waits for you to read,
-               and what has run. -->
-          <section class="lab-work" data-lab-work></section>
         </div>
       </aside>
     </section>
@@ -1176,7 +1089,7 @@
        one ground from edge to edge. The title bar it does keep stands on its
        end down the right edge, so the code has the window's full height. It
        holds what the rails held that Codex still needs: the window controls,
-       the modes — so the window can be left by mouse as well as by ⌃1–⌃7 —
+       the modes — so the window can be left by mouse as well as by ⌃1–⌃6 —
        and the panel toggles a hidden statusline would otherwise take with
        it. The empty stretch between them is the window's drag surface.
        After the body in the source because it is after it on screen, so Tab
@@ -1192,11 +1105,10 @@
     <div class="tb-modes" role="tablist" aria-label="Mode" aria-orientation="vertical">
       <button class="mode" role="tab" aria-selected="true"  data-mode="codex" title="Codex  ⌃1"><span>Codex</span></button>
       <button class="mode" role="tab" aria-selected="false" data-mode="data" title="Data  ⌃2"><span>Data</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="research" title="Research  ⌃3"><span>Research</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="sheet" title="Excel  ⌃4"><span>Excel</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="circuit" title="Circuit  ⌃5"><span>Circuit</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="logic" title="Logic  ⌃6"><span>Logic</span></button>
-      <button class="mode" role="tab" aria-selected="false" data-mode="cad" title="CAD  ⌃7"><span>CAD</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="sheet" title="Excel  ⌃3"><span>Excel</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="circuit" title="Circuit  ⌃4"><span>Circuit</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="logic" title="Logic  ⌃5"><span>Logic</span></button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="cad" title="CAD  ⌃6"><span>CAD</span></button>
     </div>
     <span class="tb-drag" aria-hidden="true"></span>
     <div class="tb-actions">
@@ -1527,7 +1439,7 @@
   <button class="hint-toggle" title="Keyboard hints"><svg class="i"><use href="#i-keyboard"/></svg></button>
   <div class="hint-keys">
   <span>Try</span>
-  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃7</kbd><span style="color:var(--ink-3)">modes</span>
+  <kbd>⌃1</kbd><kbd>…</kbd><kbd>⌃6</kbd><span style="color:var(--ink-3)">modes</span>
   <kbd>␣</kbd><span style="color:var(--ink-3)">leader</span>
   <kbd>⌘K</kbd><span style="color:var(--ink-3)">telescope</span>
   <kbd>:</kbd><span style="color:var(--ink-3)">cmd</span>

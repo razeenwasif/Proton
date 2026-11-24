@@ -6,7 +6,7 @@
 //! headless and lets a second front end reuse it verbatim.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use proton_lsp::client::Incoming;
 
@@ -125,15 +125,6 @@ pub struct Workspace {
     embedder: Option<proton_library::Embedder>,
     /// Library searches waiting on a query vector.
     asking: Vec<Asking>,
-    /// The investigations, in the Research tab: the project's own, in its
-    /// `research/`, or the session's, where the person keeps them in a
-    /// folder of their own and every project shows the same ones.
-    research: Arc<Mutex<crate::research::Research>>,
-    /// Whether `research` is the session's. The session polls and stops a
-    /// shared one itself, once; were every workspace to poll it, what a
-    /// round said could be drained by a project in the background and
-    /// dropped with the rest of that project's events.
-    research_shared: bool,
     /// The files opened in the document viewer: the only ones the shell's
     /// `read_document` will read for the page.
     documents: std::collections::BTreeSet<PathBuf>,
@@ -446,8 +437,6 @@ impl Workspace {
             pickers: Pickers::new(root),
             servers: Servers::new(root),
             agent: Agent::new(&root.display().to_string()),
-            research: Arc::new(Mutex::new(crate::research::Research::new(root))),
-            research_shared: false,
             documents: std::collections::BTreeSet::new(),
             visualizer: Visualizer::new(root),
             tree: Tree::new(root),
@@ -820,7 +809,6 @@ impl Workspace {
                 if let Some(n) = auto_notice {
                     events.push(n);
                 }
-                events.extend(self.research().sync());
                 // Excel's home page and workbook, when it is the mode on
                 // screen: finding the workbooks walks the project.
                 if self.mode == ModeId::Sheet {
@@ -1035,18 +1023,6 @@ impl Workspace {
                         NoticeLevel::Error,
                     )];
                 };
-                // One of the open investigation's papers, as the team cites
-                // them: a page of its PDF opens the viewer there, its
-                // abstract the paper. Anything else is the library's.
-                let paper = self.research().cited(&cited.path);
-                match paper {
-                    Some(crate::research::Cited::Pdf(path)) => {
-                        let page = (cited.place == proton_library::chunk::Place::Pages).then(|| u32::try_from(cited.from).ok()).flatten();
-                        return vec![self.document_event(&path, ViewerKind::Pdf, page)];
-                    }
-                    Some(crate::research::Cited::Paper(id)) => return self.research().show_paper(Some(id)),
-                    None => {}
-                }
                 // Through the library's roots rather than the workspace's: a
                 // citation names a file in somebody's vault, which is nowhere
                 // near the project. `locate` is also what refuses to leave the
@@ -1355,55 +1331,6 @@ impl Workspace {
                 vec![self.tasks_event()]
             }
 
-            // Where investigations are kept is the window's: the session
-            // answers it for every project at once.
-            Command::ResearchFolder { .. } => {
-                vec![notice("Where investigations are kept is set for the whole window.".into(), NoticeLevel::Warn)]
-            }
-            Command::ResearchNew { title, goal, discipline, literature } => self.research().create(&title, &goal, discipline, literature),
-            Command::ResearchOpen { slug } => self.research().open(&slug),
-            Command::ResearchFork { slug, round, title, direction } => self.research().fork(&slug, round, &title, &direction),
-            Command::ResearchShow { hypothesis } => self.research().show(hypothesis),
-            Command::ResearchStart => self.research().start(),
-            Command::ResearchPause => self.research().pause(),
-            Command::ResearchResume => self.research().resume(),
-            Command::ResearchStop => self.research().stop(),
-            Command::ResearchFeedback { text } => self.research().feedback(&text),
-            Command::ResearchAddHypothesis { title, statement } => self.research().add_hypothesis(&title, &statement),
-            Command::ResearchSetStatus { hypothesis, status } => self.research().set_status(&hypothesis, status),
-            Command::ResearchSeat { seat, enabled } => self.research().set_seat(seat, enabled),
-            Command::ResearchTask { task } => self.research().watch(task),
-            Command::ResearchApprove { experiment, unsandboxed } => self.research().approve(&experiment, unsandboxed),
-            Command::ResearchReject { experiment } => self.research().reject(&experiment),
-            Command::ResearchAutoRun { enabled } => self.research().set_auto_run(enabled),
-            Command::ResearchStopRun { run } => self.research().stop_run(&run),
-            Command::ResearchShowRun { run } => self.research().show_run(run),
-            Command::ResearchSetLiterature { enabled, sources } => self.research().set_literature(enabled, sources),
-            Command::ResearchSearch { query } => self.research().search(&query),
-            Command::ResearchAddPaper { paper } => self.research().add_paper(&paper),
-            Command::ResearchShowPaper { paper } => self.research().show_paper(paper),
-            Command::ResearchOpenPaper { paper, page } => {
-                let found = self.research().paper_pdf(&paper);
-                match found {
-                    Ok(path) => vec![self.document_event(&path, ViewerKind::Pdf, page)],
-                    Err(why) => vec![notice(why, NoticeLevel::Warn)],
-                }
-            }
-            Command::ResearchFetchPdf { paper } => self.research().fetch_pdf(&paper),
-            Command::LabPlan => self.research().lab_do(|lab| lab.plan()),
-            Command::LabCreate => self.research().lab_do(|lab| lab.create()),
-            Command::LabCancel => self.research().lab_do(|lab| {
-                lab.cancel();
-                Ok(())
-            }),
-            Command::LabRemove => self.research().lab_do(|lab| lab.remove()),
-            Command::LeanPlan => self.research().lean_do(|lean| lean.plan()),
-            Command::LeanCreate => self.research().lean_do(|lean| lean.create()),
-            Command::LeanCancel => self.research().lean_do(|lean| {
-                lean.cancel();
-                Ok(())
-            }),
-            Command::LeanRemove => self.research().lean_do(|lean| lean.remove()),
             Command::OpenLink { url } => match open_link(&url) {
                 Ok(()) => Vec::new(),
                 Err(why) => vec![notice(why, NoticeLevel::Warn)],
@@ -2860,13 +2787,6 @@ impl Workspace {
             }
         }
 
-        // Research's rounds: their calls are conversations with the
-        // engines, each one task long. Unless they are the
-        // session's, which polls them once for every project.
-        if !self.research_shared {
-            events.extend(self.research().poll());
-        }
-
         // And the library's walk, which is the same shape again: a second of
         // reading somebody's vault, on a thread with nothing to call back to.
         // It answers twice — the notes, then the PDFs — so this is not a
@@ -3502,9 +3422,7 @@ impl Workspace {
         }
     }
 
-    /// Proton is going: the notebook's kernel is stopped, and Research's runs
-    /// are stopped and its calls let go — the project's own, that is; the
-    /// session stops one it shares.
+    /// Proton is going: the notebook's kernel and the container are stopped.
     pub fn shutdown(&mut self) {
         // A notebook with changes is saved rather than lost: Jupyter saves as
         // it goes, and quitting is the last chance to.
@@ -3513,14 +3431,6 @@ impl Workspace {
         }
         self.data.shutdown();
         self.container.shutdown();
-        if !self.research_shared {
-            self.research().shutdown();
-        }
-    }
-
-    /// Where a file a Lab run left is: see `Research::lab_file`.
-    pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
-        self.research().lab_file(key)
     }
 
     /// A file to show in the document viewer, remembered so the shell will
@@ -3533,47 +3443,6 @@ impl Workspace {
     /// The file at `path`, if it was opened in the document viewer here.
     pub fn document_file(&self, path: &Path) -> Option<PathBuf> {
         self.documents.contains(path).then(|| path.to_path_buf())
-    }
-
-    /// The investigations this workspace shows.
-    fn research(&self) -> MutexGuard<'_, crate::research::Research> {
-        self.research.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// Whether the project's own investigations have a round or a run going.
-    /// One the session shares is the session's to ask.
-    pub fn research_busy(&self) -> bool {
-        !self.research_shared && self.research().has_work()
-    }
-
-    /// Everything the Research tab draws, as `Sync` gives it.
-    pub fn research_events(&mut self) -> Vec<Event> {
-        self.research().sync()
-    }
-
-    /// Show the project's own investigations again, in its `research/`,
-    /// rather than the session's.
-    pub fn own_research(&mut self) {
-        if self.research_shared {
-            self.research = Arc::new(Mutex::new(crate::research::Research::new(&self.root().to_path_buf())));
-            self.research_shared = false;
-        }
-    }
-
-    /// Show the session's investigations, kept in a folder of their own,
-    /// rather than the project's: see `Session::with_research_in`.
-    pub fn share_research(&mut self, research: &Arc<Mutex<crate::research::Research>>) {
-        self.research().shutdown();
-        self.research = Arc::clone(research);
-        self.research_shared = true;
-    }
-
-    /// The same, for the builder chain a session's `build` uses.
-    pub fn sharing_research(mut self, research: Option<&Arc<Mutex<crate::research::Research>>>) -> Self {
-        if let Some(research) = research {
-            self.share_research(research);
-        }
-        self
     }
 
     /// Everything the agent has proposed and nobody has accepted yet.
@@ -6003,11 +5872,6 @@ impl Workspace {
             },
         ];
 
-        // Research reads its folders again: a brief or a hypothesis edited
-        // by hand since is what the board should show.
-        if mode == ModeId::Research {
-            events.extend(self.research().sync());
-        }
         // Excel shows the project's workbooks, and the one open.
         if mode == ModeId::Sheet {
             let root = self.root().to_path_buf();

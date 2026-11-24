@@ -425,23 +425,6 @@ impl RemoteClient {
         }
     }
 
-    pub fn read_lab(&self, key: String) -> Result<Vec<u8>, String> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        match self.request(id, ClientMsg::ReadLab { id, key }, RPC_TIMEOUT)? {
-            ServerMsg::Bytes {
-                ok: true,
-                data: Some(b64),
-                ..
-            } => base64::engine::general_purpose::STANDARD
-                .decode(b64)
-                .map_err(|e| format!("invalid remote lab encoding: {e}")),
-            ServerMsg::Bytes { error, .. } => {
-                Err(error.unwrap_or_else(|| "failed to read remote lab file".into()))
-            }
-            other => Err(format!("unexpected remote read_lab reply: {other:?}")),
-        }
-    }
-
     pub fn save_unsaved(&self) -> Result<Vec<String>, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         match self.request(id, ClientMsg::SaveUnsaved { id }, RPC_TIMEOUT)? {

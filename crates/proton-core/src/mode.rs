@@ -16,9 +16,6 @@ pub enum ModeId {
     #[default]
     Codex,
     Data,
-    /// A team of AI researchers with a scientist in the loop: co-scientist's
-    /// rounds over an investigation's files, and a Lab that runs their code.
-    Research,
     /// A spreadsheet: workbooks of sheets, formulas worked out as they are
     /// typed, sorting, filters, colour and charts. "Excel" on the rail;
     /// `sheet` in the code.
@@ -36,20 +33,18 @@ pub enum ModeId {
 }
 
 impl ModeId {
-    /// Ordered as the keys bind them, `1`–`7`: Data and Research beside
-    /// Codex, the three a working day moves between, then Excel, Circuit,
-    /// Logic and CAD. (Chat was the first, until Fairy took conversations
-    /// over, and Notebook followed Research until it went to Fairy too;
-    /// Design, Model, Game, Video, Canvas and Diffuse, and LaTeX and the
-    /// Reader once among them, followed Notebook until they moved to apps of
-    /// their own.)
-    pub const ALL: [ModeId; 7] = [ModeId::Codex, ModeId::Data, ModeId::Research, ModeId::Sheet, ModeId::Circuit, ModeId::Logic, ModeId::Cad];
+    /// Ordered as the keys bind them, `1`–`6`: Data beside Codex, then
+    /// Excel, Circuit, Logic and CAD. (Chat was the first, until Fairy took
+    /// conversations over; Research followed Data, and Notebook Research,
+    /// until both went to Fairy too. Design, Model, Game, Video, Canvas and
+    /// Diffuse, and LaTeX and the Reader once among them, followed Notebook
+    /// until they moved to apps of their own.)
+    pub const ALL: [ModeId; 6] = [ModeId::Codex, ModeId::Data, ModeId::Sheet, ModeId::Circuit, ModeId::Logic, ModeId::Cad];
 
     pub fn slug(self) -> &'static str {
         match self {
             ModeId::Codex => "codex",
             ModeId::Data => "data",
-            ModeId::Research => "research",
             ModeId::Sheet => "sheet",
             ModeId::Circuit => "circuit",
             ModeId::Logic => "logic",
@@ -67,7 +62,6 @@ impl ModeId {
         match self {
             ModeId::Codex => "Codex",
             ModeId::Data => "Data",
-            ModeId::Research => "Research",
             ModeId::Sheet => "Excel",
             ModeId::Circuit => "Circuit",
             ModeId::Logic => "Logic",
@@ -84,7 +78,7 @@ impl ModeId {
         ModeId::ALL.into_iter().find(|m| m.slug() == s)
     }
 
-    /// `1`–`7`, one-indexed as the user sees them.
+    /// `1`–`6`, one-indexed as the user sees them.
     pub fn from_index(n: usize) -> Option<Self> {
         ModeId::ALL.get(n.checked_sub(1)?).copied()
     }

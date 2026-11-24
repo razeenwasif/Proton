@@ -28,7 +28,7 @@
 //! ## Each mode keeps projects of its own
 //!
 //! Every mode lists the projects opened in it and shows one of them, so the
-//! folder open in Codex is not carried into Research or Excel: going to
+//! folder open in Codex is not carried into Data or Excel: going to
 //! a mode brings back the project it had, and leaving it brings back the one
 //! the next mode had. The first time a mode is entered with nothing of its
 //! own, it is given a folder of its own — `~/Proton/<Mode>` — made then. A folder open in several modes is
@@ -201,16 +201,6 @@ pub struct Session {
     /// workspace would mean a second wasm engine and a second compile of
     /// every component the moment you opened a second project.
     plugins: std::sync::Arc<crate::plugins::Plugins>,
-    /// The investigations, where the person keeps them in a folder of their
-    /// own: one Research for every project here, rather than one per project
-    /// over its `research/`. Polled and stopped here, once.
-    research: Option<std::sync::Arc<std::sync::Mutex<crate::research::Research>>>,
-    /// The person's own settings file, where the research folder is kept.
-    /// `None` in tests, which must not touch the developer's.
-    person: Option<PathBuf>,
-    /// How a Research over a folder of its own is made: over the engines and
-    /// the machine's Lab — or, in tests, over a Lab of its own.
-    make_research: fn(&Path) -> crate::research::Research,
 }
 
 impl Session {
@@ -232,9 +222,6 @@ impl Session {
             store: None,
             servers: false,
             plugins: std::sync::Arc::default(),
-            research: None,
-            person: None,
-            make_research: crate::research::Research::kept_in,
         }
     }
 
@@ -275,115 +262,6 @@ impl Session {
         &self.plugins
     }
 
-    /// Keep the investigations in `folder`, each a folder in it, for every
-    /// project here and every one opened later — rather than in each
-    /// project's `research/`.
-    pub fn with_research_in(self, folder: &Path) -> Session {
-        let research = (self.make_research)(folder);
-        self.sharing_research(research)
-    }
-
-    /// Make a Research over a folder of its own with `make`: for tests, one
-    /// whose Lab is not the machine's.
-    pub fn making_research_with(mut self, make: fn(&Path) -> crate::research::Research) -> Session {
-        self.make_research = make;
-        self
-    }
-
-    /// The same, with the Research given: in tests, one over scripted engines.
-    pub fn sharing_research(mut self, research: crate::research::Research) -> Session {
-        let research = std::sync::Arc::new(std::sync::Mutex::new(research));
-        for workspace in &mut self.workspaces {
-            workspace.share_research(&research);
-        }
-        self.research = Some(research);
-        self
-    }
-
-    /// Where the person's own settings say investigations are kept, if they
-    /// keep them in a folder of their own: `research.folder`.
-    pub fn with_research(self) -> Session {
-        match crate::folder::config() {
-            Some(dir) => self.with_person_settings(dir.join("settings.json")),
-            None => self,
-        }
-    }
-
-    /// The same, from a named settings file — which is also where a folder
-    /// chosen in the Research tab is written.
-    pub fn with_person_settings(mut self, file: PathBuf) -> Session {
-        let folder = crate::settings::Settings::at(file.clone()).research_folder();
-        self.person = Some(file);
-        match folder {
-            Some(folder) => self.with_research_in(&folder),
-            None => self,
-        }
-    }
-
-    /// Keep the investigations in the folder somebody typed, for every
-    /// project, or in each project's own `research/` given nothing.
-    ///
-    /// Refused while a round or a run is going, since the Research that has
-    /// them is let go of. A folder that is not there is made only when its
-    /// parent is, so a slip of the keyboard cannot make a tree of them.
-    fn set_research_folder(&mut self, typed: &str) -> Vec<Event> {
-        let lock = |r: &std::sync::Arc<std::sync::Mutex<crate::research::Research>>| r.lock().map(|r| r.has_work()).unwrap_or(false);
-        if self.research.as_ref().is_some_and(lock) || self.workspaces.iter().any(Workspace::research_busy) {
-            return vec![notice(
-                "A round or a Lab run is going. Stop it before moving where investigations are kept.".into(),
-                NoticeLevel::Warn,
-            )];
-        }
-        let typed = typed.trim().trim_end_matches(['/', '\\']);
-        let mut said = Vec::new();
-        let folder = match crate::settings::research_path(typed) {
-            None => None,
-            Some(path) if path.is_dir() => Some(folder::normalise(&path)),
-            Some(path) if path.exists() => {
-                return vec![notice(format!("{}: not a folder", folder::tilde(&path)), NoticeLevel::Error)];
-            }
-            Some(path) => match path.parent().filter(|parent| parent.is_dir()) {
-                Some(_) => match std::fs::create_dir(&path) {
-                    Ok(()) => {
-                        said.push(notice(format!("Made {}.", folder::tilde(&path)), NoticeLevel::Info));
-                        Some(folder::normalise(&path))
-                    }
-                    Err(e) => return vec![notice(format!("{}: {e}", folder::tilde(&path)), NoticeLevel::Error)],
-                },
-                None => {
-                    let parent = path.parent().unwrap_or(&path);
-                    return vec![notice(format!("{}: no such folder", folder::tilde(parent)), NoticeLevel::Error)];
-                }
-            },
-        };
-        if let Some(file) = &self.person {
-            let value = if folder.is_some() { serde_json::Value::from(typed) } else { serde_json::Value::Null };
-            if let Err(why) = crate::settings::Settings::at(file.clone()).set("research.folder", value) {
-                said.push(notice(format!("Where investigations are kept could not be saved: {why}"), NoticeLevel::Warn));
-            }
-        }
-        if let Some(old) = self.research.take() {
-            old.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
-        }
-        match folder {
-            Some(folder) => {
-                let research = std::sync::Arc::new(std::sync::Mutex::new((self.make_research)(&folder)));
-                for workspace in &mut self.workspaces {
-                    workspace.share_research(&research);
-                }
-                self.research = Some(research);
-            }
-            None => {
-                for workspace in &mut self.workspaces {
-                    workspace.own_research();
-                }
-            }
-        }
-        let mut events = self.active_mut().research_events();
-        events.extend(said);
-        events
-    }
-
     /// Remember the open set in `file`, and reload it next time.
     pub fn storing_in(mut self, file: impl Into<PathBuf>) -> Session {
         self.store = Some(file.into());
@@ -413,7 +291,6 @@ impl Session {
         Session::restore_from(state_file(), requested, fallback)
             .with_language_servers()
             .with_plugins()
-            .with_research()
     }
 
     /// [`Session::restore`], from a named store and without language servers.
@@ -553,23 +430,16 @@ impl Session {
     }
 
     /// Proton is going: what every workspace has running that would outlive
-    /// it — a notebook's kernel, Research's runs and calls — is stopped.
+    /// it — a notebook's kernel, say — is stopped.
     pub fn shutdown(&mut self) {
         self.shutdown_window();
-        // The machine's Lean, if it is being made: here, not in Research's
-        // shutdown, which also runs when the investigations' folder moves.
-        crate::research::quit_lean();
     }
 
     /// This window is closing and Proton goes on in others: what its own
-    /// workspaces and Research have running is stopped, but not what the
-    /// machine shares — the Lab's other runs, Lean being made.
+    /// workspaces have running is stopped.
     pub fn shutdown_window(&mut self) {
         for workspace in &mut self.workspaces {
             workspace.shutdown();
-        }
-        if let Some(research) = &self.research {
-            research.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
         }
     }
 
@@ -581,7 +451,6 @@ impl Session {
         Session::another_from(state_file(), folder::home())
             .with_language_servers()
             .with_plugins()
-            .with_research()
     }
 
     /// [`Session::another_window`], its recents from `store` and starting in
@@ -597,11 +466,6 @@ impl Session {
             .map(|s| s.recents.iter().map(PathBuf::from).filter(|path| path.is_absolute() && !folder::is_root(path)).collect())
             .unwrap_or_default();
         session
-    }
-
-    /// Where a file a Lab run left is, in the workspace on screen.
-    pub fn lab_file(&self, key: &str) -> Option<PathBuf> {
-        self.active().lab_file(key)
     }
 
     /// Where modes with no project of their own are given one, in place of
@@ -683,7 +547,6 @@ impl Session {
             Command::CycleWorkspace { by } => self.cycle(by),
             Command::OpenWorkspacePicker => self.open_picker(),
             Command::SetMode { mode } => self.set_mode(mode),
-            Command::ResearchFolder { folder } => self.set_research_folder(&folder),
 
             // While the workspace picker is open it owns the keyboard, exactly
             // as Telescope does inside a workspace — and for the same reason.
@@ -889,11 +752,6 @@ impl Session {
             // dropped here — but they had to be *collected*, or its servers
             // block and the project is stale when you come back to it.
         }
-        // Investigations kept in a folder of their own are every project's,
-        // so what their rounds said is on screen whichever one is.
-        if let Some(research) = &self.research {
-            events.extend(research.lock().unwrap_or_else(|e| e.into_inner()).poll());
-        }
         events.extend(self.crossed(side));
         self.claim(events)
     }
@@ -901,7 +759,7 @@ impl Session {
     /* ── opening, closing, switching ──────────────────────────────── */
 
     fn build(&self, root: &Path) -> Workspace {
-        let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins).sharing_research(self.research.as_ref());
+        let mut workspace = Workspace::rooted(root).sharing_plugins(&self.plugins);
         if self.servers {
             workspace.enable_language_servers();
         }
@@ -1196,10 +1054,10 @@ impl Session {
     }
 
     /// The two sides of a session from before every mode kept its own:
-    /// Codex's projects are Codex's, Data's are Data's and Research's — and
-    /// every other mode starts on a folder of its own.
+    /// Codex's projects are Codex's, Data's are Data's — and every other
+    /// mode starts on a folder of its own.
     fn restore_sides(&mut self, sides: &StoredSides) {
-        const DATA_SIDE: [ModeId; 2] = [ModeId::Data, ModeId::Research];
+        const DATA_SIDE: [ModeId; 1] = [ModeId::Data];
         for (listed, workspace) in self.listed.iter_mut().zip(&self.workspaces) {
             let root = workspace.root().display().to_string();
             *listed = Listed::default();

@@ -14,7 +14,7 @@
 
 import {escapeHtml, icon} from "./html.js";
 import {lineHtml} from "./editor-row.js";
-import { HAS_SHELL, applyBackdrop, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, readLab, sendKey, setBackdrop, setOpaque,
+import { HAS_SHELL, applyBackdrop, copyText, dispatch, dispatchMany, onEvents, onCommand, pasteText, sendKey, setBackdrop, setOpaque,
   setMode as coreSetMode, sync, toggleFullscreen, wireWindowChrome, quitApp,
   resetTransport, remoteStatus, remoteHosts, remoteBrowse, remoteConnect, remoteDisconnect, remoteForwardPort, onRemoteStatus, onOpenRemote } from "./bridge.js";
 import { closeDocument, documentIsOpen, documentKey, documentShown, fitDocument, openDocument, saveDocument, zoomDocument } from "./document.js";
@@ -29,15 +29,12 @@ import { createEditorFeedback } from "./editor-feedback.js";
 import { createEditorState, createEditorPaints } from "./editor-state.js";
 import { performanceReview, editorPainted } from "./performance.js";
 import { createTerminalGL, xtermHex } from "./term-gl.js";
-import { createResearch } from "./research.js";
 import { createSheet } from "./sheet.js";
 import { createCircuit } from "./circuit.js";
 import { createLogic } from "./logic.js";
 import { createCad } from "./cad.js";
 import { createContainer } from "./container.js";
 import { createRemote, parseSshCommand } from "./remote.js";
-import { createLab } from "./lab.js";
-import { createLean } from "./lean.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -505,7 +502,7 @@ $$("[data-translucency-set]").forEach((b) =>
 /** The raster pictures a notebook output may be, as the core chooses them. */
 const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-const MODES = ["codex", "data", "research", "sheet", "circuit", "logic", "cad"];
+const MODES = ["codex", "data", "sheet", "circuit", "logic", "cad"];
 
 /** Which mode is on screen. The core owns it; this is a copy for the handful
  *  of places that have to behave differently in one of them. */
@@ -904,13 +901,6 @@ const displaySettings = createDisplaySettings(document, keep, () => {
   });
 });
 
-/* Research: the project's investigations. Drawn from what the core reads
-   out of research/; nothing is kept here that the files do not say. */
-const research = createResearch({ root: document, dispatch });
-/* The Lab: the Python an investigation's code runs in, made with your say-so. */
-const lab = createLab({ root: document, dispatch, readLab });
-/* Lean and Mathlib, in which a mathematics investigation's proofs are checked. */
-const lean = createLean({ root: document, dispatch });
 const sheet = createSheet({ root: document, dispatch,
   // The system's clipboard through the shell; the page's own without one.
   paste: async () => (await pasteText()) ?? (await navigator.clipboard?.readText?.().catch(() => null)) ?? null });
@@ -3455,43 +3445,6 @@ function renderEvent(event) {
       selectCell(event.index);
       break;
 
-    case "researchList":
-      research?.list(event);
-      break;
-
-    case "researchBoard":
-      research?.board(event);
-      lean?.discipline(event.discipline);
-      break;
-
-    case "researchHypothesis":
-      research?.hypothesis(event);
-      break;
-
-    case "researchRound":
-      research?.round(event);
-      break;
-
-    case "researchTranscript":
-      research?.transcript(event);
-      break;
-
-    case "researchLiterature":
-      research?.literature(event);
-      break;
-
-    case "researchPaper":
-      research?.paper(event);
-      break;
-
-    case "researchResults":
-      research?.results(event);
-      break;
-
-    case "labEnv":
-      lab?.env(event);
-      break;
-
     case "cadHome":
       cad?.home(event);
       break;
@@ -3571,18 +3524,6 @@ function renderEvent(event) {
     // What Excel copied, on the system clipboard.
     case "sheetClip":
       void copyText(event.text);
-      break;
-
-    case "leanEnv":
-      lean?.env(event);
-      break;
-
-    case "researchLab":
-      lab?.experiments(event);
-      break;
-
-    case "researchRun":
-      lab?.run(event);
       break;
 
     case "chats":

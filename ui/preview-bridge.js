@@ -1,7 +1,6 @@
 /* Legacy browser-only fixtures. The native bridge never loads this module.
  * Its public boundary is described in preview-bridge.d.ts; the fixture
  * implementation remains outside the incremental strict-check boundary. */
-import {createResearchPreview} from './preview-research.js';
 import {createSheetPreview} from './preview-sheet.js';
 import {createCircuitPreview} from './preview-circuit.js';
 import {createLogicPreview} from './preview-logic.js';
@@ -9,7 +8,6 @@ import {createCadPreview} from './preview-cad.js';
 
 export function createPreview(deliver) {
   let send;
-  const research = createResearchPreview(deliver);
   const sheet = createSheetPreview(deliver);
   const circuit = createCircuitPreview(deliver);
   const logic = createLogicPreview(deliver);
@@ -479,7 +477,6 @@ export function createPreview(deliver) {
         settingsEvent(),
         chatsEvent(),
         containerEvent(),
-        ...research.sync(),
         ...sheet.sync(),
         ...circuit.sync(),
         ...logic.sync(),
@@ -487,7 +484,6 @@ export function createPreview(deliver) {
       ];
     }
     if (command.type.startsWith("container")) return handleContainer(command);
-    if (command.type.startsWith("research") || command.type.startsWith("lab") || command.type.startsWith("lean")) return research.command(command);
     if (command.type.startsWith("sheet")) return sheet.command(command);
     if (command.type.startsWith("circuit")) return circuit.command(command);
     if (command.type.startsWith("logic")) return logic.command(command);
@@ -921,5 +917,5 @@ export function createPreview(deliver) {
     if (state.vim === "Command") return [{ type: "cmdline", text: "", prompt: state.prompt }, vimEvent()];
     return state.vim === before ? [] : [vimEvent()];
   };
-  return {send, readLab: (key) => research.file(key)};
+  return {send};
 }

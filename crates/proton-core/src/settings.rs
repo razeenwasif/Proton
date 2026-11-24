@@ -129,14 +129,6 @@ impl Settings {
             .unwrap_or_default()
     }
 
-    /// Where investigations are kept, for a person who keeps them in a folder
-    /// of their own rather than in each project's `research/`:
-    /// `research.folder`. A leading `~/` is the home folder, and so is what a
-    /// relative path is taken from, there being no project to take it from.
-    pub fn research_folder(&self) -> Option<PathBuf> {
-        research_path(self.get("research.folder")?.as_str()?)
-    }
-
     /// Everything set, as one object — what the front end draws the panels
     /// from. Defaults are *not* merged in: the difference between "chosen" and
     /// "left alone" is worth keeping, or a settings file fills up with every
@@ -235,17 +227,6 @@ impl Settings {
 }
 
 /// A path as a person writes one: `~/OnyxVault`, `../notes`, or absolute.
-/// A research folder as somebody typed it: `~/` is the home folder, and a
-/// relative path is taken from there too. Nothing for nothing.
-pub fn research_path(text: &str) -> Option<PathBuf> {
-    let home = crate::folder::home()?;
-    match text.trim() {
-        "" => None,
-        "~" => Some(home),
-        text => Some(expand(text, &home)),
-    }
-}
-
 fn expand(text: &str, project: &Path) -> PathBuf {
     let text = text.trim();
     if let Some(rest) = text.strip_prefix("~/").or_else(|| text.strip_prefix("~\\")) {
@@ -266,20 +247,6 @@ fn expand(text: &str, project: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_research_folder_is_taken_from_home() {
-        let Some(home) = crate::folder::home() else { return };
-        let with = |value: Value| Settings { path: PathBuf::new(), doc: serde_json::json!({ "research": { "folder": value } }) };
-        assert_eq!(with("~/Github/Research".into()).research_folder(), Some(home.join("Github/Research")));
-        assert_eq!(with("Github/Research".into()).research_folder(), Some(home.join("Github/Research")), "a relative path is from home");
-        assert_eq!(with("~".into()).research_folder(), Some(home.clone()));
-        let elsewhere = if cfg!(windows) { r"D:\Research" } else { "/srv/research" };
-        assert_eq!(with(elsewhere.into()).research_folder(), Some(PathBuf::from(elsewhere)));
-        assert_eq!(with("  ".into()).research_folder(), None);
-        assert_eq!(with(3.into()).research_folder(), None);
-        assert_eq!(Settings::default().research_folder(), None, "unset is each project's research/");
-    }
 
     fn root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
