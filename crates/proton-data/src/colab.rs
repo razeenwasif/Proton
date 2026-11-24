@@ -903,11 +903,82 @@ fn extract_error_summary(body: &str) -> String {
 
 /* ── Colab REST API Client ───────────────────────────────────────────────── */
 
+fn parse_adc_quota_project(json_text: &str) -> Option<String> {
+    let val: serde_json::Value = serde_json::from_str(json_text).ok()?;
+    let proj = val.get("quota_project_id")?.as_str()?.trim();
+    (!proj.is_empty()).then(|| proj.to_string())
+}
+
+fn parse_gcloud_config_project(ini_text: &str) -> Option<String> {
+    let mut in_core = false;
+    for raw in ini_text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_core = line == "[core]";
+            continue;
+        }
+        if in_core {
+            if let Some((k, v)) = line.split_once('=') {
+                if k.trim() == "project" {
+                    let proj = v.trim();
+                    return (!proj.is_empty()).then(|| proj.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn detect_quota_project() -> Option<String> {
+    if let Ok(env) = std::env::var("GOOGLE_CLOUD_QUOTA_PROJECT") {
+        let trimmed = env.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    let dir = std::env::var_os("CLOUDSDK_CONFIG")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|s| !s.is_empty())
+                .map(|h| PathBuf::from(h).join(".config").join("gcloud"))
+        })?;
+    if let Ok(adc) = std::fs::read_to_string(dir.join("application_default_credentials.json")) {
+        if let Some(proj) = parse_adc_quota_project(&adc) {
+            return Some(proj);
+        }
+    }
+    let active = std::fs::read_to_string(dir.join("active_config"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "default".into());
+    let cfg = std::fs::read_to_string(dir.join("configurations").join(format!("config_{active}")))
+        .ok()?;
+    parse_gcloud_config_project(&cfg)
+}
+
+fn with_quota_project_header<B>(
+    req: ureq::RequestBuilder<B>,
+    quota_project: Option<&str>,
+) -> ureq::RequestBuilder<B> {
+    if let Some(proj) = quota_project {
+        req.header("X-Goog-User-Project", proj)
+    } else {
+        req
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ColabClient {
     public_base: String,
     gapi_base: String,
     agent: ureq::Agent,
+    quota_project: Option<String>,
 }
 
 impl Default for ColabClient {
@@ -918,7 +989,12 @@ impl Default for ColabClient {
 
 impl ColabClient {
     pub fn production() -> Self {
-        Self::with_bases(DEFAULT_PUBLIC_API_BASE, DEFAULT_GAPI_BASE)
+        Self {
+            public_base: DEFAULT_PUBLIC_API_BASE.into(),
+            gapi_base: DEFAULT_GAPI_BASE.into(),
+            agent: http_agent(),
+            quota_project: detect_quota_project(),
+        }
     }
 
     pub fn with_bases(public_base: impl Into<String>, gapi_base: impl Into<String>) -> Self {
@@ -926,6 +1002,7 @@ impl ColabClient {
             public_base: public_base.into().trim_end_matches('/').to_string(),
             gapi_base: gapi_base.into().trim_end_matches('/').to_string(),
             agent: http_agent(),
+            quota_project: None,
         }
     }
 
@@ -934,7 +1011,15 @@ impl ColabClient {
             public_base: DEFAULT_PUBLIC_API_BASE.into(),
             gapi_base: DEFAULT_GAPI_BASE.into(),
             agent: quick_http_agent(),
+            quota_project: detect_quota_project(),
         }
+    }
+
+    pub fn with_quota_project(mut self, project: Option<String>) -> Self {
+        self.quota_project = project
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        self
     }
 
     fn get_json<T: for<'de> Deserialize<'de>>(
@@ -942,12 +1027,13 @@ impl ColabClient {
         url: &str,
         access_token: &str,
     ) -> Result<T, String> {
-        let response = self
+        let req = self
             .agent
             .get(url)
             .header("Authorization", &format!("Bearer {access_token}"))
             .header("Accept", "application/json")
-            .header("X-Colab-Client-Agent", COLAB_CLIENT_AGENT)
+            .header("X-Colab-Client-Agent", COLAB_CLIENT_AGENT);
+        let response = with_quota_project_header(req, self.quota_project.as_deref())
             .call()
             .map_err(|e| format!("Colab request failed ({url}): {e}"))?;
         parse_colab_response(response, url)
@@ -1046,12 +1132,13 @@ impl ColabClient {
             self.public_base,
             percent_encode(id)
         );
-        let response = self
+        let req = self
             .agent
             .delete(&url)
             .header("Authorization", &format!("Bearer {access_token}"))
             .header("Accept", "application/json")
-            .header("X-Colab-Client-Agent", COLAB_CLIENT_AGENT)
+            .header("X-Colab-Client-Agent", COLAB_CLIENT_AGENT);
+        let response = with_quota_project_header(req, self.quota_project.as_deref())
             .call()
             .map_err(|e| format!("failed deleting Colab runtime `{id}`: {e}"))?;
         let status = response.status().as_u16();
@@ -1094,13 +1181,14 @@ impl ColabClient {
             }
         });
 
-        let response = self
+        let req = self
             .agent
             .post(&url)
             .header("Authorization", &format!("Bearer {access_token}"))
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
-            .header("X-Colab-Client-Agent", COLAB_CLIENT_AGENT)
+            .header("X-Colab-Client-Agent", COLAB_CLIENT_AGENT);
+        let response = with_quota_project_header(req, self.quota_project.as_deref())
             .send_json(&payload)
             .map_err(|e| format!("Colab CreateRuntime failed: {e}"))?;
         let mut op: ApiOperation = parse_colab_response(response, &url)?;
@@ -1131,12 +1219,13 @@ impl ColabClient {
                 )
             };
 
-            let resp = self
+            let req = self
                 .agent
                 .get(&wait_url)
                 .header("Authorization", &format!("Bearer {access_token}"))
                 .header("Accept", "application/json")
-                .header("X-Colab-Client-Agent", COLAB_CLIENT_AGENT)
+                .header("X-Colab-Client-Agent", COLAB_CLIENT_AGENT);
+            let resp = with_quota_project_header(req, self.quota_project.as_deref())
                 .call()
                 .map_err(|e| format!("Colab operation poll failed: {e}"))?;
             let status = resp.status().as_u16();
@@ -2068,6 +2157,49 @@ mod tests {
         kernel.interrupt().unwrap();
         drop(kernel);
 
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn parses_adc_quota_project_and_gcloud_config_project() {
+        assert_eq!(
+            parse_adc_quota_project(r#"{"type":"authorized_user","quota_project_id":"my-proj-1"}"#)
+                .as_deref(),
+            Some("my-proj-1")
+        );
+        assert_eq!(parse_adc_quota_project(r#"{"quota_project_id":"   "}"#), None);
+        assert_eq!(parse_adc_quota_project(r#"{"type":"authorized_user"}"#), None);
+
+        let ini = "\
+[compute]\n\
+region = us-central1\n\
+project = wrong-section\n\
+\n\
+[core]\n\
+account = user@example.com\n\
+project = my-core-proj\n\
+\n\
+[other]\n\
+project = later-section\n";
+        assert_eq!(parse_gcloud_config_project(ini).as_deref(), Some("my-core-proj"));
+        assert_eq!(parse_gcloud_config_project("[compute]\nproject = nope\n"), None);
+        assert_eq!(parse_gcloud_config_project("[core]\nproject =   \n"), None);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let (_m, _p, headers, _b) = read_http_request(&mut stream);
+            assert_eq!(
+                headers.get("x-goog-user-project").map(String::as_str),
+                Some("quota-proj-42")
+            );
+            write_http_json(&mut stream, 200, "{\"runtimes\":[]}");
+        });
+        let client = ColabClient::with_bases(&base, &base)
+            .with_quota_project(Some(" quota-proj-42 ".into()));
+        let runtimes = client.list_runtimes("tok").unwrap();
+        assert!(runtimes.is_empty());
         server.join().unwrap();
     }
 }
