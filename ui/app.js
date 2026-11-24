@@ -35,6 +35,7 @@ import { createLogic } from "./logic.js";
 import { createCad } from "./cad.js";
 import { createContainer } from "./container.js";
 import { createRemote, parseSshCommand } from "./remote.js";
+import { createColab } from "./colab.js";
 import { markdown } from "./markdown.js";
 // As `highlightCode`: `highlight` here is the picker's, for the letters a query matched.
 import { highlight as highlightCode } from "./highlight.js";
@@ -937,7 +938,7 @@ $("#sl-container")?.addEventListener("keydown", (e) => {
 });
 
 /* ── overlays ─────────────────────────────────────────────────────────── */
-const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings", "remote-modal"];
+const OVERLAYS = ["telescope", "whichkey", "cmdline", "settings", "remote-modal", "colab-modal"];
 const overlays = createOverlays(document, OVERLAYS);
 
 function closeAll() {
@@ -945,11 +946,22 @@ function closeAll() {
 }
 
 async function dismissOverlay() {
-  const coreOwned = pickerOpen || (overlays.active && overlays.active !== "settings" && overlays.active !== "remote-modal");
+  const coreOwned = pickerOpen || (overlays.active && overlays.active !== "settings" && overlays.active !== "remote-modal" && overlays.active !== "colab-modal");
   pickerOpen = false;
   closeAll();
   if (coreOwned) await sendKey({ key: "Escape" });
 }
+
+/* Google Colab: connect Data mode notebooks to GPU/TPU/CPU cloud runtimes. */
+const colabUi = createColab({
+  root: document,
+  openOverlay: async () => {
+    if (overlays.active === "colab-modal") return;
+    await open("colab-modal");
+  },
+  closeOverlay: dismissOverlay,
+  dispatch,
+});
 
 /* Remote-SSH: connect to remote hosts (e.g. mini) over SSH NDJSON. */
 const remoteUi = createRemote({
@@ -1760,6 +1772,12 @@ function renderNotebook(event) {
     kernel.className = "chip warn";
     kernel.textContent = event.problem;
   }
+  const hasNb = Boolean(event.path);
+  const intr = $("[data-nb-interrupt]");
+  if (intr) intr.hidden = !hasNb;
+  const rst = $("[data-nb-restart]");
+  if (rst) rst.hidden = !hasNb;
+  colabUi.onNotebookLabel(event.kernelLabel ?? "");
 
   markNotebookSaved(event.modified);
   renderProposals(event.proposals ?? []);
@@ -2415,6 +2433,14 @@ document.addEventListener("click", (e) => {
   }
   if (e.target.closest("[data-nb-runall]")) {
     dispatch({ type: "runAll" });
+    return;
+  }
+  if (e.target.closest("[data-nb-interrupt]")) {
+    dispatch({ type: "interruptKernel" });
+    return;
+  }
+  if (e.target.closest("[data-nb-restart]")) {
+    dispatch({ type: "restartKernel" });
     return;
   }
   // Clicking a cell puts the cursor on it. Without this the caret and the
@@ -3364,6 +3390,10 @@ function renderEvent(event) {
         void remoteUi.runEx(event.text);
         break;
       }
+      if (cmdText === "colab") {
+        void colabUi.openModal();
+        break;
+      }
       // The core hands back the line it collected; the front end decides what
       // Only what the core did not recognise arrives here. It owns `:w`,
       // `:e`, `:q` and the splits now, so what is left is genuinely unknown —
@@ -3625,6 +3655,10 @@ function renderEvent(event) {
       containerUi.update(event.state);
       break;
 
+    case "colab":
+      colabUi.onStatus(event.status);
+      break;
+
     case "notice":
       editorFeedback.notice(event);
       renderStatus(event.text, event.level);
@@ -3714,7 +3748,7 @@ document.addEventListener("focusin", (e) => {
 document.addEventListener("keydown", (e) => {
   // Modal controls own input before either the terminal or the Vim engine.
   if (e.defaultPrevented) return;
-  if (overlays.active === "settings" || overlays.active === "remote-modal") {
+  if (overlays.active === "settings" || overlays.active === "remote-modal" || overlays.active === "colab-modal") {
     if (e.key === "Escape" || (overlays.active === "settings" && e.metaKey && e.key === ",")) {
       e.preventDefault();
       dismissOverlay();

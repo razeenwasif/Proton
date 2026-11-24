@@ -21,12 +21,49 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::action::{Action, Object, Verb};
+use proton_data::colab::{
+    self, runtime_label, ColabClient, ColabRuntime, ColabRuntimeSpec, ProxyTokenRefresher,
+};
 use proton_data::notebook::{CellKind, Notebook, Output};
 use proton_data::{table, Kernel};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+/// A running Google Colab server visible in the runtime modal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct ColabRuntimeView {
+    pub runtime_id: String,
+    pub variant: String,
+    pub accelerator: String,
+    pub shape: String,
+    pub label: String,
+    pub active: bool,
+}
+
+/// Complete Colab connection & quota state shown in Data mode.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../ui/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct ColabStatusView {
+    pub has_oauth_config: bool,
+    pub signed_in: bool,
+    pub email: String,
+    pub tier: String,
+    pub ccu_balance: Option<f64>,
+    pub ccu_rate_hourly: Option<f64>,
+    pub assignments_count: u32,
+    pub specs: Vec<ColabRuntimeSpec>,
+    pub runtimes: Vec<ColabRuntimeView>,
+    pub active_runtime_id: String,
+    pub active_label: String,
+    pub busy: String,
+    pub error: String,
+}
 
 /// One cell, as the panel draws it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -271,6 +308,11 @@ pub struct Data {
     /// Attached Dev Container target, when active: Jupyter kernels start
     /// inside this container via `proton_data::Kernel::start_remote`.
     container: Option<proton_container::ExecTarget>,
+    /// Attached Google Colab runtime, when active: Jupyter kernels run on this
+    /// remote Colab VM over WebSocket.
+    colab_runtime: Option<ColabRuntime>,
+    /// True if Proton provisioned `colab_runtime` (and should unassign it on shutdown).
+    colab_owned: bool,
 }
 
 impl std::fmt::Debug for Data {
@@ -353,8 +395,12 @@ impl Data {
 
     pub fn close(&mut self) {
         let container = self.container.take();
+        let colab_runtime = self.colab_runtime.take();
+        let colab_owned = self.colab_owned;
         *self = Data::default();
         self.container = container;
+        self.colab_runtime = colab_runtime;
+        self.colab_owned = colab_owned;
     }
 
     /// Route future Data Jupyter kernels into `target` (or back to the host
@@ -363,10 +409,38 @@ impl Data {
         if self.container == target {
             return;
         }
-        self.shutdown();
+        self.stop_kernel();
         self.problem = None;
         self.python = None;
         self.container = target;
+    }
+
+    /// Route future Data Jupyter kernels to a Google Colab runtime (or detach
+    /// back to container/local when `None`).
+    pub fn set_colab_runtime(&mut self, runtime: Option<ColabRuntime>, owned: bool) {
+        if self.colab_runtime == runtime && (!runtime.is_some() || self.colab_owned == owned) {
+            return;
+        }
+        self.stop_kernel();
+        self.problem = None;
+        self.python = None;
+        self.colab_runtime = runtime;
+        self.colab_owned = owned;
+    }
+
+    pub fn colab_runtime(&self) -> Option<&ColabRuntime> {
+        self.colab_runtime.as_ref()
+    }
+
+    /// Active execution backend label for the notebook header chip.
+    pub fn kernel_label(&self) -> String {
+        if let Some(rt) = &self.colab_runtime {
+            return runtime_label(rt);
+        }
+        if self.container.is_some() {
+            return "Container".into();
+        }
+        String::new()
     }
 
     /// Whether new Data kernels are configured to run inside an attached container.
@@ -374,14 +448,56 @@ impl Data {
         self.container.is_some()
     }
 
-    /// Proton is going: the kernel is stopped, with everything it started,
-    /// and its connection file removed. The shell exits without dropping
-    /// anything, so nothing else would.
-    pub fn shutdown(&mut self) {
+    /// Interrupt the currently running kernel execution.
+    pub fn interrupt(&mut self) -> Result<(), String> {
+        let Some(kernel) = self.kernel.as_mut() else {
+            return Err("no active kernel to interrupt".into());
+        };
+        kernel.interrupt()
+    }
+
+    /// Restart the kernel (in-place on Colab to keep the VM & packages, or
+    /// respawned locally / in container).
+    pub fn restart(&mut self, cwd: &Path) -> Result<(), String> {
+        if let Some(kernel) = self.kernel.as_mut() {
+            if kernel.restart_in_place()? {
+                self.running.clear();
+                self.replied.clear();
+                self.idled.clear();
+                self.problem = None;
+                return Ok(());
+            }
+        }
+        self.stop_kernel();
+        self.problem = None;
+        if self.is_open() {
+            self.start(cwd)?;
+        }
+        Ok(())
+    }
+
+    fn stop_kernel(&mut self) {
         self.kernel = None;
         self.running.clear();
         self.replied.clear();
         self.idled.clear();
+    }
+
+    /// Proton is going: the kernel is stopped, with everything it started,
+    /// and its connection file removed. The shell exits without dropping
+    /// anything, so nothing else would. If Proton provisioned a Colab VM,
+    /// best-effort unassigns it so compute credits are released.
+    pub fn shutdown(&mut self) {
+        self.stop_kernel();
+        if self.colab_owned {
+            if let Some(rt) = self.colab_runtime.take() {
+                self.colab_owned = false;
+                if let Ok(tok) = colab::ensure_fresh_token() {
+                    let _ = ColabClient::production_quick()
+                        .delete_runtime(&tok.access_token, &rt.runtime_id);
+                }
+            }
+        }
     }
 
     /// What the panel draws.
@@ -830,7 +946,11 @@ impl Data {
         // the only place the real reason is written down.
         let resolved_py = kernel.resolved_python().map(PathBuf::from);
         let python = resolved_py.as_deref().or(self.python.as_deref());
-        let why = explain(&kernel.said(), python, self.container.is_some());
+        let why = if self.colab_runtime.is_some() {
+            format!("Colab kernel disconnected: {}", kernel.said())
+        } else {
+            explain(&kernel.said(), python, self.container.is_some())
+        };
         self.kernel = None;
         self.problem = Some(why.clone());
         self.complaint = Some(why);
@@ -858,6 +978,25 @@ impl Data {
     fn start(&mut self, cwd: &Path) -> Result<(), String> {
         if self.kernel.as_mut().is_some_and(Kernel::is_alive) {
             return Ok(());
+        }
+        if let Some(rt) = self.colab_runtime.clone() {
+            let refresher: ProxyTokenRefresher = Arc::new(|rt_id| {
+                let tok = colab::ensure_fresh_token()?;
+                ColabClient::production()
+                    .get_runtime(&tok.access_token, rt_id)
+                    .map(|updated| updated.connection_info)
+            });
+            return match Kernel::start_colab(&rt, Some(refresher)) {
+                Ok(kernel) => {
+                    self.kernel = Some(kernel);
+                    self.problem = None;
+                    Ok(())
+                }
+                Err(why) => {
+                    self.problem = Some(why.clone());
+                    Err(why)
+                }
+            };
         }
         if let Some(target) = self.container.clone() {
             let container_cwd = target
@@ -1578,5 +1717,30 @@ mod tests {
         assert!(!data.in_container());
         assert!(data.is_open());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn data_kernel_label_reports_colab_and_container() {
+        let mut data = Data::default();
+        assert_eq!(data.kernel_label(), "");
+
+        let rt = ColabRuntime {
+            name: "runtimes/rt-a100".into(),
+            runtime_id: "rt-a100".into(),
+            variant: "VARIANT_GPU".into(),
+            accelerator: "A100".into(),
+            shape: "SHAPE_HIGHMEM".into(),
+            connection_info: proton_data::colab::ColabConnectionInfo {
+                url: "https://rt.prod.colab.dev".into(),
+                token: "tok".into(),
+                expire_time: "2099-01-01T00:00:00Z".into(),
+                endpoint: "m-s".into(),
+            },
+        };
+        data.set_colab_runtime(Some(rt), false);
+        assert_eq!(data.kernel_label(), "Colab · A100 High-RAM");
+
+        data.set_colab_runtime(None, false);
+        assert_eq!(data.kernel_label(), "");
     }
 }

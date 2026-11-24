@@ -54,6 +54,7 @@
     "cad-sketch.js",
     "preview-cad.js",
     "container.js",
+    "colab.js",
     "kmap.js",
     "sheet-chart.js",
     "pdf-view.js",

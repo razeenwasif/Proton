@@ -44,6 +44,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use crate::bridge::{Bridge, RemoteLaunch};
+use crate::colab::{ColabKernelHandle, ColabRuntime, ProxyTokenRefresher};
 use crate::connection::{connection_dir, connection_file, Connection};
 #[cfg(target_vendor = "apple")]
 use crate::spawn::Process;
@@ -63,6 +64,9 @@ enum KernelBackend {
     },
     Remote {
         bridge: Bridge,
+    },
+    Colab {
+        handle: ColabKernelHandle,
     },
 }
 
@@ -236,9 +240,91 @@ impl Kernel {
         Ok(kernel)
     }
 
+    /// Connect to a remote Google Colab runtime via Jupyter Server REST + WebSocket.
+    pub fn start_colab(
+        runtime: &ColabRuntime,
+        refresher: Option<ProxyTokenRefresher>,
+    ) -> Result<Kernel, String> {
+        let session = id();
+        let (found, incoming) = mpsc::channel::<Message>();
+        let (outgoing, to_send) = mpsc::channel::<Message>();
+        let handle = ColabKernelHandle::start(runtime, &session, to_send, found, refresher)?;
+
+        let connection = Connection {
+            transport: "https".into(),
+            ip: runtime.connection_info.url.clone(),
+            shell_port: 0,
+            iopub_port: 0,
+            stdin_port: 0,
+            control_port: 0,
+            hb_port: 0,
+            key: String::new(),
+            signature_scheme: String::new(),
+            kernel_name: "colab".into(),
+            pid: None,
+            parent: None,
+        };
+
+        Ok(Kernel {
+            backend: KernelBackend::Colab { handle },
+            session,
+            signer: Signer::new(""),
+            outgoing,
+            incoming,
+            connection,
+            next: 0,
+            alive: true,
+            // WebSockets connect directly without ZeroMQ's slow-joiner window.
+            heard: true,
+            held: Vec::new(),
+            asked: Instant::now(),
+        })
+    }
+
+    /// Interrupt the currently running execution, if supported in-place.
+    pub fn interrupt(&mut self) -> Result<(), String> {
+        match &self.backend {
+            KernelBackend::Colab { handle } => handle.interrupt(),
+            KernelBackend::Local { child, reaped, .. } => {
+                if *reaped {
+                    return Err("the kernel has exited".into());
+                }
+                #[cfg(unix)]
+                {
+                    let rc = unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGINT) };
+                    if rc == 0 {
+                        Ok(())
+                    } else {
+                        Err(format!("could not interrupt kernel: {}", std::io::Error::last_os_error()))
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = child;
+                    Err("interrupt is not supported on local kernels on Windows".into())
+                }
+            }
+            KernelBackend::Remote { .. } => {
+                Err("interrupt is not supported on container kernels — use restart".into())
+            }
+        }
+    }
+
+    /// Restart the kernel in-place (supported for Colab). Returns `Ok(true)` if
+    /// restarted in-place or `Ok(false)` when caller should respawn the process.
+    pub fn restart_in_place(&mut self) -> Result<bool, String> {
+        match &self.backend {
+            KernelBackend::Colab { handle } => {
+                handle.restart()?;
+                Ok(true)
+            }
+            KernelBackend::Local { .. } | KernelBackend::Remote { .. } => Ok(false),
+        }
+    }
+
     pub fn resolved_python(&self) -> Option<String> {
         match &self.backend {
-            KernelBackend::Local { .. } => None,
+            KernelBackend::Local { .. } | KernelBackend::Colab { .. } => None,
             KernelBackend::Remote { bridge } => bridge.resolved_python(),
         }
     }
@@ -268,6 +354,11 @@ impl Kernel {
             }
             KernelBackend::Remote { bridge } => {
                 if !bridge.is_alive() {
+                    self.alive = false;
+                }
+            }
+            KernelBackend::Colab { handle } => {
+                if !handle.is_alive() {
                     self.alive = false;
                 }
             }
@@ -398,6 +489,7 @@ impl Kernel {
                 }
             }
             KernelBackend::Remote { bridge } => bridge.said(),
+            KernelBackend::Colab { handle } => handle.said(),
         }
     }
 
@@ -778,7 +870,9 @@ mod tests {
         let running = kernel.is_alive();
         let pid = match &kernel.backend {
             KernelBackend::Local { child, .. } => child.id(),
-            KernelBackend::Remote { .. } => return format!("remote kernel: {}", kernel.said()),
+            KernelBackend::Remote { .. } | KernelBackend::Colab { .. } => {
+                return format!("remote kernel: {}", kernel.said());
+            }
         };
         if running {
             stop_group(pid);
@@ -791,7 +885,7 @@ mod tests {
                 Ok(Some(status)) => status.to_string(),
                 other => format!("{other:?}"),
             },
-            KernelBackend::Remote { .. } => unreachable!(),
+            KernelBackend::Remote { .. } | KernelBackend::Colab { .. } => unreachable!(),
         };
         let how = if running { "was still running, so was stopped" } else { "had ended" };
         format!("it {how} ({ended}), and said: {}", kernel.said())
@@ -826,7 +920,7 @@ mod tests {
             .unwrap_or_else(|| panic!("the kernel never said what it started: {}", fate(&mut kernel)));
         let (child_pid, file) = match &kernel.backend {
             KernelBackend::Local { child, file, .. } => (child.id(), file.clone()),
-            KernelBackend::Remote { .. } => unreachable!(),
+            KernelBackend::Remote { .. } | KernelBackend::Colab { .. } => unreachable!(),
         };
         assert_eq!(pid, child_pid);
         // It leads a session of its own, so no terminal can stop it.

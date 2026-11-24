@@ -953,6 +953,37 @@ pub enum Command {
     ContainerRefresh,
     ContainerClearLogs,
 
+    /* ── google colab ─────────────────────────────────────────────── */
+    ColabStatus,
+    #[serde(rename_all = "camelCase")]
+    ColabConfigureOauth {
+        client_id: String,
+        client_secret: String,
+    },
+    ColabImportOauthJson {
+        json: String,
+    },
+    ColabSignIn,
+    #[serde(rename_all = "camelCase")]
+    ColabSetToken {
+        access_token: String,
+    },
+    ColabSignOut,
+    ColabConnect {
+        variant: String,
+        accelerator: String,
+        shape: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    ColabAttach {
+        runtime_id: String,
+    },
+    ColabDisconnect {
+        unassign: bool,
+    },
+    InterruptKernel,
+    RestartKernel,
+
     /// Ask for the current state — used once on connect so the shell can render
     /// without guessing.
     Sync,
@@ -1255,6 +1286,9 @@ pub enum Event {
         cells: Vec<crate::data::CellView>,
         /// Why there is no kernel, when there is a reason worth showing.
         problem: String,
+        /// Active kernel target label (e.g. "Colab · A100", "Container", or empty for Local).
+        #[serde(default)]
+        kernel_label: String,
         /// The language its code cells are in, to colour them by: what the
         /// notebook says, else Python.
         language: String,
@@ -1560,6 +1594,10 @@ pub enum Event {
     /// Dev container state: detected configs, active phase, ports, and logs.
     Container {
         state: crate::container::ContainerView,
+    },
+    /// Google Colab auth, compute unit balance, accelerator specs, and active runtimes.
+    Colab {
+        status: crate::data::ColabStatusView,
     },
 }
 

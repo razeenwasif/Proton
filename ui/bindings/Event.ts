@@ -19,6 +19,7 @@ import type { CircuitMachineView } from "./CircuitMachineView";
 import type { CircuitProjectView } from "./CircuitProjectView";
 import type { CircuitRunView } from "./CircuitRunView";
 import type { CircuitTestResult } from "./CircuitTestResult";
+import type { ColabStatusView } from "./ColabStatusView";
 import type { Completion } from "./Completion";
 import type { ContainerView } from "./ContainerView";
 import type { DebugFrame } from "./DebugFrame";
@@ -179,6 +180,10 @@ path: string, cells: Array<CellView>,
  */
 problem: string, 
 /**
+ * Active kernel target label (e.g. "Colab · A100", "Container", or empty for Local).
+ */
+kernelLabel: string, 
+/**
  * The language its code cells are in, to colour them by: what the
  * notebook says, else Python.
  */
@@ -290,4 +295,4 @@ subject: string,
 /**
  * Step count, an error, or what it is doing.
  */
-message: string, step: number, steps: number, view: StepView | null, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, } | { "type": "container", state: ContainerView, };
+message: string, step: number, steps: number, view: StepView | null, } | { "type": "state", mode: ModeId, vimMode: VimMode, vimLabel: string, } | { "type": "container", state: ContainerView, } | { "type": "colab", status: ColabStatusView, };

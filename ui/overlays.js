@@ -5,7 +5,7 @@ export function createOverlays(root, ids) {
   let previousFocus = null;
   const app = root.querySelector('.app');
   const scrim = root.querySelector('#scrim');
-  const modal = (id) => id === 'settings' || id === 'telescope';
+  const modal = (id) => id === 'settings' || id === 'telescope' || id === 'colab-modal';
   const focusable = (panel) => [...panel.querySelectorAll(
     'button, input, select, textarea, a[href], [tabindex="0"], [contenteditable="true"]',
   )].filter((el) => !el.disabled && el.getClientRects().length && !el.closest('[hidden]'));

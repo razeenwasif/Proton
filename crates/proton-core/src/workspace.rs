@@ -200,6 +200,31 @@ pub struct Workspace {
     container: proton_container::Manager,
     /// Guard ensuring `container.autoAttach` runs at most once per workspace.
     container_auto_attempted: bool,
+    /// Cached Google Colab auth, quota, specs, and active runtimes.
+    colab_status: crate::data::ColabStatusView,
+    /// Full runtime records including proxy tokens (kept out of wire events).
+    colab_runtimes: Vec<proton_data::colab::ColabRuntime>,
+    /// Completion channel for background Colab OAuth/API tasks.
+    colab_rx: Option<std::sync::mpsc::Receiver<ColabAsyncResult>>,
+}
+
+#[derive(Debug)]
+enum ColabAsyncResult {
+    Account(Result<proton_data::colab::ColabAccountSummary, String>),
+    Connected {
+        result: Result<
+            (
+                proton_data::colab::ColabRuntime,
+                Option<proton_data::colab::ColabAccountSummary>,
+            ),
+            String,
+        >,
+        owned: bool,
+    },
+    Disconnected {
+        unassigned: bool,
+        result: Result<Option<proton_data::colab::ColabAccountSummary>, String>,
+    },
 }
 
 /// A search, remembered.
@@ -756,6 +781,7 @@ impl Workspace {
                 if !self.container.is_busy() {
                     self.container.refresh();
                 }
+                self.sync_colab_disk();
                 let mut auto_notice = None;
                 if !self.container_auto_attempted
                     && self.settings.bool("container.autoAttach", false)
@@ -802,6 +828,7 @@ impl Workspace {
                     self.library_event(),
                     self.chats_event(),
                     self.container_event(),
+                    self.colab_event(),
                     Event::Layout {
                         layout: self.mode.layout(),
                     },
@@ -1224,6 +1251,39 @@ impl Workspace {
             Command::ContainerClearLogs => {
                 self.container.clear_logs();
                 vec![self.container_event()]
+            }
+
+            /* ── google colab ─────────────────────────────────────── */
+            Command::ColabStatus => self.colab_refresh_status(),
+            Command::ColabConfigureOauth {
+                client_id,
+                client_secret,
+            } => self.colab_configure_oauth(&client_id, &client_secret),
+            Command::ColabImportOauthJson { json } => self.colab_import_oauth_json(&json),
+            Command::ColabSignIn => self.colab_sign_in(),
+            Command::ColabSetToken { access_token } => self.colab_set_token(&access_token),
+            Command::ColabSignOut => self.colab_sign_out(),
+            Command::ColabConnect {
+                variant,
+                accelerator,
+                shape,
+            } => self.colab_connect(&variant, &accelerator, &shape),
+            Command::ColabAttach { runtime_id } => self.colab_attach(&runtime_id),
+            Command::ColabDisconnect { unassign } => self.colab_disconnect(unassign),
+            Command::InterruptKernel => {
+                let msg = match self.data.interrupt() {
+                    Ok(()) => notice("kernel interrupted".into(), NoticeLevel::Info),
+                    Err(why) => notice(why, NoticeLevel::Warn),
+                };
+                vec![msg, self.notebook_event()]
+            }
+            Command::RestartKernel => {
+                let cwd = self.pickers.root().to_path_buf();
+                let msg = match self.data.restart(&cwd) {
+                    Ok(()) => notice("kernel restarted".into(), NoticeLevel::Info),
+                    Err(why) => notice(why, NoticeLevel::Error),
+                };
+                vec![msg, self.notebook_event()]
             }
 
             Command::ToggleTreeNode { path } => {
@@ -2293,6 +2353,10 @@ impl Workspace {
             return self.ex_container(ex.arg.as_deref());
         }
 
+        if ex.name == "colab" {
+            return self.ex_colab(ex.arg.as_deref());
+        }
+
         vec![Event::CmdlineRun { text: line }]
     }
 
@@ -2762,6 +2826,10 @@ impl Workspace {
                     _ => self.notebook_event(),
                 });
             }
+        }
+        let colab_events = self.poll_colab();
+        if !self.quiet {
+            events.extend(colab_events);
         }
         if self.terminal.as_mut().is_some_and(|t| t.poll()) && !self.quiet {
             events.push(self.terminal_delta());
@@ -5768,6 +5836,7 @@ impl Workspace {
                 .unwrap_or_default(),
             cells: self.data.cells(),
             problem: self.data.problem().unwrap_or_default().to_string(),
+            kernel_label: self.data.kernel_label(),
             language: self.data.language(),
             modified: self.data.is_modified(),
             proposals: self.data.proposals(),
@@ -6647,6 +6716,386 @@ impl Workspace {
         vec![notice(
             "usage: :container [start|rebuild|stop|detach|clone <url> [branch]|init [rust|python|node|cpp|go|base]]"
                 .into(),
+            NoticeLevel::Warn,
+        )]
+    }
+
+    /* ── google colab ─────────────────────────────────────────────── */
+
+    fn colab_event(&self) -> Event {
+        Event::Colab {
+            status: self.colab_status.clone(),
+        }
+    }
+
+    fn sync_colab_disk(&mut self) {
+        self.colab_status.has_oauth_config = proton_data::colab::load_oauth_client().is_some();
+        if let Some(tokens) = proton_data::colab::load_tokens() {
+            self.colab_status.signed_in = true;
+            if let Some(email) = tokens.email {
+                if !email.is_empty() {
+                    self.colab_status.email = email;
+                }
+            }
+        } else if !self.colab_status.signed_in {
+            self.colab_status.email.clear();
+        }
+        self.refresh_colab_active_fields();
+    }
+
+    fn refresh_colab_active_fields(&mut self) {
+        let active_id = self
+            .data
+            .colab_runtime()
+            .map(|r| r.runtime_id.clone())
+            .unwrap_or_default();
+        self.colab_status.active_label = self
+            .data
+            .colab_runtime()
+            .map(proton_data::colab::runtime_label)
+            .unwrap_or_default();
+        self.colab_status.active_runtime_id = active_id.clone();
+        self.colab_status.runtimes = self
+            .colab_runtimes
+            .iter()
+            .map(|r| crate::data::ColabRuntimeView {
+                runtime_id: r.runtime_id.clone(),
+                variant: r.variant.clone(),
+                accelerator: r.accelerator.clone(),
+                shape: r.shape.clone(),
+                label: proton_data::colab::runtime_label(r),
+                active: !active_id.is_empty() && r.runtime_id == active_id,
+            })
+            .collect();
+    }
+
+    fn apply_colab_summary(&mut self, summary: proton_data::colab::ColabAccountSummary) {
+        self.colab_status.has_oauth_config = proton_data::colab::load_oauth_client().is_some();
+        self.colab_status.signed_in = true;
+        if !summary.email.is_empty() {
+            self.colab_status.email = summary.email;
+        }
+        self.colab_status.tier = summary.tier;
+        self.colab_status.ccu_balance = summary.ccu_balance;
+        self.colab_status.ccu_rate_hourly = summary.ccu_rate_hourly;
+        self.colab_status.assignments_count = summary.assignments_count;
+        self.colab_status.specs = summary.specs;
+        self.colab_runtimes = summary.runtimes;
+        self.refresh_colab_active_fields();
+    }
+
+    fn colab_configure_oauth(&mut self, client_id: &str, client_secret: &str) -> Vec<Event> {
+        match proton_data::colab::save_oauth_client(client_id, client_secret) {
+            Ok(()) => {
+                self.colab_status.has_oauth_config = true;
+                self.colab_status.error.clear();
+                vec![
+                    self.colab_event(),
+                    notice("Saved Colab OAuth client credentials".into(), NoticeLevel::Info),
+                ]
+            }
+            Err(why) => {
+                self.colab_status.error = why.clone();
+                vec![self.colab_event(), notice(why, NoticeLevel::Error)]
+            }
+        }
+    }
+
+    fn colab_import_oauth_json(&mut self, json: &str) -> Vec<Event> {
+        match proton_data::colab::parse_oauth_client_json(json)
+            .and_then(|(id, secret)| proton_data::colab::save_oauth_client(&id, &secret))
+        {
+            Ok(()) => {
+                self.colab_status.has_oauth_config = true;
+                self.colab_status.error.clear();
+                vec![
+                    self.colab_event(),
+                    notice("Imported Google OAuth client JSON".into(), NoticeLevel::Info),
+                ]
+            }
+            Err(why) => {
+                self.colab_status.error = why.clone();
+                vec![self.colab_event(), notice(why, NoticeLevel::Error)]
+            }
+        }
+    }
+
+    fn spawn_colab_job<F>(&mut self, busy: impl Into<String>, job: F) -> Vec<Event>
+    where
+        F: FnOnce() -> ColabAsyncResult + Send + 'static,
+    {
+        self.colab_status.busy = busy.into();
+        self.colab_status.error.clear();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.colab_rx = Some(rx);
+        std::thread::Builder::new()
+            .name("proton-colab-worker".into())
+            .spawn(move || {
+                let _ = tx.send(job());
+            })
+            .ok();
+        vec![self.colab_event()]
+    }
+
+    fn colab_refresh_status(&mut self) -> Vec<Event> {
+        self.sync_colab_disk();
+        if !self.colab_status.signed_in {
+            self.colab_status.error.clear();
+            return vec![self.colab_event()];
+        }
+        self.spawn_colab_job("Refreshing Colab quotas & runtimes…", || {
+            let res = proton_data::colab::ensure_fresh_token().and_then(|tok| {
+                proton_data::colab::ColabClient::production()
+                    .account_summary(&tok.access_token, tok.email)
+            });
+            ColabAsyncResult::Account(res)
+        })
+    }
+
+    fn colab_sign_in(&mut self) -> Vec<Event> {
+        let Some(oauth) = proton_data::colab::load_oauth_client() else {
+            let msg = "Configure Google OAuth Client ID (or paste direct access token) first".to_string();
+            self.colab_status.error = msg.clone();
+            return vec![self.colab_event(), notice(msg, NoticeLevel::Warn)];
+        };
+        let (auth_url, oauth_rx) = match proton_data::colab::start_loopback_auth(oauth) {
+            Ok(pair) => pair,
+            Err(why) => {
+                self.colab_status.error = why.clone();
+                return vec![self.colab_event(), notice(why, NoticeLevel::Error)];
+            }
+        };
+        let open_err = open_link(&auth_url).err();
+        let mut events = self.spawn_colab_job("Waiting for Google sign-in in browser…", move || {
+            let res = oauth_rx
+                .recv()
+                .map_err(|_| "OAuth worker terminated unexpectedly".to_string())
+                .and_then(|r| r)
+                .and_then(|tok| {
+                    proton_data::colab::ColabClient::production()
+                        .account_summary(&tok.access_token, tok.email)
+                });
+            ColabAsyncResult::Account(res)
+        });
+        if let Some(err) = open_err {
+            events.push(notice(
+                format!("Could not launch browser automatically ({err}). Open: {auth_url}"),
+                NoticeLevel::Warn,
+            ));
+        } else {
+            events.push(notice(
+                "Complete Google sign-in in your browser".into(),
+                NoticeLevel::Info,
+            ));
+        }
+        events
+    }
+
+    fn colab_set_token(&mut self, access_token: &str) -> Vec<Event> {
+        let token = access_token.to_string();
+        self.spawn_colab_job("Verifying Google Colab access token…", move || {
+            let res = proton_data::colab::set_direct_token(&token).and_then(|tok| {
+                proton_data::colab::ColabClient::production()
+                    .account_summary(&tok.access_token, tok.email)
+            });
+            ColabAsyncResult::Account(res)
+        })
+    }
+
+    fn colab_sign_out(&mut self) -> Vec<Event> {
+        let _ = proton_data::colab::sign_out();
+        self.data.set_colab_runtime(None, false);
+        self.colab_runtimes.clear();
+        self.colab_rx = None;
+        self.colab_status = crate::data::ColabStatusView {
+            has_oauth_config: proton_data::colab::load_oauth_client().is_some(),
+            ..Default::default()
+        };
+        vec![
+            self.colab_event(),
+            self.notebook_event(),
+            notice("Signed out of Google Colab".into(), NoticeLevel::Info),
+        ]
+    }
+
+    fn colab_connect(&mut self, variant: &str, accelerator: &str, shape: &str) -> Vec<Event> {
+        let v = variant.to_string();
+        let a = accelerator.to_string();
+        let s = shape.to_string();
+        let label = if a.is_empty() || a == "NONE" || v.to_ascii_uppercase().contains("CPU") {
+            "CPU".to_string()
+        } else {
+            a.clone()
+        };
+        self.spawn_colab_job(format!("Provisioning Colab {label} runtime…"), move || {
+            let res = proton_data::colab::ensure_fresh_token().and_then(|tok| {
+                let client = proton_data::colab::ColabClient::production();
+                let rt = client.create_runtime(&tok.access_token, &v, &a, &s)?;
+                let summary = client.account_summary(&tok.access_token, tok.email).ok();
+                Ok((rt, summary))
+            });
+            ColabAsyncResult::Connected {
+                result: res,
+                owned: true,
+            }
+        })
+    }
+
+    fn colab_attach(&mut self, runtime_id: &str) -> Vec<Event> {
+        let id = runtime_id.trim().to_string();
+        if id.is_empty() {
+            return vec![notice("runtime id cannot be empty".into(), NoticeLevel::Warn)];
+        }
+        self.spawn_colab_job(format!("Connecting to Colab runtime {id}…"), move || {
+            let res = proton_data::colab::ensure_fresh_token().and_then(|tok| {
+                let client = proton_data::colab::ColabClient::production();
+                let rt = client.get_runtime(&tok.access_token, &id)?;
+                let summary = client.account_summary(&tok.access_token, tok.email).ok();
+                Ok((rt, summary))
+            });
+            ColabAsyncResult::Connected {
+                result: res,
+                owned: false,
+            }
+        })
+    }
+
+    fn colab_disconnect(&mut self, unassign: bool) -> Vec<Event> {
+        let target_id = self
+            .data
+            .colab_runtime()
+            .map(|r| r.runtime_id.clone())
+            .or_else(|| self.colab_runtimes.first().map(|r| r.runtime_id.clone()));
+        self.data.set_colab_runtime(None, false);
+        self.refresh_colab_active_fields();
+
+        if !unassign {
+            return vec![
+                self.colab_event(),
+                self.notebook_event(),
+                notice("Switched notebook kernel back to Local".into(), NoticeLevel::Info),
+            ];
+        }
+
+        let Some(rt_id) = target_id else {
+            return vec![
+                self.colab_event(),
+                self.notebook_event(),
+                notice("No active Colab runtime to terminate".into(), NoticeLevel::Info),
+            ];
+        };
+        let mut events = vec![self.notebook_event()];
+        events.extend(self.spawn_colab_job("Terminating Colab runtime…", move || {
+            let res = proton_data::colab::ensure_fresh_token().and_then(|tok| {
+                let client = proton_data::colab::ColabClient::production();
+                client.delete_runtime(&tok.access_token, &rt_id)?;
+                Ok(client.account_summary(&tok.access_token, tok.email).ok())
+            });
+            ColabAsyncResult::Disconnected {
+                unassigned: true,
+                result: res,
+            }
+        }));
+        events
+    }
+
+    fn poll_colab(&mut self) -> Vec<Event> {
+        let Some(rx) = &self.colab_rx else {
+            return Vec::new();
+        };
+        let msg = match rx.try_recv() {
+            Ok(msg) => msg,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return Vec::new(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.colab_rx = None;
+                self.colab_status.busy.clear();
+                return vec![self.colab_event()];
+            }
+        };
+        self.colab_rx = None;
+        self.colab_status.busy.clear();
+
+        match msg {
+            ColabAsyncResult::Account(Ok(summary)) => {
+                self.colab_status.error.clear();
+                self.apply_colab_summary(summary);
+                vec![self.colab_event()]
+            }
+            ColabAsyncResult::Account(Err(why)) => {
+                self.colab_status.error = why.clone();
+                vec![self.colab_event(), notice(why, NoticeLevel::Error)]
+            }
+            ColabAsyncResult::Connected { result: Ok((rt, summary)), owned } => {
+                let label = proton_data::colab::runtime_label(&rt);
+                self.colab_status.error.clear();
+                self.data.set_colab_runtime(Some(rt.clone()), owned);
+                if let Some(sum) = summary {
+                    self.apply_colab_summary(sum);
+                } else {
+                    if !self.colab_runtimes.iter().any(|r| r.runtime_id == rt.runtime_id) {
+                        self.colab_runtimes.push(rt);
+                    }
+                    self.refresh_colab_active_fields();
+                }
+                vec![
+                    self.colab_event(),
+                    self.notebook_event(),
+                    notice(format!("Connected to {label}"), NoticeLevel::Info),
+                ]
+            }
+            ColabAsyncResult::Connected { result: Err(why), .. } => {
+                self.colab_status.error = why.clone();
+                vec![self.colab_event(), notice(why, NoticeLevel::Error)]
+            }
+            ColabAsyncResult::Disconnected { unassigned, result: Ok(summary) } => {
+                self.colab_status.error.clear();
+                if let Some(sum) = summary {
+                    self.apply_colab_summary(sum);
+                } else {
+                    self.refresh_colab_active_fields();
+                }
+                let text = if unassigned {
+                    "Colab runtime terminated and disconnected"
+                } else {
+                    "Disconnected from Colab runtime"
+                };
+                vec![
+                    self.colab_event(),
+                    self.notebook_event(),
+                    notice(text.into(), NoticeLevel::Info),
+                ]
+            }
+            ColabAsyncResult::Disconnected { result: Err(why), .. } => {
+                self.colab_status.error = why.clone();
+                vec![self.colab_event(), notice(why, NoticeLevel::Error)]
+            }
+        }
+    }
+
+    fn ex_colab(&mut self, arg: Option<&str>) -> Vec<Event> {
+        let trimmed = arg.map(str::trim).unwrap_or("");
+        if trimmed.is_empty() {
+            let mut events = self.apply(Command::ColabStatus);
+            events.push(Event::CmdlineRun { text: "colab".into() });
+            return events;
+        }
+        if matches!(trimmed, "status" | "refresh") {
+            return self.apply(Command::ColabStatus);
+        }
+        if matches!(trimmed, "local" | "disconnect" | "detach") {
+            return self.apply(Command::ColabDisconnect { unassign: false });
+        }
+        if matches!(trimmed, "stop" | "terminate" | "unassign" | "down") {
+            return self.apply(Command::ColabDisconnect { unassign: true });
+        }
+        if trimmed == "signout" {
+            return self.apply(Command::ColabSignOut);
+        }
+        if trimmed == "signin" {
+            return self.apply(Command::ColabSignIn);
+        }
+        vec![notice(
+            "usage: :colab [status|signin|signout|disconnect|terminate]".into(),
             NoticeLevel::Warn,
         )]
     }
@@ -7813,6 +8262,62 @@ esac
         assert!(second_sync.iter().any(|e| matches!(
             e,
             Event::Container { state } if state.phase == crate::container::ContainerPhase::Detected
+        )));
+    }
+
+    #[test]
+    fn colab_sync_and_commands_emit_colab_events_and_notebook_label() {
+        let dir = Project::new("colab-ws");
+        let mut ws = Workspace::rooted(dir.folder());
+        let sync_events = ws.apply(Command::Sync);
+        assert!(sync_events.iter().any(|e| matches!(e, Event::Colab { .. })));
+        assert!(sync_events
+            .iter()
+            .any(|e| matches!(e, Event::Notebook { kernel_label, .. } if kernel_label.is_empty())));
+
+        // Invalid OAuth JSON surfaces cleanly as an error in Event::Colab.
+        let bad = ws.apply(Command::ColabImportOauthJson {
+            json: "not json".into(),
+        });
+        assert!(bad.iter().any(|e| matches!(
+            e,
+            Event::Colab { status } if status.error.contains("invalid OAuth JSON")
+        )));
+
+        // Attaching a Colab runtime updates kernelLabel and detaching resets it.
+        let rt = proton_data::colab::ColabRuntime {
+            name: "runtimes/rt-tpu".into(),
+            runtime_id: "rt-tpu".into(),
+            variant: "VARIANT_TPU".into(),
+            accelerator: "V5E1".into(),
+            shape: "SHAPE_STANDARD".into(),
+            connection_info: proton_data::colab::ColabConnectionInfo {
+                url: "https://tpu.prod.colab.dev".into(),
+                token: "tok".into(),
+                expire_time: "2099-01-01T00:00:00Z".into(),
+                endpoint: "m-s".into(),
+            },
+        };
+        ws.data.set_colab_runtime(Some(rt), false);
+        ws.refresh_colab_active_fields();
+        let sync_attached = ws.apply(Command::Sync);
+        assert!(sync_attached.iter().any(|e| matches!(
+            e,
+            Event::Colab { status } if status.active_label == "Colab · TPU v5e-1"
+        )));
+        assert!(sync_attached.iter().any(|e| matches!(
+            e,
+            Event::Notebook { kernel_label, .. } if kernel_label == "Colab · TPU v5e-1"
+        )));
+
+        let detached = ws.apply(Command::ColabDisconnect { unassign: false });
+        assert!(detached.iter().any(|e| matches!(
+            e,
+            Event::Colab { status } if status.active_label.is_empty()
+        )));
+        assert!(detached.iter().any(|e| matches!(
+            e,
+            Event::Notebook { kernel_label, .. } if kernel_label.is_empty()
         )));
     }
 }

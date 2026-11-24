@@ -541,8 +541,11 @@
           <!-- Rendered from Event::Notebook. Empty until a .ipynb is opened,
                which is a mode switch as much as a file open. -->
           <span class="chip accent" data-nb-name>no notebook</span>
+          <button class="chip nb-runtime" data-nb-runtime title="Select notebook kernel (Local, Container, or Google Colab GPU/TPU)">Local</button>
           <span class="chip" data-nb-kernel hidden></span>
           <span class="grow"></span>
+          <button class="btn" data-nb-interrupt title="Interrupt kernel execution" hidden>■</button>
+          <button class="btn" data-nb-restart title="Restart kernel" hidden>↻</button>
           <button class="btn" data-nb-runall title="Run every code cell, top to bottom">Run all</button>
           <button class="btn" data-nb-add title="Add a code cell">+ Cell</button>
           <button class="btn" data-nb-save title="Write the notebook back">Save</button>
@@ -1178,6 +1181,8 @@
 </div>
 
 <div class="overlay float" id="remote-modal" role="dialog" aria-modal="true" aria-label="Connect to SSH Host" tabindex="-1"></div>
+
+<div class="overlay float" id="colab-modal" role="dialog" aria-modal="true" aria-label="Google Colab Runtimes" tabindex="-1"></div>
 
 <div class="overlay float" id="settings" role="dialog" aria-modal="true" aria-label="Settings" tabindex="-1">
   <header style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--edge)">

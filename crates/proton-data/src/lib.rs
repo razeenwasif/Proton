@@ -7,6 +7,7 @@
 //! channel, drained on the core's heartbeat.
 
 pub mod bridge;
+pub mod colab;
 pub mod connection;
 pub mod kernel;
 pub mod notebook;

@@ -177,11 +177,36 @@ export function createPreview(deliver) {
       path: notebook.path,
       cells: notebook.cells.map((cell, i) => ({ ...cell, proposals: all.filter((p) => p.cell === i) })),
       problem: notebook.problem,
+      kernelLabel: colabState.activeLabel,
       language: "python",
       modified,
       proposals: all,
     };
   };
+
+  let colabState = {
+    hasOauthConfig: true,
+    signedIn: false,
+    email: "",
+    tier: "SUBSCRIPTION_TIER_PRO_PLUS",
+    ccuBalance: null,
+    ccuRateHourly: null,
+    assignmentsCount: 0,
+    specs: [
+      { variant: "VARIANT_GPU", accelerator: "T4", shape: "SHAPE_STANDARD", eligible: true },
+      { variant: "VARIANT_GPU", accelerator: "L4", shape: "SHAPE_STANDARD", eligible: true },
+      { variant: "VARIANT_GPU", accelerator: "A100", shape: "SHAPE_HIGHMEM", eligible: true },
+      { variant: "VARIANT_TPU", accelerator: "V5E1", shape: "SHAPE_STANDARD", eligible: true },
+      { variant: "VARIANT_TPU", accelerator: "V6E1", shape: "SHAPE_STANDARD", eligible: true },
+      { variant: "VARIANT_CPU", accelerator: "NONE", shape: "SHAPE_HIGHMEM", eligible: true },
+    ],
+    runtimes: [],
+    activeRuntimeId: "",
+    activeLabel: "",
+    busy: "",
+    error: "",
+  };
+  const colabEvent = () => ({ type: "colab", status: { ...colabState, runtimes: [...colabState.runtimes] } });
 
   // A canned pair of plugins, so the settings panel and the theme strip can
   // be designed against. The real ones are wasm components loaded by
@@ -477,6 +502,7 @@ export function createPreview(deliver) {
         settingsEvent(),
         chatsEvent(),
         containerEvent(),
+        colabEvent(),
         ...sheet.sync(),
         ...circuit.sync(),
         ...logic.sync(),
@@ -484,6 +510,18 @@ export function createPreview(deliver) {
       ];
     }
     if (command.type.startsWith("container")) return handleContainer(command);
+    if (command.type === "colabStatus") return [colabEvent()];
+    if (command.type === "colabDisconnect") {
+      colabState = { ...colabState, activeRuntimeId: "", activeLabel: "", runtimes: [] };
+      return [colabEvent(), notebookEvent()];
+    }
+    if (command.type === "colabSignOut") {
+      colabState = { ...colabState, signedIn: false, email: "", activeRuntimeId: "", activeLabel: "", runtimes: [] };
+      return [colabEvent(), notebookEvent()];
+    }
+    if (command.type === "interruptKernel" || command.type === "restartKernel") {
+      return [notebookEvent()];
+    }
     if (command.type.startsWith("sheet")) return sheet.command(command);
     if (command.type.startsWith("circuit")) return circuit.command(command);
     if (command.type.startsWith("logic")) return logic.command(command);
